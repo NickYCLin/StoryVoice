@@ -1345,15 +1345,15 @@ docker compose up
 
 # 35. Phase 2 — Book Import
 
-- [x] Upload API（TXT）
-- [ ] File Storage
+- [x] Upload API（TXT / EPUB）
+- [x] File Storage
 - [x] Book Entity
 - [x] Chapter Entity
-- [ ] EPUB Parser
+- [x] EPUB Parser
 - [x] TXT Parser
-- [ ] Metadata
-- [ ] TOC
-- [x] Chapter Extraction（TXT）
+- [x] Metadata
+- [x] TOC
+- [x] Chapter Extraction（TXT / EPUB）
 - [ ] Book Library UI
 
 Acceptance Criteria：

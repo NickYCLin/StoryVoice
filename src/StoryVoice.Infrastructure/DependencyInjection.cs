@@ -19,8 +19,13 @@ public static class DependencyInjection
 
         services.AddDbContext<StoryVoiceDbContext>(options =>
             options.UseNpgsql(connectionString));
+        services.Configure<BookStorageOptions>(options =>
+            options.RootPath = configuration[$"{BookStorageOptions.SectionName}:RootPath"]
+                ?? options.RootPath);
         services.AddScoped<IBookRepository, BookRepository>();
         services.AddSingleton<IBookImportParser, PlainTextBookParser>();
+        services.AddSingleton<IBookImportParser, EpubBookParser>();
+        services.AddSingleton<IBookFileStorage, LocalBookFileStorage>();
         return services;
     }
 }

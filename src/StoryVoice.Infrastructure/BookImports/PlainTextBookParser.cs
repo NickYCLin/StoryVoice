@@ -43,7 +43,7 @@ public sealed partial class PlainTextBookParser : IBookImportParser
             throw new ArgumentException("TXT 沒有可匯入的章節內容。", nameof(content));
         }
 
-        return new ParsedBook(fallbackTitle, chapters);
+        return new ParsedBook(fallbackTitle, null, null, chapters);
     }
 
     private static IReadOnlyList<ParsedChapter> ExtractChapters(

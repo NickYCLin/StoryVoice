@@ -9,6 +9,14 @@ public sealed record CreateBookRequest(
     string OriginalFileName,
     IReadOnlyList<CreateChapterRequest> Chapters);
 
+public sealed record CreateImportedBookRequest(
+    string Title,
+    string Author,
+    string Language,
+    string OriginalFileName,
+    string StoragePath,
+    IReadOnlyList<CreateChapterRequest> Chapters);
+
 public sealed record ChapterResponse(
     Guid Id,
     int ChapterNumber,

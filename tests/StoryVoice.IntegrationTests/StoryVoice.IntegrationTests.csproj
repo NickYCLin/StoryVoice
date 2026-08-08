@@ -19,6 +19,9 @@
     </PackageReference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="../Shared/MinimalEpub.cs" Link="Shared/MinimalEpub.cs" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="../../src/StoryVoice.Api/StoryVoice.Api.csproj" />
     <ProjectReference Include="../../src/StoryVoice.Infrastructure/StoryVoice.Infrastructure.csproj" />
   </ItemGroup>

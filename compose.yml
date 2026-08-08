@@ -37,6 +37,9 @@ services:
       ASPNETCORE_URLS: http://+:8080
       ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=storyvoice;Username=storyvoice;Password=${POSTGRES_PASSWORD:-storyvoice_local}
       ConnectionStrings__Redis: redis:6379,abortConnect=false
+      BookStorage__RootPath: /data/books
+    volumes:
+      - book-storage:/data/books
     ports:
       - "${STORYVOICE_API_PORT:-8080}:8080"
     depends_on:
@@ -59,6 +62,9 @@ services:
     environment:
       DOTNET_ENVIRONMENT: Production
       ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=storyvoice;Username=storyvoice;Password=${POSTGRES_PASSWORD:-storyvoice_local}
+      BookStorage__RootPath: /data/books
+    volumes:
+      - book-storage:/data/books
     depends_on:
       postgres:
         condition: service_healthy
@@ -85,3 +91,4 @@ services:
 volumes:
   postgres-data:
   redis-data:
+  book-storage:

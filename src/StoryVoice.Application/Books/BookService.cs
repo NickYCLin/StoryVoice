@@ -10,13 +10,48 @@ public sealed class BookService(IBookRepository repository) : IBookService
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var book = Book.Create(
+        return await CreateCoreAsync(
             request.Title,
             request.Author,
             request.Language,
-            request.OriginalFileName);
+            request.OriginalFileName,
+            storagePath: null,
+            request.Chapters,
+            cancellationToken);
+    }
 
-        foreach (var chapter in request.Chapters ?? [])
+    public async Task<BookDetailsResponse> CreateImportedAsync(
+        CreateImportedBookRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        return await CreateCoreAsync(
+            request.Title,
+            request.Author,
+            request.Language,
+            request.OriginalFileName,
+            request.StoragePath,
+            request.Chapters,
+            cancellationToken);
+    }
+
+    private async Task<BookDetailsResponse> CreateCoreAsync(
+        string title,
+        string author,
+        string language,
+        string originalFileName,
+        string? storagePath,
+        IReadOnlyList<CreateChapterRequest>? chapters,
+        CancellationToken cancellationToken)
+    {
+        var book = Book.Create(title, author, language, originalFileName);
+        if (!string.IsNullOrWhiteSpace(storagePath))
+        {
+            book.SetStoragePath(storagePath);
+        }
+
+        foreach (var chapter in chapters ?? [])
         {
             book.AddChapter(chapter.ChapterNumber, chapter.Title, chapter.OriginalText);
         }

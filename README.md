@@ -13,12 +13,12 @@ Phase 1 Foundation 已建立：
 - Redis-ready background processing boundary
 - React 19 + TypeScript + Vite + Tailwind CSS 4
 - Book / Chapter domain model and REST API
-- TXT multipart upload、中文／英文章節標題解析與單章 fallback
+- EPUB / TXT multipart upload、metadata、TOC 與章節解析
 - Serilog, OpenAPI, liveness/readiness health checks
 - Docker Compose development stack
 - Unit and integration tests + GitHub Actions CI
 
-AI、TTS 與 EPUB 上傳尚未假裝完成；它們會依 [`DEVELOPMENT_PLAN.md`](DEVELOPMENT_PLAN.md) 分階段落地。TXT 匯入已可實際使用。
+AI 與 TTS 尚未假裝完成；它們會依 [`DEVELOPMENT_PLAN.md`](DEVELOPMENT_PLAN.md) 分階段落地。EPUB / TXT 匯入已可實際使用。
 
 ## Quick start
 
@@ -43,7 +43,8 @@ Stop the stack:
 docker compose down
 ```
 
-Add `-v` only when you intentionally want to remove local PostgreSQL and Redis data.
+Add `-v` only when you intentionally want to remove local PostgreSQL、Redis
+and uploaded-book data.
 
 ## Local development
 
@@ -75,18 +76,23 @@ GET  /api/books
 GET  /api/books/{id}
 ```
 
-Import a UTF-8 TXT book (10 MiB maximum):
+Import a UTF-8 TXT or DRM-free EPUB book (10 MiB maximum):
 
 ```bash
 curl -X POST \
   'http://localhost:8080/api/books/import?author=StoryVoice&language=zh-TW' \
   -F 'file=@./story.txt;type=text/plain'
+
+curl -X POST \
+  'http://localhost:8080/api/books/import' \
+  -F 'file=@./story.epub;type=application/epub+zip'
 ```
 
 The TXT parser recognizes headings such as `第一章 月下相逢` and
-`Chapter 1: Moonlight`. When no heading is present, it imports the file as one
-chapter. EPUB is intentionally rejected until its parser and storage boundary
-are implemented.
+`Chapter 1: Moonlight`; files without headings become one chapter. EPUB imports
+metadata, TOC labels and spine reading order, strips executable/style markup,
+and stores the original upload under a generated server-side path. EPUB archive
+expansion is capped at 100 MiB and 5,000 entries.
 
 Example:
 

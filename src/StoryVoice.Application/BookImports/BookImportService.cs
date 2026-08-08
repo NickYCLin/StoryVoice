@@ -4,8 +4,11 @@ namespace StoryVoice.Application.BookImports;
 
 public sealed class BookImportService(
     IEnumerable<IBookImportParser> parsers,
+    IBookFileStorage fileStorage,
     IBookService bookService) : IBookImportService
 {
+    private const int MaximumFileBytes = 10 * 1024 * 1024;
+
     public async Task<BookDetailsResponse> ImportAsync(
         Stream content,
         string fileName,
@@ -31,25 +34,68 @@ public sealed class BookImportService(
                 string.IsNullOrEmpty(extension) ? "未知" : extension);
         }
 
+        await using var bufferedContent = await BufferAsync(content, cancellationToken);
         var parsed = await parser.ParseAsync(
-            content,
+            bufferedContent,
             safeFileName,
             cancellationToken);
-        var request = new CreateBookRequest(
-            Choose(title, parsed.Title),
-            string.IsNullOrWhiteSpace(author) ? "未知作者" : author.Trim(),
-            Choose(language, "zh-TW"),
-            safeFileName,
-            parsed.Chapters
-                .Select(chapter => new CreateChapterRequest(
-                    chapter.ChapterNumber,
-                    chapter.Title,
-                    chapter.OriginalText))
-                .ToArray());
 
-        return await bookService.CreateAsync(request, cancellationToken);
+        bufferedContent.Position = 0;
+        var stored = await fileStorage.SaveAsync(
+            bufferedContent,
+            safeFileName,
+            cancellationToken);
+        try
+        {
+            var request = new CreateImportedBookRequest(
+                Choose(title, parsed.Title),
+                Choose(author, parsed.Author ?? "未知作者"),
+                Choose(language, parsed.Language ?? "zh-TW"),
+                safeFileName,
+                stored.RelativePath,
+                parsed.Chapters
+                    .Select(chapter => new CreateChapterRequest(
+                        chapter.ChapterNumber,
+                        chapter.Title,
+                        chapter.OriginalText))
+                    .ToArray());
+
+            return await bookService.CreateImportedAsync(request, cancellationToken);
+        }
+        catch
+        {
+            await fileStorage.DeleteAsync(stored.RelativePath, CancellationToken.None);
+            throw;
+        }
+    }
+
+    private static async Task<MemoryStream> BufferAsync(
+        Stream source,
+        CancellationToken cancellationToken)
+    {
+        var destination = new MemoryStream();
+        var buffer = new byte[81920];
+        while (true)
+        {
+            var read = await source.ReadAsync(buffer, cancellationToken);
+            if (read == 0)
+            {
+                break;
+            }
+
+            if (destination.Length + read > MaximumFileBytes)
+            {
+                await destination.DisposeAsync();
+                throw new ArgumentException("書籍檔案不可超過 10 MiB。", nameof(source));
+            }
+
+            await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+        }
+
+        destination.Position = 0;
+        return destination;
     }
 
     private static string Choose(string? candidate, string fallback) =>
-        string.IsNullOrWhiteSpace(candidate) ? fallback : candidate.Trim();
+        string.IsNullOrWhiteSpace(candidate) ? fallback.Trim() : candidate.Trim();
 }

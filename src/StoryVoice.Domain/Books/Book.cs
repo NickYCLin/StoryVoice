@@ -32,6 +32,8 @@ public sealed class Book
 
     public string FileType { get; private set; } = string.Empty;
 
+    public string? StoragePath { get; private set; }
+
     public BookStatus Status { get; private set; }
 
     public DateTimeOffset CreatedAt { get; private set; }
@@ -51,6 +53,11 @@ public sealed class Book
         var chapter = Chapter.Create(Id, chapterNumber, title, originalText);
         _chapters.Add(chapter);
         return chapter;
+    }
+
+    public void SetStoragePath(string storagePath)
+    {
+        StoragePath = Require(storagePath, nameof(storagePath));
     }
 
     private static string Require(string value, string parameterName)

@@ -11,10 +11,17 @@ namespace StoryVoice.IntegrationTests;
 public sealed class ApiFactory : WebApplicationFactory<Program>
 {
     private readonly string _databaseName = $"storyvoice-tests-{Guid.NewGuid()}";
+    private readonly string _storageRoot = Path.Combine(
+        Path.GetTempPath(),
+        "storyvoice-integration-tests",
+        Guid.NewGuid().ToString("N"));
+
+    public string StorageRoot => _storageRoot;
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
+        builder.UseSetting("BookStorage:RootPath", _storageRoot);
         builder.ConfigureServices(services =>
         {
             services.RemoveAll<DbContextOptions<StoryVoiceDbContext>>();
@@ -22,5 +29,14 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
             services.AddDbContext<StoryVoiceDbContext>(options =>
                 options.UseInMemoryDatabase(_databaseName));
         });
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        base.Dispose(disposing);
+        if (disposing && Directory.Exists(_storageRoot))
+        {
+            Directory.Delete(_storageRoot, recursive: true);
+        }
     }
 }
