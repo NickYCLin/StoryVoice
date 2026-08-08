@@ -1,0 +1,54 @@
+@import "tailwindcss";
+
+:root {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #f7f2ea;
+  background: #09070d;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+html { scroll-behavior: smooth; }
+body { margin: 0; min-width: 320px; min-height: 100vh; }
+button, a { -webkit-tap-highlight-color: transparent; }
+.font-serif { font-family: Georgia, "Noto Serif TC", "Times New Roman", serif; }
+
+.ambient { position: absolute; border-radius: 999px; filter: blur(90px); pointer-events: none; opacity: .35; }
+.ambient-one { width: 32rem; height: 32rem; left: -14rem; top: 20rem; background: rgba(180, 83, 9, .22); }
+.ambient-two { width: 40rem; height: 40rem; right: -22rem; top: 4rem; background: rgba(190, 24, 93, .14); }
+.stage-card::before { content: ""; position: absolute; inset: 0; background: linear-gradient(135deg, rgba(255,255,255,.045), transparent 42%); pointer-events: none; }
+
+.primary-button, .secondary-button {
+  display: inline-flex; align-items: center; justify-content: center; min-height: 3rem; border-radius: 999px;
+  padding: .75rem 1.4rem; font-size: .875rem; font-weight: 650; transition: .22s ease;
+}
+.primary-button { color: #23150b; background: linear-gradient(120deg, #fde68a, #fdba74); box-shadow: 0 10px 35px rgba(245, 158, 11, .18); }
+.primary-button:hover { transform: translateY(-2px); box-shadow: 0 14px 45px rgba(245, 158, 11, .28); }
+.secondary-button { color: #e7e5e4; border: 1px solid rgba(255,255,255,.1); background: rgba(255,255,255,.03); }
+.secondary-button:hover { border-color: rgba(253, 230, 138, .3); background: rgba(253,230,138,.06); }
+
+.voice-wave { height: 7rem; display: flex; align-items: center; gap: 4px; padding: 0 .25rem; }
+.voice-wave span { flex: 1; min-width: 2px; height: var(--wave); border-radius: 999px; background: linear-gradient(to top, rgba(251,146,60,.2), rgba(253,230,138,.9), rgba(251,113,133,.45)); animation: breathe 1.8s ease-in-out infinite alternate; animation-delay: var(--delay); transform-origin: center; }
+@keyframes breathe { from { transform: scaleY(.72); opacity: .5; } to { transform: scaleY(1); opacity: 1; } }
+
+.script-line { display: grid; grid-template-columns: 2.2rem 1fr auto; gap: .85rem; align-items: center; border-radius: 1rem; padding: .8rem; border: 1px solid transparent; }
+.active-line { border-color: rgba(253,230,138,.13); background: rgba(253,230,138,.045); }
+.script-line strong { display: block; font-size: .78rem; color: #d6d3d1; font-weight: 650; }
+.script-line p { margin-top: .25rem; color: #78716c; font-size: .76rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.speaker { display: grid; place-items: center; width: 2.2rem; height: 2.2rem; border-radius: .8rem; font-family: Georgia, serif; font-size: .72rem; }
+.narrator { background: rgba(253,230,138,.1); color: #fde68a; border: 1px solid rgba(253,230,138,.12); }
+.character { background: rgba(251,113,133,.1); color: #fda4af; border: 1px solid rgba(251,113,133,.12); }
+.male { background: rgba(125,211,252,.1); color: #bae6fd; border: 1px solid rgba(125,211,252,.12); }
+.emotion { font-size: .65rem; color: #57534e; }
+.eyebrow { font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .27em; color: rgba(253, 230, 138, .65); }
+.library-state { display: grid; place-items: center; border: 1px dashed rgba(255,255,255,.09); border-radius: 1.5rem; padding: 3rem; color: #78716c; text-align: center; background: rgba(255,255,255,.015); }
+.book-card { display: flex; gap: 1.1rem; padding: 1.1rem; border-radius: 1.3rem; border: 1px solid rgba(255,255,255,.07); background: rgba(255,255,255,.022); transition: .2s ease; }
+.book-card:hover { transform: translateY(-2px); border-color: rgba(253,230,138,.18); background: rgba(253,230,138,.025); }
+.book-cover { display: grid; place-items: center; width: 4.6rem; aspect-ratio: 3/4; flex: none; border-radius: .8rem; color: #fde68a; font-family: Georgia, serif; font-size: 1.5rem; background: linear-gradient(145deg, #281622, #17101a); border: 1px solid rgba(253,230,138,.13); box-shadow: 0 12px 30px rgba(0,0,0,.25); }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .voice-wave span { animation: none; }
+  *, *::before, *::after { transition-duration: .01ms !important; }
+}

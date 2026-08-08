@@ -1,0 +1,14 @@
+**/bin
+**/obj
+**/node_modules
+**/dist
+.git
+.github
+.env
+.env.*
+!.env.example
+TestResults
+coverage
+storage
+uploads
+audio

@@ -1,0 +1,39 @@
+# .NET
+**/bin/
+**/obj/
+.vs/
+*.user
+*.suo
+TestResults/
+coverage/
+
+# Node / Vite
+**/node_modules/
+**/dist/
+*.tsbuildinfo
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Secrets and runtime data
+.env
+.env.*
+!.env.example
+secrets/
+storage/
+uploads/
+audio/
+data/
+*.epub
+*.mobi
+*.azw3
+*.mp3
+*.wav
+*.m4b
+
+# Logs
+*.log
+logs/
