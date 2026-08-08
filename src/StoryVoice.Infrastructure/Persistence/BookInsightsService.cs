@@ -47,8 +47,12 @@ internal sealed class BookInsightsService(
             .SingleOrDefaultAsync(book => book.Id == contentBookId, cancellationToken);
         EnsureProcessable(content);
 
-        target.LinkAuthorizedContent(contentBookId);
-        await RemoveExistingSummaryAsync(bookId, cancellationToken);
+        if (target.ContentBookId != contentBookId)
+        {
+            target.LinkAuthorizedContent(contentBookId);
+            await RemoveExistingSummaryAsync(bookId, cancellationToken);
+            await DetachChapterNotesAsync(bookId, cancellationToken);
+        }
         await dbContext.SaveChangesAsync(cancellationToken);
         return ToContentLink(target, content!);
     }
@@ -64,6 +68,7 @@ internal sealed class BookInsightsService(
 
         target.UnlinkAuthorizedContent();
         await RemoveExistingSummaryAsync(bookId, cancellationToken);
+        await DetachChapterNotesAsync(bookId, cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
         return true;
     }
@@ -228,7 +233,7 @@ internal sealed class BookInsightsService(
             || !book.Chapters.Any(chapter => !string.IsNullOrWhiteSpace(chapter.OriginalText)))
         {
             throw new BookTextUnavailableException(
-                "這本書目前只有書目資料；請先上傳你合法持有、無 DRM 的 EPUB 或 TXT，並明確連結後再建立摘要。");
+                "這本書目前沒有可處理的合法正文；請先上傳你合法持有、無 DRM 的 EPUB 或 TXT，並明確連結後再使用正文功能。");
         }
     }
 
@@ -243,11 +248,11 @@ internal sealed class BookInsightsService(
         }
 
         var contentBookId = target.ContentBookId ?? target.Id;
-        var belongsToAuthorizedContent = await dbContext.Chapters
-            .AsNoTracking()
-            .AnyAsync(
-                chapter => chapter.Id == chapterId && chapter.BookId == contentBookId,
-                cancellationToken);
+        var content = await OwnedBooks()
+            .Include(book => book.Chapters)
+            .SingleOrDefaultAsync(book => book.Id == contentBookId, cancellationToken);
+        EnsureProcessable(content);
+        var belongsToAuthorizedContent = content!.Chapters.Any(chapter => chapter.Id == chapterId);
         if (!belongsToAuthorizedContent)
         {
             throw new ArgumentException("章節不屬於這本書已連結的合法正文。", nameof(chapterId));
@@ -261,6 +266,19 @@ internal sealed class BookInsightsService(
         if (summary is not null)
         {
             dbContext.BookExtractiveSummaries.Remove(summary);
+        }
+    }
+
+    private async Task DetachChapterNotesAsync(Guid bookId, CancellationToken cancellationToken)
+    {
+        var notes = await dbContext.ReadingNotes
+            .Where(note => note.OwnerId == currentUser.UserId
+                && note.BookId == bookId
+                && note.ChapterId != null)
+            .ToListAsync(cancellationToken);
+        foreach (var note in notes)
+        {
+            note.DetachChapter();
         }
     }
 

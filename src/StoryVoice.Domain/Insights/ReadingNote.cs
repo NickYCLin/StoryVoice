@@ -39,6 +39,12 @@ public sealed class ReadingNote
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 
+    public void DetachChapter()
+    {
+        ChapterId = null;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
     private static string NormalizeBody(string value)
     {
         var normalized = value?.Trim() ?? string.Empty;

@@ -186,6 +186,81 @@ public sealed class BookInsightsApiTests(ApiFactory factory) : IClassFixture<Api
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
+    [Fact]
+    public async Task Synthetic_book_chapters_cannot_receive_chapter_notes_without_upload_provenance()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        using var create = await client.PostWithCsrfAsync(
+            "/api/books/",
+            new CreateBookRequest(
+                "合成測試書",
+                "測試作者",
+                "zh-TW",
+                "synthetic.txt",
+                [new CreateChapterRequest(1, "第一章", "沒有上傳來源的測試文字。")]),
+            cancellationToken);
+        var book = await create.Content.ReadFromJsonAsync<BookDetailsResponse>(cancellationToken);
+        Assert.NotNull(book);
+
+        using var note = await client.PostWithCsrfAsync(
+            $"/api/books/{book.Id}/notes",
+            new CreateReadingNoteRequest("不可掛到未授權章節。", book.Chapters[0].Id),
+            cancellationToken);
+        using var problem = JsonDocument.Parse(await note.Content.ReadAsStreamAsync(cancellationToken));
+
+        Assert.Equal(HttpStatusCode.Conflict, note.StatusCode);
+        Assert.Equal(BookTextUnavailableException.StableCode, problem.RootElement.GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task Replacing_or_removing_content_link_detaches_existing_chapter_notes()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        using var companion = await CreateCompanionClientAsync(client, cancellationToken);
+        var linked = await ImportLinkedBookAsync(companion, cancellationToken);
+        var firstContent = await ImportTextAsync(client, cancellationToken);
+        var secondContent = await ImportTextAsync(client, cancellationToken);
+
+        using var firstLink = await PutWithCsrfAsync(
+            client,
+            $"/api/books/{linked.Id}/content-link",
+            new SetBookContentLinkRequest(firstContent.Id),
+            cancellationToken);
+        firstLink.EnsureSuccessStatusCode();
+        using var firstNote = await client.PostWithCsrfAsync(
+            $"/api/books/{linked.Id}/notes",
+            new CreateReadingNoteRequest("換綁後保留為書籍筆記。", firstContent.Chapters[0].Id),
+            cancellationToken);
+        firstNote.EnsureSuccessStatusCode();
+
+        using var replacement = await PutWithCsrfAsync(
+            client,
+            $"/api/books/{linked.Id}/content-link",
+            new SetBookContentLinkRequest(secondContent.Id),
+            cancellationToken);
+        replacement.EnsureSuccessStatusCode();
+        using var afterReplacement = await client.GetAsync($"/api/books/{linked.Id}/notes", cancellationToken);
+        var replacedNotes = await afterReplacement.Content.ReadFromJsonAsync<ReadingNoteResponse[]>(cancellationToken);
+        Assert.NotNull(replacedNotes);
+        Assert.All(replacedNotes, note => Assert.Null(note.ChapterId));
+
+        using var secondNote = await client.PostWithCsrfAsync(
+            $"/api/books/{linked.Id}/notes",
+            new CreateReadingNoteRequest("解綁後也保留為書籍筆記。", secondContent.Chapters[0].Id),
+            cancellationToken);
+        secondNote.EnsureSuccessStatusCode();
+        using var unlink = await DeleteWithCsrfAsync(client, $"/api/books/{linked.Id}/content-link", cancellationToken);
+        using var afterUnlink = await client.GetAsync($"/api/books/{linked.Id}/notes", cancellationToken);
+        var unlinkedNotes = await afterUnlink.Content.ReadFromJsonAsync<ReadingNoteResponse[]>(cancellationToken);
+
+        Assert.Equal(HttpStatusCode.NoContent, unlink.StatusCode);
+        Assert.NotNull(unlinkedNotes);
+        Assert.Equal(2, unlinkedNotes.Length);
+        Assert.All(unlinkedNotes, note => Assert.Null(note.ChapterId));
+    }
+
     private static async Task<BookDetailsResponse> ImportTextAsync(
         HttpClient client,
         CancellationToken cancellationToken)
@@ -288,6 +363,15 @@ public sealed class BookInsightsApiTests(ApiFactory factory) : IClassFixture<Api
         CancellationToken cancellationToken)
     {
         using var request = new HttpRequestMessage(HttpMethod.Put, path);
+        return await client.SendWithCsrfAsync(request, cancellationToken);
+    }
+
+    private static async Task<HttpResponseMessage> DeleteWithCsrfAsync(
+        HttpClient client,
+        string path,
+        CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Delete, path);
         return await client.SendWithCsrfAsync(request, cancellationToken);
     }
 
