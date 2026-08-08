@@ -36,6 +36,9 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run build
+      - run: npm run build
+        env:
+          STORYVOICE_BASE_PATH: /StoryVoice/
 
   books-com-tw-companion:
     runs-on: ubuntu-latest

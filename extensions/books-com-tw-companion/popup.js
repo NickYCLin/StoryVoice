@@ -1,3 +1,5 @@
+import { validateStoryVoiceOrigin } from './storyvoice-origin.mjs'
+
 const state = { books: [] }
 const originInput = document.querySelector('#storyvoice-origin')
 const count = document.querySelector('#count')
@@ -13,14 +15,6 @@ function setStatus(message, kind = '') {
   status.className = `status ${kind}`.trim()
 }
 
-function validateStoryVoiceOrigin(value) {
-  const url = new URL(value)
-  const allowedHost = url.hostname === 'localhost' || url.hostname === '127.0.0.1'
-  if (url.protocol !== 'http:' || !allowedHost || url.port !== '3000' || url.username || url.password) {
-    throw new Error('MVP 僅允許 http://localhost:3000 或 http://127.0.0.1:3000。')
-  }
-  return url.origin
-}
 
 function selectedBooks() {
   const selectedIds = new Set(

@@ -1,9 +1,9 @@
 {
   "name": "storyvoice-books-com-tw-companion",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "scripts": {
     "test": "node --test tests/*.test.js",
-    "check": "node --check extractor.js && node --check content.js && node --check popup.js && npm test"
+    "check": "node --check extractor.js && node --check content.js && node --check popup.js && node --check storyvoice-origin.mjs && npm test"
   }
 }

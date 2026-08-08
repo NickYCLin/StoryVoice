@@ -41,7 +41,7 @@ services:
     volumes:
       - book-storage:/data/books
     ports:
-      - "${STORYVOICE_API_PORT:-8080}:8080"
+      - "127.0.0.1:${STORYVOICE_API_PORT:-8080}:8080"
     depends_on:
       postgres:
         condition: service_healthy
@@ -76,8 +76,10 @@ services:
     build:
       context: .
       dockerfile: docker/web.Dockerfile
+      args:
+        STORYVOICE_BASE_PATH: ${STORYVOICE_BASE_PATH:-/}
     ports:
-      - "${STORYVOICE_WEB_PORT:-3000}:80"
+      - "127.0.0.1:${STORYVOICE_WEB_PORT:-3000}:80"
     depends_on:
       api:
         condition: service_healthy

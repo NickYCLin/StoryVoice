@@ -1,5 +1,7 @@
 FROM node:22-alpine AS build
 WORKDIR /app
+ARG STORYVOICE_BASE_PATH=/
+ENV STORYVOICE_BASE_PATH=${STORYVOICE_BASE_PATH}
 COPY src/StoryVoice.Web/package*.json ./
 RUN npm ci
 COPY src/StoryVoice.Web/ ./

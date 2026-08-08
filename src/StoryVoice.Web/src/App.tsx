@@ -31,6 +31,9 @@ type BookDetails = Omit<BookSummary, 'chapterCount'> & {
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error'
 
+const basePath = import.meta.env.BASE_URL.replace(/\/+$/, '')
+const apiUrl = (path: string) => `${basePath}${path.startsWith('/') ? path : `/${path}`}`
+
 const pipeline = [
   ['01', '理解章節', '解析 EPUB、章節、段落與對話邊界。'],
   ['02', '辨識角色', '建立 Character Bible，讓角色跨章節保持一致。'],
@@ -50,7 +53,7 @@ function App() {
   useEffect(() => {
     const controller = new AbortController()
 
-    fetch('/api/books', { signal: controller.signal })
+    fetch(apiUrl('/api/books'), { signal: controller.signal })
       .then((response) => {
         if (!response.ok) throw new Error(`API returned ${response.status}`)
         return response.json() as Promise<BookSummary[]>
@@ -77,7 +80,7 @@ function App() {
 
     const controller = new AbortController()
     setDetailState('loading')
-    fetch(`/api/books/${selectedBookId}`, { signal: controller.signal })
+    fetch(apiUrl(`/api/books/${selectedBookId}`), { signal: controller.signal })
       .then((response) => {
         if (!response.ok) throw new Error(`API returned ${response.status}`)
         return response.json() as Promise<BookDetails>
@@ -113,14 +116,14 @@ function App() {
     setUploadState('loading')
     setUploadMessage('正在解析章節並存入書庫…')
     try {
-      const response = await fetch('/api/books/import', { method: 'POST', body: formData })
+      const response = await fetch(apiUrl('/api/books/import'), { method: 'POST', body: formData })
       if (!response.ok) {
         const problem = await response.json().catch(() => null) as { detail?: string; title?: string } | null
         throw new Error(problem?.detail ?? problem?.title ?? `匯入失敗（${response.status}）`)
       }
 
       const imported = await response.json() as BookDetails
-      const listResponse = await fetch('/api/books')
+      const listResponse = await fetch(apiUrl('/api/books'))
       if (!listResponse.ok) throw new Error(`書庫重新整理失敗（${listResponse.status}）`)
       const items = await listResponse.json() as BookSummary[]
       setBooks(items)
@@ -140,7 +143,7 @@ function App() {
   async function handleLibraryRefresh() {
     setLibraryState('loading')
     try {
-      const response = await fetch('/api/books')
+      const response = await fetch(apiUrl('/api/books'))
       if (!response.ok) throw new Error(`API returned ${response.status}`)
       const items = await response.json() as BookSummary[]
       setBooks(items)

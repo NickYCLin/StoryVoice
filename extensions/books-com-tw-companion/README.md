@@ -1,6 +1,6 @@
 # StoryVoice 博客來書櫃 Companion
 
-這個 Chrome／Chromium Manifest V3 extension 只會從**目前開啟的博客來電子書櫃頁面**讀取已呈現的 metadata，並同步到本機 StoryVoice：
+這個 Chrome／Chromium Manifest V3 extension 只會從**目前開啟的博客來電子書櫃頁面**讀取已呈現的 metadata，並同步到明確允許的 StoryVoice：
 
 - 書籍識別碼
 - 書名與作者
@@ -22,7 +22,9 @@
 6. 點 extension 圖示後，可掃描目前頁面，或明確按下「展開完整書櫃」讓 Companion 捲動／點擊書櫃的「看更多」。
 7. 確認清單、勾選書籍，再同步到 StoryVoice。
 
-預設只允許把資料送到 `http://localhost:3000` 或 `http://127.0.0.1:3000`，避免誤把私人書櫃 metadata 傳往其他主機。
+只允許把資料送到 `http://localhost:3000`、`http://127.0.0.1:3000`，或正式上線後的
+`https://aiprod.wrbtycg.tw/StoryVoice`。其他 host、port、path、HTTP 正式站、帳密 URL
+與 query/hash 全部拒絕，避免誤把私人書櫃 metadata 傳往其他主機。
 
 ## 驗證
 

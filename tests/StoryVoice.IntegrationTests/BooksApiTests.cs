@@ -45,4 +45,52 @@ public sealed class BooksApiTests(ApiFactory factory) : IClassFixture<ApiFactory
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
+
+    [Fact]
+    public async Task Create_book_uses_allowed_forwarded_prefix_in_location_header()
+    {
+        using var client = factory.CreateClient();
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/books")
+        {
+            Content = JsonContent.Create(new CreateBookRequest(
+                "子路徑故事",
+                "StoryVoice",
+                "zh-TW",
+                "subpath.txt",
+                [new CreateChapterRequest(1, "序章", "從子路徑開始。")]))
+        };
+        request.Headers.Add("X-Forwarded-Prefix", "/StoryVoice");
+
+        var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
+        var created = await response.Content.ReadFromJsonAsync<BookDetailsResponse>(
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        Assert.NotNull(created);
+        Assert.Equal($"/StoryVoice/api/books/{created.Id}", response.Headers.Location?.OriginalString);
+    }
+
+    [Fact]
+    public async Task Create_book_ignores_unconfigured_forwarded_prefix()
+    {
+        using var client = factory.CreateClient();
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/books")
+        {
+            Content = JsonContent.Create(new CreateBookRequest(
+                "偽造前綴故事",
+                "StoryVoice",
+                "zh-TW",
+                "untrusted.txt",
+                [new CreateChapterRequest(1, "序章", "不反射任意前綴。")]))
+        };
+        request.Headers.Add("X-Forwarded-Prefix", "/untrusted");
+
+        var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
+        var created = await response.Content.ReadFromJsonAsync<BookDetailsResponse>(
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        Assert.NotNull(created);
+        Assert.Equal($"/api/books/{created.Id}", response.Headers.Location?.OriginalString);
+    }
 }

@@ -38,6 +38,19 @@ Open:
 - Liveness: <http://localhost:8080/health/live>
 - Readiness: <http://localhost:8080/health/ready>
 
+Compose 只把 Web 與 API 綁在 `127.0.0.1`；對外服務應由同機 reverse proxy 提供 TLS。
+
+要先在本機驗證預定的正式子路徑：
+
+```bash
+STORYVOICE_BASE_PATH=/StoryVoice/ docker compose up -d --build
+```
+
+接著開啟 <http://localhost:3000/StoryVoice/>。預定正式網址是
+<https://aiprod.wrbtycg.tw/StoryVoice/>；host nginx location 範例放在
+[`deploy/nginx-storyvoice-location.conf.example`](deploy/nginx-storyvoice-location.conf.example)，
+但不會因為本機 Compose 啟動而自動公開。
+
 Stop the stack:
 
 ```bash
@@ -105,6 +118,8 @@ Chrome／Chromium 可載入 [`extensions/books-com-tw-companion`](extensions/boo
 從使用者已登入的官方電子書櫃同步已呈現的書名、作者、封面與官方閱讀連結；
 使用者也能明確觸發有輪次／數量上限的完整書櫃展開掃描。
 Companion 不讀取帳密、Cookie、購買憑證或電子書內文，也不呼叫博客來未公開 API。
+傳送目標採精確 allowlist：本機 `localhost:3000`／`127.0.0.1:3000`，以及正式上線後的
+`https://aiprod.wrbtycg.tw/StoryVoice`。
 
 同步後的書籍狀態為 `Linked`，可以在 StoryVoice 書庫辨識來源並回到博客來官方閱讀器；
 若要進行故事分析與語音生成，仍須另外匯入使用者有權處理的無 DRM EPUB／TXT。

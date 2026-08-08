@@ -14,11 +14,12 @@ public static class BookEndpoints
 
         group.MapPost("/", async (
             CreateBookRequest request,
+            HttpContext httpContext,
             IBookService service,
             CancellationToken cancellationToken) =>
         {
             var book = await service.CreateAsync(request, cancellationToken);
-            return Results.Created($"/api/books/{book.Id}", book);
+            return Results.Created(BookLocation(httpContext.Request.PathBase, book.Id), book);
         })
         .WithName("CreateBook");
 
@@ -27,6 +28,7 @@ public static class BookEndpoints
             string? title,
             string? author,
             string? language,
+            HttpContext httpContext,
             IBookImportService importService,
             CancellationToken cancellationToken) =>
         {
@@ -51,7 +53,7 @@ public static class BookEndpoints
                 author,
                 language,
                 cancellationToken);
-            return Results.Created($"/api/books/{book.Id}", book);
+            return Results.Created(BookLocation(httpContext.Request.PathBase, book.Id), book);
         })
         .DisableAntiforgery()
         .WithName("ImportBook")
@@ -85,4 +87,7 @@ public static class BookEndpoints
 
         return endpoints;
     }
+
+    private static string BookLocation(PathString pathBase, Guid bookId) =>
+        $"{pathBase}/api/books/{bookId}";
 }

@@ -47,6 +47,21 @@ if (!builder.Environment.IsEnvironment("Testing"))
 
 var app = builder.Build();
 
+var configuredPathBase = builder.Configuration["ReverseProxy:PathBase"]?.TrimEnd('/');
+if (!string.IsNullOrWhiteSpace(configuredPathBase))
+{
+    app.Use((context, next) =>
+    {
+        if (context.Request.Headers.TryGetValue("X-Forwarded-Prefix", out var forwardedPrefix)
+            && string.Equals(forwardedPrefix.ToString(), configuredPathBase, StringComparison.Ordinal))
+        {
+            context.Request.PathBase = new PathString(configuredPathBase);
+        }
+
+        return next(context);
+    });
+}
+
 app.UseSerilogRequestLogging();
 app.UseExceptionHandler();
 
