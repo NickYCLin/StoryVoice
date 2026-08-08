@@ -1354,7 +1354,7 @@ docker compose up
 - [x] Metadata
 - [x] TOC
 - [x] Chapter Extraction（TXT / EPUB）
-- [ ] Book Library UI
+- [x] Book Library UI
 
 Acceptance Criteria：
 

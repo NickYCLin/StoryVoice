@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from 'react'
+import { useEffect, useState, type CSSProperties, type FormEvent } from 'react'
 
 type BookSummary = {
   id: string
@@ -11,6 +11,21 @@ type BookSummary = {
   createdAt: string
 }
 
+type Chapter = {
+  id: string
+  chapterNumber: number
+  sortOrder: number
+  title: string
+  originalText: string
+}
+
+type BookDetails = Omit<BookSummary, 'chapterCount'> & {
+  originalFileName: string
+  chapters: Chapter[]
+}
+
+type LoadState = 'idle' | 'loading' | 'ready' | 'error'
+
 const pipeline = [
   ['01', '理解章節', '解析 EPUB、章節、段落與對話邊界。'],
   ['02', '辨識角色', '建立 Character Bible，讓角色跨章節保持一致。'],
@@ -21,6 +36,11 @@ const pipeline = [
 function App() {
   const [books, setBooks] = useState<BookSummary[]>([])
   const [libraryState, setLibraryState] = useState<'loading' | 'ready' | 'error'>('loading')
+  const [selectedBookId, setSelectedBookId] = useState<string | null>(null)
+  const [selectedBook, setSelectedBook] = useState<BookDetails | null>(null)
+  const [detailState, setDetailState] = useState<LoadState>('idle')
+  const [uploadState, setUploadState] = useState<LoadState>('idle')
+  const [uploadMessage, setUploadMessage] = useState('')
 
   useEffect(() => {
     const controller = new AbortController()
@@ -32,6 +52,7 @@ function App() {
       })
       .then((items) => {
         setBooks(items)
+        setSelectedBookId((current) => current ?? items[0]?.id ?? null)
         setLibraryState('ready')
       })
       .catch((error: unknown) => {
@@ -42,8 +63,77 @@ function App() {
     return () => controller.abort()
   }, [])
 
+  useEffect(() => {
+    if (!selectedBookId) {
+      setSelectedBook(null)
+      setDetailState('idle')
+      return
+    }
+
+    const controller = new AbortController()
+    setDetailState('loading')
+    fetch(`/api/books/${selectedBookId}`, { signal: controller.signal })
+      .then((response) => {
+        if (!response.ok) throw new Error(`API returned ${response.status}`)
+        return response.json() as Promise<BookDetails>
+      })
+      .then((book) => {
+        setSelectedBook(book)
+        setDetailState('ready')
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === 'AbortError') return
+        setDetailState('error')
+      })
+
+    return () => controller.abort()
+  }, [selectedBookId])
+
+  async function handleUpload(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const form = event.currentTarget
+    const formData = new FormData(form)
+    const file = formData.get('file')
+    if (!(file instanceof File) || file.size === 0) {
+      setUploadState('error')
+      setUploadMessage('請先選擇 EPUB 或 UTF-8 TXT 檔案。')
+      return
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setUploadState('error')
+      setUploadMessage('檔案不可超過 10 MiB。')
+      return
+    }
+
+    setUploadState('loading')
+    setUploadMessage('正在解析章節並存入書庫…')
+    try {
+      const response = await fetch('/api/books/import', { method: 'POST', body: formData })
+      if (!response.ok) {
+        const problem = await response.json().catch(() => null) as { detail?: string; title?: string } | null
+        throw new Error(problem?.detail ?? problem?.title ?? `匯入失敗（${response.status}）`)
+      }
+
+      const imported = await response.json() as BookDetails
+      const listResponse = await fetch('/api/books')
+      if (!listResponse.ok) throw new Error(`書庫重新整理失敗（${listResponse.status}）`)
+      const items = await listResponse.json() as BookSummary[]
+      setBooks(items)
+      setLibraryState('ready')
+      setSelectedBook(imported)
+      setSelectedBookId(imported.id)
+      setDetailState('ready')
+      setUploadState('ready')
+      setUploadMessage(`「${imported.title}」已匯入，共 ${imported.chapters.length} 章。`)
+      form.reset()
+    } catch (error) {
+      setUploadState('error')
+      setUploadMessage(error instanceof Error ? error.message : '匯入失敗，請稍後再試。')
+    }
+  }
+
   return (
-    <main className="min-h-screen overflow-hidden bg-[#09070d] text-[#f7f2ea]">
+    <main className="relative min-h-screen overflow-hidden bg-[#09070d] text-[#f7f2ea]">
       <div className="ambient ambient-one" aria-hidden="true" />
       <div className="ambient ambient-two" aria-hidden="true" />
 
@@ -164,13 +254,34 @@ function App() {
       </section>
 
       <section id="library" className="relative z-10 mx-auto max-w-7xl px-6 py-24 lg:px-10">
-        <div className="mb-10 flex items-end justify-between gap-6">
+        <div className="mb-10 flex flex-col justify-between gap-6 sm:flex-row sm:items-end">
           <div>
             <p className="eyebrow">Your library</p>
             <h2 className="mt-3 font-serif text-4xl tracking-tight sm:text-5xl">故事書庫</h2>
+            <p className="mt-4 max-w-xl text-sm leading-7 text-stone-500">上傳你有權使用的 EPUB 或 UTF-8 TXT；StoryVoice 會保留原始檔並依 TOC／標題解析章節。</p>
           </div>
           <span className="rounded-full border border-white/[.08] px-3 py-1 text-xs text-stone-500">{books.length} 本</span>
         </div>
+
+        <form className="mb-8 grid gap-4 rounded-3xl border border-amber-300/10 bg-amber-200/[.025] p-5 sm:grid-cols-[1fr_auto] sm:items-center sm:p-6" onSubmit={handleUpload}>
+          <div className="min-w-0">
+            <label className="block text-sm font-semibold text-stone-200" htmlFor="book-file">匯入新故事</label>
+            <input
+              accept=".epub,.txt,application/epub+zip,text/plain"
+              className="mt-3 block w-full cursor-pointer rounded-xl border border-white/10 bg-black/20 p-2 text-sm text-stone-400 file:mr-4 file:rounded-lg file:border-0 file:bg-amber-200/10 file:px-4 file:py-2 file:font-semibold file:text-amber-200 hover:border-amber-300/20"
+              id="book-file"
+              name="file"
+              required
+              type="file"
+            />
+            <p className={`mt-2 min-h-5 text-xs ${uploadState === 'error' ? 'text-rose-300' : uploadState === 'ready' ? 'text-emerald-300' : 'text-stone-600'}`} role="status">
+              {uploadMessage || '最大 10 MiB；不處理 DRM 或未授權內容。'}
+            </p>
+          </div>
+          <button className="primary-button w-full disabled:cursor-wait disabled:opacity-60 sm:w-auto" disabled={uploadState === 'loading'} type="submit">
+            {uploadState === 'loading' ? '匯入中…' : '匯入書庫'}
+          </button>
+        </form>
 
         {libraryState === 'loading' && <div className="library-state">正在連接 StoryVoice API…</div>}
         {libraryState === 'error' && <div className="library-state border-rose-400/20 text-rose-200">API 尚未連線。請確認後端服務已啟動。</div>}
@@ -179,24 +290,60 @@ function App() {
             <div>
               <span className="mx-auto mb-5 grid h-14 w-14 place-items-center rounded-2xl border border-amber-300/20 bg-amber-300/[.06] text-2xl">◇</span>
               <h3 className="font-serif text-2xl text-stone-200">書庫還在等第一個故事</h3>
-              <p className="mt-3 text-sm text-stone-500">Foundation 已就緒。EPUB 上傳與解析將在 Phase 2 接上。</p>
+              <p className="mt-3 text-sm text-stone-500">選擇上方的 EPUB 或 TXT，第一個章節很快就會點亮。</p>
             </div>
           </div>
         )}
         {libraryState === 'ready' && books.length > 0 && (
-          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-            {books.map((book) => (
-              <article className="book-card" key={book.id}>
-                <div className="book-cover"><span>{book.title.slice(0, 1)}</span></div>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate font-serif text-xl text-stone-100">{book.title}</p>
-                  <p className="mt-1 truncate text-sm text-stone-500">{book.author}</p>
-                  <div className="mt-7 flex items-center gap-3 text-xs text-stone-600">
-                    <span>{book.chapterCount} 章</span><span>·</span><span>{book.fileType.toUpperCase()}</span><span>·</span><span>{book.status}</span>
+          <div className="grid gap-6 lg:grid-cols-[minmax(0,.82fr)_minmax(0,1.18fr)]">
+            <div className="space-y-3">
+              {books.map((book) => (
+                <button
+                  className={`book-card w-full text-left ${selectedBookId === book.id ? 'selected-book' : ''}`}
+                  key={book.id}
+                  onClick={() => setSelectedBookId(book.id)}
+                  type="button"
+                >
+                  <div className="book-cover"><span>{book.title.slice(0, 1)}</span></div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-serif text-xl text-stone-100">{book.title}</p>
+                    <p className="mt-1 truncate text-sm text-stone-500">{book.author}</p>
+                    <div className="mt-7 flex flex-wrap items-center gap-3 text-xs text-stone-600">
+                      <span>{book.chapterCount} 章</span><span>·</span><span>{book.fileType.toUpperCase()}</span><span>·</span><span>{book.status}</span>
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            <aside className="min-h-80 rounded-3xl border border-white/[.07] bg-white/[.018] p-5 sm:p-7">
+              {detailState === 'loading' && <div className="library-state h-full">正在展開章節…</div>}
+              {detailState === 'error' && <div className="library-state h-full border-rose-400/20 text-rose-200">章節讀取失敗，請重新選擇書籍。</div>}
+              {detailState === 'ready' && selectedBook && (
+                <div>
+                  <div className="flex flex-col justify-between gap-4 border-b border-white/[.07] pb-6 sm:flex-row sm:items-start">
+                    <div className="min-w-0">
+                      <p className="eyebrow">Selected story</p>
+                      <h3 className="mt-2 break-words font-serif text-3xl text-stone-100">{selectedBook.title}</h3>
+                      <p className="mt-2 text-sm text-stone-500">{selectedBook.author} · {selectedBook.language} · {selectedBook.fileType.toUpperCase()}</p>
+                    </div>
+                    <span className="shrink-0 rounded-full border border-white/[.08] px-3 py-1 text-xs text-stone-500">{selectedBook.chapters.length} 章</span>
+                  </div>
+                  <div className="mt-5 space-y-3">
+                    {selectedBook.chapters.map((chapter) => (
+                      <details className="chapter-panel group" key={chapter.id}>
+                        <summary className="flex cursor-pointer list-none items-center gap-4 px-4 py-4 text-left">
+                          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-amber-200/[.07] font-mono text-xs text-amber-200/70">{String(chapter.chapterNumber).padStart(2, '0')}</span>
+                          <span className="min-w-0 flex-1 truncate font-serif text-lg text-stone-200">{chapter.title}</span>
+                          <span className="text-stone-600 transition group-open:rotate-45">＋</span>
+                        </summary>
+                        <div className="max-h-80 overflow-y-auto whitespace-pre-wrap border-t border-white/[.06] px-4 py-5 text-sm leading-7 text-stone-400">{chapter.originalText}</div>
+                      </details>
+                    ))}
                   </div>
                 </div>
-              </article>
-            ))}
+              )}
+            </aside>
           </div>
         )}
       </section>

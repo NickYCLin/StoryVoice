@@ -94,6 +94,9 @@ metadata, TOC labels and spine reading order, strips executable/style markup,
 and stores the original upload under a generated server-side path. EPUB archive
 expansion is capped at 100 MiB and 5,000 entries.
 
+Open `http://localhost:3000/#library` to import EPUB/TXT files, switch between
+books, and expand the parsed chapter text in the read-only library view.
+
 Example:
 
 ```json

@@ -10,7 +10,8 @@
 }
 
 html { scroll-behavior: smooth; }
-body { margin: 0; min-width: 320px; min-height: 100vh; }
+body { margin: 0; min-width: 320px; min-height: 100vh; overflow-x: hidden; }
+button, input, a { font: inherit; }
 button, a { -webkit-tap-highlight-color: transparent; }
 .font-serif { font-family: Georgia, "Noto Serif TC", "Times New Roman", serif; }
 
@@ -45,7 +46,13 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .library-state { display: grid; place-items: center; border: 1px dashed rgba(255,255,255,.09); border-radius: 1.5rem; padding: 3rem; color: #78716c; text-align: center; background: rgba(255,255,255,.015); }
 .book-card { display: flex; gap: 1.1rem; padding: 1.1rem; border-radius: 1.3rem; border: 1px solid rgba(255,255,255,.07); background: rgba(255,255,255,.022); transition: .2s ease; }
 .book-card:hover { transform: translateY(-2px); border-color: rgba(253,230,138,.18); background: rgba(253,230,138,.025); }
+.book-card:focus-visible { outline: 2px solid rgba(253,230,138,.55); outline-offset: 3px; }
+.book-card.selected-book { border-color: rgba(253,230,138,.28); background: rgba(253,230,138,.055); }
 .book-cover { display: grid; place-items: center; width: 4.6rem; aspect-ratio: 3/4; flex: none; border-radius: .8rem; color: #fde68a; font-family: Georgia, serif; font-size: 1.5rem; background: linear-gradient(145deg, #281622, #17101a); border: 1px solid rgba(253,230,138,.13); box-shadow: 0 12px 30px rgba(0,0,0,.25); }
+.chapter-panel { overflow: hidden; border: 1px solid rgba(255,255,255,.07); border-radius: 1rem; background: rgba(0,0,0,.12); transition: .2s ease; }
+.chapter-panel:hover, .chapter-panel[open] { border-color: rgba(253,230,138,.16); background: rgba(253,230,138,.022); }
+.chapter-panel summary::-webkit-details-marker { display: none; }
+.chapter-panel summary:focus-visible { outline: 2px solid rgba(253,230,138,.45); outline-offset: -2px; border-radius: 1rem; }
 
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
