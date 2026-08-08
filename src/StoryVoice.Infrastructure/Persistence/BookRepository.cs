@@ -15,6 +15,17 @@ internal sealed class BookRepository(StoryVoiceDbContext dbContext) : IBookRepos
             .Include(book => book.Chapters)
             .SingleOrDefaultAsync(book => book.Id == id, cancellationToken);
 
+    public Task<Book?> GetBySourceAsync(
+        string sourceProvider,
+        string externalSourceId,
+        CancellationToken cancellationToken) =>
+        dbContext.Books
+            .Include(book => book.Chapters)
+            .SingleOrDefaultAsync(
+                book => book.SourceProvider == sourceProvider &&
+                    book.ExternalSourceId == externalSourceId,
+                cancellationToken);
+
     public async Task<IReadOnlyList<Book>> ListAsync(CancellationToken cancellationToken) =>
         await dbContext.Books
             .AsNoTracking()

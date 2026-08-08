@@ -34,6 +34,16 @@ public sealed class Book
 
     public string? StoragePath { get; private set; }
 
+    public string? SourceProvider { get; private set; }
+
+    public string? ExternalSourceId { get; private set; }
+
+    public string? SourceUrl { get; private set; }
+
+    public string? CoverImageUrl { get; private set; }
+
+    public DateTimeOffset? SourceSyncedAt { get; private set; }
+
     public BookStatus Status { get; private set; }
 
     public DateTimeOffset CreatedAt { get; private set; }
@@ -42,6 +52,29 @@ public sealed class Book
 
     public static Book Create(string title, string author, string language, string originalFileName) =>
         new(title, author, language, originalFileName);
+
+    public static Book CreateExternal(
+        string title,
+        string author,
+        string language,
+        string sourceProvider,
+        string externalSourceId,
+        string sourceUrl,
+        string? coverImageUrl)
+    {
+        var book = new Book(title, author, language, $"{externalSourceId}.link")
+        {
+            FileType = "external",
+            Status = BookStatus.Linked,
+            SourceProvider = Require(sourceProvider, nameof(sourceProvider)),
+            ExternalSourceId = Require(externalSourceId, nameof(externalSourceId)),
+            SourceUrl = Require(sourceUrl, nameof(sourceUrl)),
+            CoverImageUrl = NormalizeOptional(coverImageUrl),
+            SourceSyncedAt = DateTimeOffset.UtcNow
+        };
+
+        return book;
+    }
 
     public Chapter AddChapter(int chapterNumber, string title, string originalText)
     {
@@ -60,6 +93,26 @@ public sealed class Book
         StoragePath = Require(storagePath, nameof(storagePath));
     }
 
+    public void UpdateExternalMetadata(
+        string title,
+        string author,
+        string language,
+        string sourceUrl,
+        string? coverImageUrl)
+    {
+        if (SourceProvider is null || ExternalSourceId is null)
+        {
+            throw new InvalidOperationException("只有外部來源書籍可以更新來源 metadata。");
+        }
+
+        Title = Require(title, nameof(title));
+        Author = Require(author, nameof(author));
+        Language = Require(language, nameof(language));
+        SourceUrl = Require(sourceUrl, nameof(sourceUrl));
+        CoverImageUrl = NormalizeOptional(coverImageUrl);
+        SourceSyncedAt = DateTimeOffset.UtcNow;
+    }
+
     private static string Require(string value, string parameterName)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -69,4 +122,7 @@ public sealed class Book
 
         return value.Trim();
     }
+
+    private static string? NormalizeOptional(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }

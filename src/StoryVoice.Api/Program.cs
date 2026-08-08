@@ -8,6 +8,7 @@ using StackExchange.Redis;
 using StoryVoice.Api;
 using StoryVoice.Application.BookImports;
 using StoryVoice.Application.Books;
+using StoryVoice.Application.Bookshelves;
 using StoryVoice.Infrastructure;
 using StoryVoice.Infrastructure.Health;
 using StoryVoice.Infrastructure.Persistence;
@@ -27,6 +28,7 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.Services.AddScoped<IBookService, BookService>();
 builder.Services.AddScoped<IBookImportService, BookImportService>();
+builder.Services.AddScoped<IBooksComTwBookshelfService, BooksComTwBookshelfService>();
 builder.Services.Configure<FormOptions>(options =>
     options.MultipartBodyLengthLimit = 10 * 1024 * 1024 + 64 * 1024);
 builder.Services.AddStoryVoiceInfrastructure(builder.Configuration);

@@ -8,6 +8,11 @@ public interface IBookRepository
 
     Task<Book?> GetAsync(Guid id, CancellationToken cancellationToken);
 
+    Task<Book?> GetBySourceAsync(
+        string sourceProvider,
+        string externalSourceId,
+        CancellationToken cancellationToken);
+
     Task<IReadOnlyList<Book>> ListAsync(CancellationToken cancellationToken);
 
     Task SaveChangesAsync(CancellationToken cancellationToken);

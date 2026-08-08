@@ -58,47 +58,18 @@ public sealed class BookService(IBookRepository repository) : IBookService
 
         await repository.AddAsync(book, cancellationToken);
         await repository.SaveChangesAsync(cancellationToken);
-        return ToDetails(book);
+        return BookResponseMapper.ToDetails(book);
     }
 
     public async Task<BookDetailsResponse?> GetAsync(Guid id, CancellationToken cancellationToken)
     {
         var book = await repository.GetAsync(id, cancellationToken);
-        return book is null ? null : ToDetails(book);
+        return book is null ? null : BookResponseMapper.ToDetails(book);
     }
 
     public async Task<IReadOnlyList<BookSummaryResponse>> ListAsync(CancellationToken cancellationToken)
     {
         var books = await repository.ListAsync(cancellationToken);
-        return books.Select(ToSummary).ToArray();
+        return books.Select(BookResponseMapper.ToSummary).ToArray();
     }
-
-    private static BookSummaryResponse ToSummary(Book book) => new(
-        book.Id,
-        book.Title,
-        book.Author,
-        book.Language,
-        book.FileType,
-        book.Status.ToString(),
-        book.Chapters.Count,
-        book.CreatedAt);
-
-    private static BookDetailsResponse ToDetails(Book book) => new(
-        book.Id,
-        book.Title,
-        book.Author,
-        book.Language,
-        book.OriginalFileName,
-        book.FileType,
-        book.Status.ToString(),
-        book.CreatedAt,
-        book.Chapters
-            .OrderBy(chapter => chapter.SortOrder)
-            .Select(chapter => new ChapterResponse(
-                chapter.Id,
-                chapter.ChapterNumber,
-                chapter.SortOrder,
-                chapter.Title,
-                chapter.OriginalText))
-            .ToArray());
 }

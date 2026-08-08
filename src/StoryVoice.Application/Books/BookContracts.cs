@@ -32,7 +32,12 @@ public sealed record BookSummaryResponse(
     string FileType,
     string Status,
     int ChapterCount,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    string? SourceProvider,
+    string? ExternalSourceId,
+    string? SourceUrl,
+    string? CoverImageUrl,
+    DateTimeOffset? SourceSyncedAt);
 
 public sealed record BookDetailsResponse(
     Guid Id,
@@ -43,4 +48,9 @@ public sealed record BookDetailsResponse(
     string FileType,
     string Status,
     DateTimeOffset CreatedAt,
-    IReadOnlyList<ChapterResponse> Chapters);
+    IReadOnlyList<ChapterResponse> Chapters,
+    string? SourceProvider,
+    string? ExternalSourceId,
+    string? SourceUrl,
+    string? CoverImageUrl,
+    DateTimeOffset? SourceSyncedAt);
