@@ -15,6 +15,9 @@ Phase 1 Foundation 已建立：
 - Book / Chapter domain model and REST API
 - EPUB / TXT multipart upload、metadata、TOC 與章節解析
 - 博客來電子書櫃 Companion：同步可見 metadata 與官方閱讀連結
+- 使用者明確連結合法 EPUB／TXT 正文、擷取式摘要與手動閱讀筆記
+- 單一神經語音 MVP：持久化工作、租約與重試、取消、私有 MP3 與 owner-scoped Range 串流
+- 全書庫處理狀態矩陣：分開標示官方 TTS、合法正文、摘要、筆記與 StoryVoice 音訊
 - Serilog, OpenAPI, liveness/readiness health checks
 - Docker Compose development stack
 - Unit and integration tests + GitHub Actions CI
@@ -190,6 +193,7 @@ tests/
 - StoryVoice **does not provide DRM circumvention**.
 - 博客來 Companion 不接收帳密／Cookie，也不下載或解密博客來電子書內文。
 - Process only content you own or have the right to transform.
+- 建立神經語音時，合法正文會送往設定的外部 Microsoft Edge 語音服務；StoryVoice 不會把博客來官方 TTS 標記當成已生成音訊。
 - API keys belong in environment variables or a secret manager, never Git.
 - Uploaded books, generated audio, analysis results and runtime volumes are ignored by Git.
 - Generated audio is not automatically licensed for redistribution.

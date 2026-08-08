@@ -1,0 +1,72 @@
+using StoryVoice.Application.Narrations;
+
+namespace StoryVoice.Api;
+
+public static class NarrationEndpoints
+{
+    public static IEndpointRouteBuilder MapNarrationEndpoints(this IEndpointRouteBuilder endpoints)
+    {
+        var bookGroup = endpoints.MapGroup("/api/books/{bookId:guid}/narrations")
+            .WithTags("Narrations")
+            .RequireAuthorization(StoryVoicePolicies.UserSession);
+
+        bookGroup.MapGet("/", async (
+            Guid bookId,
+            INarrationService service,
+            CancellationToken cancellationToken) =>
+        {
+            var jobs = await service.ListAsync(bookId, cancellationToken);
+            return jobs is null ? Results.NotFound() : Results.Ok(jobs);
+        });
+
+        bookGroup.MapPost("/", async (
+            Guid bookId,
+            CreateNarrationRequest request,
+            HttpContext httpContext,
+            INarrationService service,
+            CancellationToken cancellationToken) =>
+        {
+            var job = await service.CreateAsync(bookId, request, cancellationToken);
+            return job is null
+                ? Results.NotFound()
+                : Results.Created($"{httpContext.Request.PathBase}/api/narrations/{job.Id}", job);
+        })
+        .AddEndpointFilter<AntiforgeryEndpointFilter>();
+
+        var jobGroup = endpoints.MapGroup("/api/narrations/{jobId:guid}")
+            .WithTags("Narrations")
+            .RequireAuthorization(StoryVoicePolicies.UserSession);
+
+        jobGroup.MapGet("/", async (
+            Guid jobId,
+            INarrationService service,
+            CancellationToken cancellationToken) =>
+        {
+            var job = await service.GetAsync(jobId, cancellationToken);
+            return job is null ? Results.NotFound() : Results.Ok(job);
+        });
+
+        jobGroup.MapPost("/cancel", async (
+            Guid jobId,
+            INarrationService service,
+            CancellationToken cancellationToken) =>
+        {
+            var job = await service.CancelAsync(jobId, cancellationToken);
+            return job is null ? Results.NotFound() : Results.Ok(job);
+        })
+        .AddEndpointFilter<AntiforgeryEndpointFilter>();
+
+        jobGroup.MapGet("/audio", async (
+            Guid jobId,
+            INarrationService service,
+            CancellationToken cancellationToken) =>
+        {
+            var audio = await service.GetAudioAsync(jobId, cancellationToken);
+            return audio is null
+                ? Results.NotFound()
+                : Results.File(audio.AbsolutePath, audio.ContentType, enableRangeProcessing: true);
+        });
+
+        return endpoints;
+    }
+}

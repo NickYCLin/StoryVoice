@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 using StoryVoice.Application.BookImports;
 using StoryVoice.Application.Insights;
+using StoryVoice.Application.Narrations;
 
 namespace StoryVoice.Api;
 
@@ -19,6 +20,8 @@ public sealed class ApiExceptionHandler(
         {
             UnsupportedBookFormatException => StatusCodes.Status415UnsupportedMediaType,
             BookTextUnavailableException => StatusCodes.Status409Conflict,
+            NarrationTextUnavailableException => StatusCodes.Status409Conflict,
+            NarrationRightsRequiredException => StatusCodes.Status400BadRequest,
             AntiforgeryValidationException => StatusCodes.Status400BadRequest,
             ArgumentException or InvalidOperationException => StatusCodes.Status400BadRequest,
             _ => StatusCodes.Status500InternalServerError
@@ -46,6 +49,14 @@ public sealed class ApiExceptionHandler(
         if (exception is BookTextUnavailableException)
         {
             problemDetails.Extensions["code"] = BookTextUnavailableException.StableCode;
+        }
+        else if (exception is NarrationTextUnavailableException)
+        {
+            problemDetails.Extensions["code"] = NarrationTextUnavailableException.StableCode;
+        }
+        else if (exception is NarrationRightsRequiredException)
+        {
+            problemDetails.Extensions["code"] = NarrationRightsRequiredException.StableCode;
         }
 
         httpContext.Response.StatusCode = statusCode;

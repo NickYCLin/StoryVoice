@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using StoryVoice.Domain.Books;
 using StoryVoice.Domain.Insights;
+using StoryVoice.Domain.Narrations;
 using StoryVoice.Infrastructure.Identity;
 
 namespace StoryVoice.Infrastructure.Persistence;
@@ -17,6 +18,8 @@ public sealed class StoryVoiceDbContext(DbContextOptions<StoryVoiceDbContext> op
     public DbSet<ReadingNote> ReadingNotes => Set<ReadingNote>();
 
     public DbSet<BookExtractiveSummary> BookExtractiveSummaries => Set<BookExtractiveSummary>();
+
+    public DbSet<NarrationJob> NarrationJobs => Set<NarrationJob>();
 
     public DbSet<CompanionAccessToken> CompanionAccessTokens => Set<CompanionAccessToken>();
 

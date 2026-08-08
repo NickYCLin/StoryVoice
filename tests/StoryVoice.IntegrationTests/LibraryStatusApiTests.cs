@@ -1,0 +1,231 @@
+using System.Net.Http.Json;
+using System.Net.Http.Headers;
+using System.Text;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using StoryVoice.Application.Books;
+using StoryVoice.Application.Insights;
+using StoryVoice.Application.Library;
+using StoryVoice.Application.Narrations;
+using StoryVoice.Domain.Books;
+using StoryVoice.Infrastructure.Persistence;
+
+namespace StoryVoice.IntegrationTests;
+
+public sealed class LibraryStatusApiTests(ApiFactory factory) : IClassFixture<ApiFactory>
+{
+    [Fact]
+    public async Task Matrix_reports_authorized_text_summary_notes_and_narration_without_guessing_metadata()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        var uploaded = await ImportTextAsync(client, cancellationToken);
+        using var summary = await PutWithCsrfAsync(client, $"/api/books/{uploaded.Id}/summary", cancellationToken);
+        summary.EnsureSuccessStatusCode();
+        using var note = await client.PostWithCsrfAsync(
+            $"/api/books/{uploaded.Id}/notes",
+            new CreateReadingNoteRequest("使用者自己的狀態矩陣筆記。", null),
+            cancellationToken);
+        note.EnsureSuccessStatusCode();
+        using var narration = await client.PostWithCsrfAsync(
+            $"/api/books/{uploaded.Id}/narrations/",
+            new CreateNarrationRequest(true),
+            cancellationToken);
+        narration.EnsureSuccessStatusCode();
+
+        using var syntheticResponse = await client.PostWithCsrfAsync(
+            "/api/books/",
+            new CreateBookRequest(
+                "沒有上傳來源的書目",
+                "測試作者",
+                "zh-TW",
+                "synthetic.txt",
+                [new CreateChapterRequest(1, "章節", "這段文字缺少持久化上傳來源。")]),
+            cancellationToken);
+        syntheticResponse.EnsureSuccessStatusCode();
+        var synthetic = await syntheticResponse.Content.ReadFromJsonAsync<BookDetailsResponse>(cancellationToken);
+        Assert.NotNull(synthetic);
+
+        using var response = await client.GetAsync("/api/library/status-matrix/", cancellationToken);
+        response.EnsureSuccessStatusCode();
+        var matrix = await response.Content.ReadFromJsonAsync<LibraryBookStatusResponse[]>(cancellationToken);
+
+        Assert.NotNull(matrix);
+        var uploadedStatus = Assert.Single(matrix, item => item.BookId == uploaded.Id);
+        Assert.True(uploadedStatus.AuthorizedTextAvailable);
+        Assert.True(uploadedStatus.ExtractiveSummaryAvailable);
+        Assert.Equal(1, uploadedStatus.ReadingNoteCount);
+        Assert.Equal("Queued", uploadedStatus.StoryVoiceNarrationStatus);
+        Assert.True(uploadedStatus.StoryVoiceNarrationMatchesAuthorizedText);
+        Assert.Equal("processing", uploadedStatus.State);
+
+        var blockedStatus = Assert.Single(matrix, item => item.BookId == synthetic.Id);
+        Assert.False(blockedStatus.AuthorizedTextAvailable);
+        Assert.Equal("blocked", blockedStatus.State);
+        Assert.Equal("authorized_text_required", blockedStatus.BlockedReason);
+    }
+
+    [Fact]
+    public async Task Matrix_prefers_active_current_content_but_keeps_old_audio_visible_after_unlink()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        var firstContent = await ImportTextAsync(client, cancellationToken);
+        var secondContent = await ImportTextAsync(client, cancellationToken);
+        Guid targetId;
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+            var ownerId = await db.Books
+                .Where(book => book.Id == firstContent.Id)
+                .Select(book => book.OwnerId!.Value)
+                .SingleAsync(cancellationToken);
+            var target = Book.CreateExternal(
+                ownerId,
+                "狀態矩陣連結目標",
+                "測試作者",
+                "zh-TW",
+                "test-provider",
+                $"matrix-{Guid.NewGuid():N}",
+                $"https://example.test/reader/{Guid.NewGuid():N}",
+                null);
+            db.Books.Add(target);
+            await db.SaveChangesAsync(cancellationToken);
+            targetId = target.Id;
+        }
+
+        using var firstLink = await PutWithCsrfAsync(
+            client,
+            $"/api/books/{targetId}/content-link",
+            new SetBookContentLinkRequest(firstContent.Id),
+            cancellationToken);
+        Assert.True(firstLink.IsSuccessStatusCode, await firstLink.Content.ReadAsStringAsync(cancellationToken));
+        using var firstCreate = await client.PostWithCsrfAsync(
+            $"/api/books/{targetId}/narrations/",
+            new CreateNarrationRequest(true),
+            cancellationToken);
+        var olderJob = await firstCreate.Content.ReadFromJsonAsync<NarrationJobResponse>(cancellationToken);
+        Assert.NotNull(olderJob);
+        using var firstCancel = await client.PostWithCsrfAsync(
+            $"/api/narrations/{olderJob.Id}/cancel",
+            new { },
+            cancellationToken);
+        firstCancel.EnsureSuccessStatusCode();
+
+        using var secondLink = await PutWithCsrfAsync(
+            client,
+            $"/api/books/{targetId}/content-link",
+            new SetBookContentLinkRequest(secondContent.Id),
+            cancellationToken);
+        secondLink.EnsureSuccessStatusCode();
+        using var newerCreate = await client.PostWithCsrfAsync(
+            $"/api/books/{targetId}/narrations/",
+            new CreateNarrationRequest(true),
+            cancellationToken);
+        newerCreate.EnsureSuccessStatusCode();
+
+        using var relink = await PutWithCsrfAsync(
+            client,
+            $"/api/books/{targetId}/content-link",
+            new SetBookContentLinkRequest(firstContent.Id),
+            cancellationToken);
+        relink.EnsureSuccessStatusCode();
+        using var requeue = await client.PostWithCsrfAsync(
+            $"/api/books/{targetId}/narrations/",
+            new CreateNarrationRequest(true),
+            cancellationToken);
+        var requeued = await requeue.Content.ReadFromJsonAsync<NarrationJobResponse>(cancellationToken);
+        Assert.NotNull(requeued);
+        Assert.Equal(olderJob.Id, requeued.Id);
+
+        var currentMatrix = await client.GetFromJsonAsync<LibraryBookStatusResponse[]>(
+            "/api/library/status-matrix/",
+            cancellationToken);
+        var currentStatus = Assert.Single(currentMatrix!, item => item.BookId == targetId);
+        Assert.Equal("Queued", currentStatus.StoryVoiceNarrationStatus);
+        Assert.True(currentStatus.StoryVoiceNarrationMatchesAuthorizedText);
+
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+            var job = await db.NarrationJobs.SingleAsync(item => item.Id == olderJob.Id, cancellationToken);
+            job.Claim("matrix-worker", DateTimeOffset.UtcNow.AddMinutes(20));
+            job.Complete("matrix/old-content.mp3", 42);
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        using var unlink = await DeleteWithCsrfAsync(
+            client,
+            $"/api/books/{targetId}/content-link",
+            cancellationToken);
+        unlink.EnsureSuccessStatusCode();
+
+        var unlinkedMatrix = await client.GetFromJsonAsync<LibraryBookStatusResponse[]>(
+            "/api/library/status-matrix/",
+            cancellationToken);
+        var unlinkedStatus = Assert.Single(unlinkedMatrix!, item => item.BookId == targetId);
+        Assert.False(unlinkedStatus.AuthorizedTextAvailable);
+        Assert.Equal("Completed", unlinkedStatus.StoryVoiceNarrationStatus);
+        Assert.False(unlinkedStatus.StoryVoiceNarrationMatchesAuthorizedText);
+        Assert.Equal("audio_ready", unlinkedStatus.State);
+        Assert.Equal("authorized_text_required", unlinkedStatus.BlockedReason);
+    }
+
+    [Fact]
+    public async Task Matrix_is_owner_scoped()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var owner = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        _ = await ImportTextAsync(owner, cancellationToken);
+        using var other = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+
+        var matrix = await other.GetFromJsonAsync<LibraryBookStatusResponse[]>(
+            "/api/library/status-matrix/",
+            cancellationToken);
+
+        Assert.NotNull(matrix);
+        Assert.Empty(matrix);
+    }
+
+    private static async Task<BookDetailsResponse> ImportTextAsync(
+        HttpClient client,
+        CancellationToken cancellationToken)
+    {
+        using var content = new MultipartFormDataContent();
+        var file = new ByteArrayContent(Encoding.UTF8.GetBytes("第一章\n自行撰寫的合法狀態矩陣測試正文。"));
+        file.Headers.ContentType = new MediaTypeHeaderValue("text/plain");
+        content.Add(file, "file", $"matrix-{Guid.NewGuid():N}.txt");
+        using var response = await client.PostMultipartWithCsrfAsync("/api/books/import", content, cancellationToken);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<BookDetailsResponse>(cancellationToken))!;
+    }
+
+    private static Task<HttpResponseMessage> PutWithCsrfAsync(
+        HttpClient client,
+        string requestUri,
+        CancellationToken cancellationToken) =>
+        client.SendWithCsrfAsync(
+            new HttpRequestMessage(HttpMethod.Put, requestUri),
+            cancellationToken);
+
+    private static async Task<HttpResponseMessage> PutWithCsrfAsync<T>(
+        HttpClient client,
+        string requestUri,
+        T body,
+        CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Put, requestUri)
+        {
+            Content = JsonContent.Create(body)
+        };
+        return await client.SendWithCsrfAsync(request, cancellationToken);
+    }
+
+    private static async Task<HttpResponseMessage> DeleteWithCsrfAsync(
+        HttpClient client,
+        string requestUri,
+        CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Delete, requestUri);
+        return await client.SendWithCsrfAsync(request, cancellationToken);
+    }
+}

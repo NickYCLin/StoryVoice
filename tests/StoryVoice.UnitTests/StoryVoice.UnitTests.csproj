@@ -22,5 +22,6 @@
   <ItemGroup>
     <ProjectReference Include="../../src/StoryVoice.Domain/StoryVoice.Domain.csproj" />
     <ProjectReference Include="../../src/StoryVoice.Infrastructure/StoryVoice.Infrastructure.csproj" />
+    <ProjectReference Include="../../src/StoryVoice.Worker/StoryVoice.Worker.csproj" />
   </ItemGroup>
 </Project>

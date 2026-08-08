@@ -27,6 +27,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
     {
         builder.UseEnvironment("Testing");
         builder.UseSetting("BookStorage:RootPath", _storageRoot);
+        builder.UseSetting("Narration:AudioRootPath", Path.Combine(_storageRoot, "audio"));
         builder.ConfigureServices(services =>
         {
             services.RemoveAll<DbContextOptions<StoryVoiceDbContext>>();

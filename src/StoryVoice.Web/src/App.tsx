@@ -6,6 +6,8 @@ import {
   type DeviceBookTags,
   type LibraryCatalogFilters,
 } from './libraryCatalog'
+import { NarrationPanel } from './NarrationPanel'
+import LibraryStatusMatrix from './LibraryStatusMatrix'
 
 type AuthSession = {
   authenticated: boolean
@@ -125,7 +127,7 @@ const pipeline = [
   ['01', '整理章節', '解析 EPUB／TXT，建立可閱讀的章節與書庫。', '目前可用'],
   ['02', '辨識角色', '建立 Character Bible，讓角色跨章節保持一致。', '開發中'],
   ['03', '導演演出', '決定說話者、情緒、語氣、停頓與節奏。', '開發中'],
-  ['04', '合成聲音', '透過可替換的 TTS Provider 生成多角色音訊。', '開發中'],
+  ['04', '合成聲音', '對合法正文建立單一神經語音；多角色演出仍在開發中。', '目前可用'],
 ]
 
 type AuthScreenProps = {
@@ -351,6 +353,7 @@ function BookInsightsPanel({ book, books, csrfToken, onBookUpdated }: BookInsigh
       setSummaryState('ready')
       setLinkState('ready')
       setLinkMessage(contentSelection ? '已明確連結這份合法正文。' : '已解除正文連結。')
+      onBookUpdated({ ...book, contentBookId: contentSelection || null })
     } catch (error) {
       setLinkState('error')
       setLinkMessage(error instanceof Error ? error.message : '正文連結失敗。')
@@ -1067,6 +1070,12 @@ function App() {
         </details>
 
         {libraryState === 'ready' && books.length > 0 && (
+          <LibraryStatusMatrix
+            refreshKey={books.map((book) => `${book.id}:${book.contentBookId ?? ''}`).join('|')}
+          />
+        )}
+
+        {libraryState === 'ready' && books.length > 0 && (
           <section aria-label="書庫整理工具" className="mb-6 rounded-3xl border border-white/[.07] bg-white/[.018] p-5 sm:p-6">
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               <label className="text-xs text-stone-500 sm:col-span-2 lg:col-span-1">
@@ -1243,6 +1252,7 @@ function App() {
                     key={selectedBook.id}
                     onBookUpdated={handleBookUpdated}
                   />
+                  <NarrationPanel book={selectedBook} csrfToken={authState.csrfToken} />
                   <div className="mt-5 space-y-3">
                     {selectedBook.chapters.length === 0 && selectedBook.sourceProvider === 'books-com-tw' && (
                       <div className="library-state min-h-52">

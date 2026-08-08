@@ -199,6 +199,8 @@ app.MapHealthChecks("/health/ready", new HealthCheckOptions
 app.MapAccountEndpoints();
 app.MapBookEndpoints();
 app.MapBookInsightEndpoints();
+app.MapNarrationEndpoints();
+app.MapLibraryStatusEndpoints();
 app.Run();
 
 public partial class Program;

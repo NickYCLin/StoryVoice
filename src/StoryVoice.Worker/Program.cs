@@ -10,6 +10,7 @@ builder.Services.AddSerilog((services, loggerConfiguration) => loggerConfigurati
     .Enrich.FromLogContext()
     .WriteTo.Console());
 builder.Services.AddStoryVoiceInfrastructure(builder.Configuration);
+builder.Services.AddSingleton<INarrationProvider, EdgeTtsNarrationProvider>();
 builder.Services.AddHostedService<StoryPipelineWorker>();
 
 var host = builder.Build();

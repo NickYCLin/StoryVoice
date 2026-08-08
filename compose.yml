@@ -38,9 +38,11 @@ services:
       ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=storyvoice;Username=storyvoice;Password=${POSTGRES_PASSWORD:-storyvoice_local}
       ConnectionStrings__Redis: redis:6379,abortConnect=false
       BookStorage__RootPath: /data/books
+      Narration__AudioRootPath: /data/audio
       Auth__DataProtectionKeysPath: /var/lib/storyvoice/data-protection-keys
     volumes:
       - book-storage:/data/books
+      - audio-storage:/data/audio:ro
       - data-protection-keys:/var/lib/storyvoice/data-protection-keys
     ports:
       - "127.0.0.1:${STORYVOICE_API_PORT:-8080}:8080"
@@ -65,12 +67,18 @@ services:
       DOTNET_ENVIRONMENT: Production
       ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=storyvoice;Username=storyvoice;Password=${POSTGRES_PASSWORD:-storyvoice_local}
       BookStorage__RootPath: /data/books
+      Narration__AudioRootPath: /data/audio
+      Narration__Voice: zh-TW-YunJheNeural
+      Narration__Rate: -5%
     volumes:
       - book-storage:/data/books
+      - audio-storage:/data/audio
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      api:
         condition: service_healthy
     restart: unless-stopped
 
@@ -96,4 +104,5 @@ volumes:
   postgres-data:
   redis-data:
   book-storage:
+  audio-storage:
   data-protection-keys:
