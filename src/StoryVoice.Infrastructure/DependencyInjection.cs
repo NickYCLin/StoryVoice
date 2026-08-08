@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using StoryVoice.Application.BookImports;
 using StoryVoice.Application.Books;
 using StoryVoice.Infrastructure.BookImports;
+using StoryVoice.Infrastructure.Identity;
 using StoryVoice.Infrastructure.Persistence;
 
 namespace StoryVoice.Infrastructure;
@@ -23,6 +24,7 @@ public static class DependencyInjection
             options.RootPath = configuration[$"{BookStorageOptions.SectionName}:RootPath"]
                 ?? options.RootPath);
         services.AddScoped<IBookRepository, BookRepository>();
+        services.AddScoped<CompanionTokenService>();
         services.AddSingleton<IBookImportParser, PlainTextBookParser>();
         services.AddSingleton<IBookImportParser, EpubBookParser>();
         services.AddSingleton<IBookFileStorage, LocalBookFileStorage>();

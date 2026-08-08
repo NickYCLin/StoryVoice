@@ -1,16 +1,23 @@
 using System.Text.Json.Serialization;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Serilog;
 using StackExchange.Redis;
 using StoryVoice.Api;
+using StoryVoice.Application.Authentication;
 using StoryVoice.Application.BookImports;
 using StoryVoice.Application.Books;
 using StoryVoice.Application.Bookshelves;
 using StoryVoice.Infrastructure;
 using StoryVoice.Infrastructure.Health;
+using StoryVoice.Infrastructure.Identity;
 using StoryVoice.Infrastructure.Persistence;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -32,6 +39,92 @@ builder.Services.AddScoped<IBooksComTwBookshelfService, BooksComTwBookshelfServi
 builder.Services.Configure<FormOptions>(options =>
     options.MultipartBodyLengthLimit = 10 * 1024 * 1024 + 64 * 1024);
 builder.Services.AddStoryVoiceInfrastructure(builder.Configuration);
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ICurrentUser, HttpCurrentUser>();
+builder.Services.AddAntiforgery(options =>
+{
+    options.HeaderName = "X-CSRF-TOKEN";
+    options.Cookie.Name = "StoryVoice.Antiforgery";
+    options.Cookie.SameSite = SameSiteMode.Strict;
+    options.Cookie.HttpOnly = true;
+    options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+});
+builder.Services.AddIdentityCore<ApplicationUser>(options =>
+    {
+        options.User.RequireUniqueEmail = true;
+        options.Password.RequiredLength = 10;
+        options.Password.RequireDigit = true;
+        options.Password.RequireLowercase = true;
+        options.Password.RequireUppercase = true;
+        options.Password.RequireNonAlphanumeric = true;
+        options.Lockout.AllowedForNewUsers = true;
+        options.Lockout.MaxFailedAccessAttempts = 5;
+        options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
+    })
+    .AddEntityFrameworkStores<StoryVoiceDbContext>()
+    .AddSignInManager();
+builder.Services.AddAuthentication(options =>
+    {
+        options.DefaultAuthenticateScheme = IdentityConstants.ApplicationScheme;
+        options.DefaultChallengeScheme = IdentityConstants.ApplicationScheme;
+        options.DefaultSignInScheme = IdentityConstants.ApplicationScheme;
+    })
+    .AddCookie(IdentityConstants.ApplicationScheme, options =>
+    {
+        options.Cookie.Name = "StoryVoice.Auth";
+        options.Cookie.HttpOnly = true;
+        options.Cookie.SameSite = SameSiteMode.Lax;
+        options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+        options.ExpireTimeSpan = TimeSpan.FromDays(7);
+        options.SlidingExpiration = true;
+        options.Events.OnRedirectToLogin = context =>
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            return Task.CompletedTask;
+        };
+        options.Events.OnRedirectToAccessDenied = context =>
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            return Task.CompletedTask;
+        };
+    })
+    .AddScheme<AuthenticationSchemeOptions, CompanionAuthenticationHandler>(
+        CompanionAuthenticationDefaults.Scheme,
+        _ => { });
+builder.Services.AddAuthorizationBuilder()
+    .AddPolicy(StoryVoicePolicies.UserSession, policy =>
+    {
+        policy.AddAuthenticationSchemes(IdentityConstants.ApplicationScheme);
+        policy.RequireAuthenticatedUser();
+    })
+    .AddPolicy(StoryVoicePolicies.BookshelfSync, policy =>
+    {
+        policy.AddAuthenticationSchemes(
+            IdentityConstants.ApplicationScheme,
+            CompanionAuthenticationDefaults.Scheme);
+        policy.RequireAuthenticatedUser();
+        policy.RequireAssertion(context =>
+            context.User.Identities.Any(identity =>
+                identity.IsAuthenticated &&
+                identity.AuthenticationType == IdentityConstants.ApplicationScheme) ||
+            context.User.HasClaim(
+                CompanionAuthenticationDefaults.ScopeClaim,
+                CompanionAuthenticationDefaults.BookshelfSyncScope));
+    });
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    options.ForwardLimit = 2;
+    options.KnownIPNetworks.Clear();
+    options.KnownProxies.Clear();
+});
+var dataProtectionKeysPath = builder.Configuration["Auth:DataProtectionKeysPath"];
+if (!string.IsNullOrWhiteSpace(dataProtectionKeysPath))
+{
+    builder.Services.AddDataProtection()
+        .SetApplicationName("StoryVoice")
+        .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeysPath));
+}
 
 var healthChecks = builder.Services.AddHealthChecks()
     .AddDbContextCheck<StoryVoiceDbContext>("postgres", tags: ["ready"]);
@@ -46,6 +139,8 @@ if (!builder.Environment.IsEnvironment("Testing"))
 }
 
 var app = builder.Build();
+
+app.UseForwardedHeaders();
 
 var configuredPathBase = builder.Configuration["ReverseProxy:PathBase"]?.TrimEnd('/');
 if (!string.IsNullOrWhiteSpace(configuredPathBase))
@@ -64,6 +159,8 @@ if (!string.IsNullOrWhiteSpace(configuredPathBase))
 
 app.UseSerilogRequestLogging();
 app.UseExceptionHandler();
+app.UseAuthentication();
+app.UseAuthorization();
 
 if (app.Environment.IsDevelopment())
 {
@@ -105,6 +202,7 @@ app.MapHealthChecks("/health/ready", new HealthCheckOptions
     }
 });
 
+app.MapAccountEndpoints();
 app.MapBookEndpoints();
 app.Run();
 

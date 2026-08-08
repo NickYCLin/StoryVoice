@@ -37,6 +37,8 @@ public sealed record BookSummaryResponse(
     string? ExternalSourceId,
     string? SourceUrl,
     string? CoverImageUrl,
+    bool? NativeTtsAvailable,
+    string? EbookLayout,
     DateTimeOffset? SourceSyncedAt);
 
 public sealed record BookDetailsResponse(
@@ -53,4 +55,6 @@ public sealed record BookDetailsResponse(
     string? ExternalSourceId,
     string? SourceUrl,
     string? CoverImageUrl,
+    bool? NativeTtsAvailable,
+    string? EbookLayout,
     DateTimeOffset? SourceSyncedAt);

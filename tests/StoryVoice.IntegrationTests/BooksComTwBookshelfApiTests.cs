@@ -10,8 +10,8 @@ public sealed class BooksComTwBookshelfApiTests(ApiFactory factory) : IClassFixt
     [Fact]
     public async Task Import_is_idempotent_and_refreshes_visible_metadata()
     {
-        using var client = factory.CreateClient();
         var cancellationToken = TestContext.Current.CancellationToken;
+        using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
         var firstRequest = new
         {
             books = new[]
@@ -22,8 +22,10 @@ public sealed class BooksComTwBookshelfApiTests(ApiFactory factory) : IClassFixt
                     title = "月下的第一本書",
                     author = "初始作者",
                     language = "zh-TW",
-                    sourceUrl = "https://viewer-ebook.books.com.tw/viewer/epub_v3/?book_uni_id=E050145360",
-                    coverImageUrl = "https://im1.book.com.tw/image/getImage?i=E050145360"
+                    sourceUrl = "https://viewer-ebook.books.com.tw/viewer/epub_v3/?book_uni_id=E050145360&access_token=provider-secret",
+                    coverImageUrl = "https://im1.book.com.tw/image/getImage?i=E050145360&signature=provider-secret",
+                    nativeTtsAvailable = (bool?)true,
+                    ebookLayout = (string?)"Reflowable"
                 },
                 new
                 {
@@ -32,12 +34,17 @@ public sealed class BooksComTwBookshelfApiTests(ApiFactory factory) : IClassFixt
                     author = "另一位作者",
                     language = "zh-TW",
                     sourceUrl = "https://www.books.com.tw/products/E050145361",
-                    coverImageUrl = "https://im2.book.com.tw/image/getImage?i=E050145361"
+                    coverImageUrl = "https://im2.book.com.tw/image/getImage?i=E050145361",
+                    nativeTtsAvailable = (bool?)null,
+                    ebookLayout = (string?)null
                 }
             }
         };
 
-        var firstResponse = await client.PostAsJsonAsync(ImportPath, firstRequest, cancellationToken);
+        var firstResponse = await client.PostWithCsrfAsync(
+            ImportPath,
+            firstRequest,
+            cancellationToken);
         var firstResult = await firstResponse.Content.ReadFromJsonAsync<ImportResultProbe>(cancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, firstResponse.StatusCode);
@@ -46,8 +53,17 @@ public sealed class BooksComTwBookshelfApiTests(ApiFactory factory) : IClassFixt
         Assert.Equal(0, firstResult.UpdatedCount);
         Assert.All(firstResult.Books, book => Assert.Equal("books-com-tw", book.SourceProvider));
         Assert.All(firstResult.Books, book => Assert.Equal("Linked", book.Status));
+        var ttsBook = Assert.Single(firstResult.Books, book => book.ExternalSourceId == "E050145360");
+        Assert.True(ttsBook.NativeTtsAvailable);
+        Assert.Equal("Reflowable", ttsBook.EbookLayout);
+        Assert.Equal(
+            "https://viewer-ebook.books.com.tw/viewer/epub_v3/?book_uni_id=E050145360",
+            ttsBook.SourceUrl);
+        Assert.Equal(
+            "https://im1.book.com.tw/image/getImage?i=E050145360",
+            ttsBook.CoverImageUrl);
 
-        var refreshResponse = await client.PostAsJsonAsync(ImportPath, new
+        var refreshResponse = await client.PostWithCsrfAsync(ImportPath, new
         {
             books = new[]
             {
@@ -58,7 +74,9 @@ public sealed class BooksComTwBookshelfApiTests(ApiFactory factory) : IClassFixt
                     author = "更新作者",
                     language = "zh-TW",
                     sourceUrl = "https://viewer-ebook.books.com.tw/viewer/epub_v3/?book_uni_id=E050145360",
-                    coverImageUrl = "https://im1.book.com.tw/image/getImage?i=E050145360-new"
+                    coverImageUrl = "https://im1.book.com.tw/image/getImage?i=E050145360-new",
+                    nativeTtsAvailable = false,
+                    ebookLayout = "Fixed"
                 }
             }
         }, cancellationToken);
@@ -71,14 +89,17 @@ public sealed class BooksComTwBookshelfApiTests(ApiFactory factory) : IClassFixt
         Assert.Single(refreshResult.Books);
         Assert.Equal("月下的第一本書（新版）", refreshResult.Books[0].Title);
         Assert.Equal("更新作者", refreshResult.Books[0].Author);
+        Assert.False(refreshResult.Books[0].NativeTtsAvailable);
+        Assert.Equal("Fixed", refreshResult.Books[0].EbookLayout);
     }
 
     [Fact]
     public async Task Import_rejects_non_books_com_tw_links()
     {
-        using var client = factory.CreateClient();
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
 
-        var response = await client.PostAsJsonAsync(ImportPath, new
+        var response = await client.PostWithCsrfAsync(ImportPath, new
         {
             books = new[]
             {
@@ -109,5 +130,7 @@ public sealed class BooksComTwBookshelfApiTests(ApiFactory factory) : IClassFixt
         string? SourceProvider,
         string? ExternalSourceId,
         string? SourceUrl,
-        string? CoverImageUrl);
+        string? CoverImageUrl,
+        bool? NativeTtsAvailable,
+        string? EbookLayout);
 }

@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using StoryVoice.Infrastructure.Persistence;
@@ -11,9 +12,11 @@ using StoryVoice.Infrastructure.Persistence;
 namespace StoryVoice.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(StoryVoiceDbContext))]
-    partial class StoryVoiceDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260808090526_AddAccountsAndBookOwnership")]
+    partial class AddAccountsAndBookOwnership
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -170,10 +173,6 @@ namespace StoryVoice.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<string>("EbookLayout")
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
-
                     b.Property<string>("ExternalSourceId")
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
@@ -187,9 +186,6 @@ namespace StoryVoice.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
-
-                    b.Property<bool?>("NativeTtsAvailable")
-                        .HasColumnType("boolean");
 
                     b.Property<string>("OriginalFileName")
                         .IsRequired()

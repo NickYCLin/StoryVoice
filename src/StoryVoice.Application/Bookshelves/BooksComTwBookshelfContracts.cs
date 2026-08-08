@@ -8,7 +8,9 @@ public sealed record BooksComTwBookMetadata(
     string? Author,
     string? Language,
     string SourceUrl,
-    string? CoverImageUrl);
+    string? CoverImageUrl,
+    bool? NativeTtsAvailable,
+    string? EbookLayout);
 
 public sealed record BooksComTwBookshelfImportRequest(
     IReadOnlyList<BooksComTwBookMetadata> Books);

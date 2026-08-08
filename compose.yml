@@ -38,8 +38,10 @@ services:
       ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=storyvoice;Username=storyvoice;Password=${POSTGRES_PASSWORD:-storyvoice_local}
       ConnectionStrings__Redis: redis:6379,abortConnect=false
       BookStorage__RootPath: /data/books
+      Auth__DataProtectionKeysPath: /var/lib/storyvoice/data-protection-keys
     volumes:
       - book-storage:/data/books
+      - data-protection-keys:/var/lib/storyvoice/data-protection-keys
     ports:
       - "127.0.0.1:${STORYVOICE_API_PORT:-8080}:8080"
     depends_on:
@@ -94,3 +96,4 @@ volumes:
   postgres-data:
   redis-data:
   book-storage:
+  data-protection-keys:

@@ -1,10 +1,13 @@
 using System.Text.RegularExpressions;
+using StoryVoice.Application.Authentication;
 using StoryVoice.Application.Books;
 using StoryVoice.Domain.Books;
 
 namespace StoryVoice.Application.Bookshelves;
 
-public sealed class BooksComTwBookshelfService(IBookRepository repository) : IBooksComTwBookshelfService
+public sealed class BooksComTwBookshelfService(
+    IBookRepository repository,
+    ICurrentUser currentUser) : IBooksComTwBookshelfService
 {
     public const string Provider = "books-com-tw";
     private const int MaximumBooksPerRequest = 200;
@@ -45,13 +48,16 @@ public sealed class BooksComTwBookshelfService(IBookRepository repository) : IBo
             if (book is null)
             {
                 book = Book.CreateExternal(
+                    currentUser.UserId,
                     metadata.Title,
                     metadata.Author,
                     metadata.Language,
                     Provider,
                     metadata.ExternalId,
                     metadata.SourceUrl,
-                    metadata.CoverImageUrl);
+                    metadata.CoverImageUrl,
+                    metadata.NativeTtsAvailable,
+                    metadata.EbookLayout);
                 await repository.AddAsync(book, cancellationToken);
                 createdCount++;
             }
@@ -62,7 +68,9 @@ public sealed class BooksComTwBookshelfService(IBookRepository repository) : IBo
                     metadata.Author,
                     metadata.Language,
                     metadata.SourceUrl,
-                    metadata.CoverImageUrl);
+                    metadata.CoverImageUrl,
+                    metadata.NativeTtsAvailable,
+                    metadata.EbookLayout);
                 updatedCount++;
             }
 
@@ -87,13 +95,31 @@ public sealed class BooksComTwBookshelfService(IBookRepository repository) : IBo
             Require(metadata.Title, "title", 500),
             Optional(metadata.Author, 300) ?? "未知作者",
             Optional(metadata.Language, 20) ?? "zh-TW",
-            ValidateBooksUrl(metadata.SourceUrl, "sourceUrl", allowAssetDomain: false),
+            ValidateBooksUrl(metadata.SourceUrl, "sourceUrl", externalId, allowAssetDomain: false),
             string.IsNullOrWhiteSpace(metadata.CoverImageUrl)
                 ? null
-                : ValidateBooksUrl(metadata.CoverImageUrl, "coverImageUrl", allowAssetDomain: true));
+                : ValidateBooksUrl(metadata.CoverImageUrl, "coverImageUrl", externalId, allowAssetDomain: true),
+            metadata.NativeTtsAvailable,
+            ParseEbookLayout(metadata.EbookLayout));
     }
 
-    private static string ValidateBooksUrl(string value, string fieldName, bool allowAssetDomain)
+    private static EbookLayout? ParseEbookLayout(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        return Enum.TryParse<EbookLayout>(value.Trim(), ignoreCase: true, out var layout)
+            ? layout
+            : throw new ArgumentException("ebookLayout 只接受 Reflowable 或 Fixed。", nameof(value));
+    }
+
+    private static string ValidateBooksUrl(
+        string value,
+        string fieldName,
+        string externalId,
+        bool allowAssetDomain)
     {
         var normalized = Require(value, fieldName, 2_000);
         var isBooksDomain = false;
@@ -115,7 +141,24 @@ public sealed class BooksComTwBookshelfService(IBookRepository repository) : IBo
             throw new ArgumentException($"{fieldName} 必須是安全的博客來 HTTPS 網址。", fieldName);
         }
 
-        return uri.AbsoluteUri;
+        var sanitized = new UriBuilder(uri)
+        {
+            Fragment = string.Empty,
+            Query = string.Empty
+        };
+        if (!allowAssetDomain &&
+            uri.Host.Equals("viewer-ebook.books.com.tw", StringComparison.OrdinalIgnoreCase) &&
+            uri.AbsolutePath.StartsWith("/viewer/", StringComparison.OrdinalIgnoreCase))
+        {
+            sanitized.Query = $"book_uni_id={Uri.EscapeDataString(externalId)}";
+        }
+        else if (allowAssetDomain && isAssetDomain &&
+                 uri.AbsolutePath.StartsWith("/image/getImage", StringComparison.OrdinalIgnoreCase))
+        {
+            sanitized.Query = $"i={Uri.EscapeDataString(externalId)}";
+        }
+
+        return sanitized.Uri.AbsoluteUri;
     }
 
     private static string Require(string? value, string fieldName, int maximumLength)
@@ -156,5 +199,7 @@ public sealed class BooksComTwBookshelfService(IBookRepository repository) : IBo
         string Author,
         string Language,
         string SourceUrl,
-        string? CoverImageUrl);
+        string? CoverImageUrl,
+        bool? NativeTtsAvailable,
+        EbookLayout? EbookLayout);
 }

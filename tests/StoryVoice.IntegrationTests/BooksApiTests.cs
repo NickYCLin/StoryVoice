@@ -9,7 +9,8 @@ public sealed class BooksApiTests(ApiFactory factory) : IClassFixture<ApiFactory
     [Fact]
     public async Task Create_then_read_book_preserves_chapters()
     {
-        using var client = factory.CreateClient();
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
         var request = new CreateBookRequest(
             "月下故事",
             "比比工程師",
@@ -17,8 +18,10 @@ public sealed class BooksApiTests(ApiFactory factory) : IClassFixture<ApiFactory
             "story.epub",
             [new CreateChapterRequest(1, "序章", "故事從月色裡開始。")]);
 
-        var cancellationToken = TestContext.Current.CancellationToken;
-        var createResponse = await client.PostAsJsonAsync("/api/books", request, cancellationToken);
+        var createResponse = await client.PostWithCsrfAsync(
+            "/api/books",
+            request,
+            cancellationToken);
         var created = await createResponse.Content.ReadFromJsonAsync<BookDetailsResponse>(cancellationToken);
 
         Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
@@ -37,7 +40,8 @@ public sealed class BooksApiTests(ApiFactory factory) : IClassFixture<ApiFactory
     [Fact]
     public async Task Unknown_book_returns_not_found()
     {
-        using var client = factory.CreateClient();
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
 
         var response = await client.GetAsync(
             $"/api/books/{Guid.NewGuid()}",
@@ -49,7 +53,8 @@ public sealed class BooksApiTests(ApiFactory factory) : IClassFixture<ApiFactory
     [Fact]
     public async Task Create_book_uses_allowed_forwarded_prefix_in_location_header()
     {
-        using var client = factory.CreateClient();
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
         using var request = new HttpRequestMessage(HttpMethod.Post, "/api/books")
         {
             Content = JsonContent.Create(new CreateBookRequest(
@@ -61,7 +66,9 @@ public sealed class BooksApiTests(ApiFactory factory) : IClassFixture<ApiFactory
         };
         request.Headers.Add("X-Forwarded-Prefix", "/StoryVoice");
 
-        var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
+        var response = await client.SendWithCsrfAsync(
+            request,
+            cancellationToken);
         var created = await response.Content.ReadFromJsonAsync<BookDetailsResponse>(
             TestContext.Current.CancellationToken);
 
@@ -73,7 +80,8 @@ public sealed class BooksApiTests(ApiFactory factory) : IClassFixture<ApiFactory
     [Fact]
     public async Task Create_book_ignores_unconfigured_forwarded_prefix()
     {
-        using var client = factory.CreateClient();
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
         using var request = new HttpRequestMessage(HttpMethod.Post, "/api/books")
         {
             Content = JsonContent.Create(new CreateBookRequest(
@@ -85,7 +93,9 @@ public sealed class BooksApiTests(ApiFactory factory) : IClassFixture<ApiFactory
         };
         request.Headers.Add("X-Forwarded-Prefix", "/untrusted");
 
-        var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
+        var response = await client.SendWithCsrfAsync(
+            request,
+            cancellationToken);
         var created = await response.Content.ReadFromJsonAsync<BookDetailsResponse>(
             TestContext.Current.CancellationToken);
 

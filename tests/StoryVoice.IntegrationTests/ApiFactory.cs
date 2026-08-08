@@ -10,6 +10,11 @@ namespace StoryVoice.IntegrationTests;
 
 public sealed class ApiFactory : WebApplicationFactory<Program>
 {
+    static ApiFactory()
+    {
+        Environment.SetEnvironmentVariable("DOTNET_HOSTBUILDER__RELOADCONFIGONCHANGE", "false");
+    }
+
     private readonly string _databaseName = $"storyvoice-tests-{Guid.NewGuid()}";
     private readonly string _storageRoot = Path.Combine(
         Path.GetTempPath(),

@@ -1,4 +1,15 @@
-import { useEffect, useState, type CSSProperties, type FormEvent } from 'react'
+import { useCallback, useEffect, useState, type CSSProperties, type FormEvent } from 'react'
+
+type AuthSession = {
+  authenticated: boolean
+  email: string | null
+  csrfToken: string
+}
+
+type AuthState =
+  | { status: 'loading' | 'error'; email: null; csrfToken: string }
+  | { status: 'anonymous'; email: null; csrfToken: string }
+  | { status: 'authenticated'; email: string; csrfToken: string }
 
 type BookSummary = {
   id: string
@@ -13,6 +24,8 @@ type BookSummary = {
   externalSourceId: string | null
   sourceUrl: string | null
   coverImageUrl: string | null
+  nativeTtsAvailable: boolean | null
+  ebookLayout: 'Reflowable' | 'Fixed' | null
   sourceSyncedAt: string | null
 }
 
@@ -41,7 +54,115 @@ const pipeline = [
   ['04', '合成聲音', '透過可替換的 TTS Provider 生成多角色音訊。', '開發中'],
 ]
 
+type AuthScreenProps = {
+  csrfToken: string
+  onAuthenticated: () => Promise<void>
+}
+
+function AuthScreen({ csrfToken, onAuthenticated }: AuthScreenProps) {
+  const [mode, setMode] = useState<'login' | 'register'>('login')
+  const [state, setState] = useState<LoadState>('idle')
+  const [message, setMessage] = useState('')
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const form = event.currentTarget
+    const formData = new FormData(form)
+    const email = String(formData.get('email') ?? '').trim()
+    const password = String(formData.get('password') ?? '')
+    const rememberMe = formData.get('rememberMe') === 'on'
+    setState('loading')
+    setMessage(mode === 'login' ? '正在登入你的 StoryVoice…' : '正在建立你的 StoryVoice 帳號…')
+
+    try {
+      const authEndpoint = mode === 'login' ? '/api/auth/login' : '/api/auth/register'
+      const response = await fetch(apiUrl(authEndpoint), {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken },
+        body: JSON.stringify({ email, password, rememberMe }),
+      })
+      if (!response.ok) {
+        const problem = await response.json().catch(() => null) as {
+          detail?: string
+          errors?: Record<string, string[]>
+        } | null
+        const validationMessage = problem?.errors
+          ? Object.values(problem.errors).flat()[0]
+          : null
+        throw new Error(validationMessage ?? problem?.detail ?? (response.status === 401 ? '電子郵件或密碼不正確。' : `登入失敗（${response.status}）`))
+      }
+
+      await onAuthenticated()
+    } catch (error) {
+      setState('error')
+      setMessage(error instanceof Error ? error.message : '帳號操作失敗，請稍後再試。')
+    }
+  }
+
+  return (
+    <main className="relative grid min-h-screen place-items-center overflow-hidden bg-[#09070d] px-5 py-12 text-[#f7f2ea]">
+      <div className="ambient ambient-one" aria-hidden="true" />
+      <div className="ambient ambient-two" aria-hidden="true" />
+      <section className="relative z-10 grid w-full max-w-5xl overflow-hidden rounded-[2rem] border border-white/10 bg-[#100d15]/90 shadow-2xl shadow-black/50 backdrop-blur-xl lg:grid-cols-[1.05fr_.95fr]">
+        <div className="border-b border-white/[.07] p-8 sm:p-12 lg:border-b-0 lg:border-r">
+          <div className="flex items-center gap-3">
+            <span className="grid h-12 w-12 place-items-center rounded-2xl border border-amber-300/20 bg-amber-100/10 font-serif text-lg text-amber-200">SV</span>
+            <div>
+              <strong className="block font-serif text-xl">StoryVoice</strong>
+              <span className="text-[10px] uppercase tracking-[.26em] text-stone-500">Your private story library</span>
+            </div>
+          </div>
+          <p className="eyebrow mt-14">Step 1</p>
+          <h1 className="mt-4 max-w-xl font-serif text-4xl leading-tight sm:text-5xl">先登入 StoryVoice，<span className="text-amber-200">再連接自己的書櫃。</span></h1>
+          <p className="mt-6 max-w-xl text-sm leading-7 text-stone-400">每個帳號都有獨立書庫。StoryVoice 只保存你主動匯入的檔案與書目，不會接收博客來帳密、Cookie 或受 DRM 保護的內文。</p>
+          <ol className="mt-10 space-y-4 text-sm text-stone-400">
+            <li><span className="mr-3 text-amber-200">01</span>登入或建立 StoryVoice 帳號</li>
+            <li><span className="mr-3 text-orange-200">02</span>登入自己的博客來官方書櫃</li>
+            <li><span className="mr-3 text-rose-200">03</span>用 Companion 同步已呈現的書目</li>
+          </ol>
+        </div>
+
+        <div className="p-8 sm:p-12">
+          <div className="flex rounded-full border border-white/[.08] bg-black/20 p-1">
+            <button className={`auth-tab ${mode === 'login' ? 'active' : ''}`} onClick={() => { setMode('login'); setMessage('') }} type="button">登入</button>
+            <button className={`auth-tab ${mode === 'register' ? 'active' : ''}`} onClick={() => { setMode('register'); setMessage('') }} type="button">建立帳號</button>
+          </div>
+          <h2 className="mt-9 font-serif text-3xl">{mode === 'login' ? '登入 StoryVoice' : '建立 StoryVoice 帳號'}</h2>
+          <p className="mt-2 text-sm text-stone-500">{mode === 'login' ? '回到你的個人故事書庫。' : '使用電子郵件建立獨立書庫。'}</p>
+
+          <form className="mt-8 space-y-5" onSubmit={handleSubmit}>
+            <label className="block text-sm text-stone-300">
+              電子郵件
+              <input autoComplete="email" className="auth-input mt-2" name="email" required type="email" />
+            </label>
+            <label className="block text-sm text-stone-300">
+              密碼
+              <input autoComplete={mode === 'login' ? 'current-password' : 'new-password'} className="auth-input mt-2" minLength={10} name="password" required type="password" />
+            </label>
+            {mode === 'register' && <p className="text-xs leading-6 text-stone-600">至少 10 字元，並包含大小寫英文字母、數字與符號。</p>}
+            {mode === 'login' && (
+              <label className="flex items-center gap-2 text-xs text-stone-500">
+                <input className="h-4 w-4 accent-amber-300" name="rememberMe" type="checkbox" />
+                在這台裝置保持登入
+              </label>
+            )}
+            <button className="primary-button w-full disabled:cursor-wait disabled:opacity-60" disabled={state === 'loading'} type="submit">
+              {state === 'loading' ? '請稍候…' : mode === 'login' ? '登入 StoryVoice' : '建立帳號並登入'}
+            </button>
+            <p className={`min-h-6 text-sm ${state === 'error' ? 'text-rose-300' : 'text-stone-500'}`} role="status">{message}</p>
+          </form>
+        </div>
+      </section>
+    </main>
+  )
+}
+
 function App() {
+  const [authState, setAuthState] = useState<AuthState>({ status: 'loading', email: null, csrfToken: '' })
+  const [companionToken, setCompanionToken] = useState('')
+  const [companionTokenState, setCompanionTokenState] = useState<LoadState>('idle')
+  const [companionTokenMessage, setCompanionTokenMessage] = useState('')
   const [books, setBooks] = useState<BookSummary[]>([])
   const [libraryState, setLibraryState] = useState<'loading' | 'ready' | 'error'>('loading')
   const [selectedBookId, setSelectedBookId] = useState<string | null>(null)
@@ -50,10 +171,32 @@ function App() {
   const [uploadState, setUploadState] = useState<LoadState>('idle')
   const [uploadMessage, setUploadMessage] = useState('')
 
-  useEffect(() => {
-    const controller = new AbortController()
+  const loadAuthSession = useCallback(async () => {
+    try {
+      const response = await fetch(apiUrl('/api/auth/session'), { credentials: 'same-origin' })
+      if (!response.ok) throw new Error(`Auth API returned ${response.status}`)
+      const session = await response.json() as AuthSession
+      if (session.authenticated && session.email) {
+        setAuthState({ status: 'authenticated', email: session.email, csrfToken: session.csrfToken })
+      } else {
+        setAuthState({ status: 'anonymous', email: null, csrfToken: session.csrfToken })
+      }
+    } catch {
+      setAuthState({ status: 'error', email: null, csrfToken: '' })
+    }
+  }, [])
 
-    fetch(apiUrl('/api/books'), { signal: controller.signal })
+  useEffect(() => {
+    void loadAuthSession()
+  }, [loadAuthSession])
+
+  useEffect(() => {
+    if (authState.status !== 'authenticated') return
+
+    const controller = new AbortController()
+    setLibraryState('loading')
+
+    fetch(apiUrl('/api/books'), { signal: controller.signal, credentials: 'same-origin' })
       .then((response) => {
         if (!response.ok) throw new Error(`API returned ${response.status}`)
         return response.json() as Promise<BookSummary[]>
@@ -69,10 +212,10 @@ function App() {
       })
 
     return () => controller.abort()
-  }, [])
+  }, [authState.status])
 
   useEffect(() => {
-    if (!selectedBookId) {
+    if (authState.status !== 'authenticated' || !selectedBookId) {
       setSelectedBook(null)
       setDetailState('idle')
       return
@@ -80,7 +223,10 @@ function App() {
 
     const controller = new AbortController()
     setDetailState('loading')
-    fetch(apiUrl(`/api/books/${selectedBookId}`), { signal: controller.signal })
+    fetch(apiUrl(`/api/books/${selectedBookId}`), {
+      signal: controller.signal,
+      credentials: 'same-origin',
+    })
       .then((response) => {
         if (!response.ok) throw new Error(`API returned ${response.status}`)
         return response.json() as Promise<BookDetails>
@@ -95,10 +241,12 @@ function App() {
       })
 
     return () => controller.abort()
-  }, [selectedBookId])
+  }, [authState.status, selectedBookId])
 
   async function handleUpload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (authState.status !== 'authenticated') return
+
     const form = event.currentTarget
     const formData = new FormData(form)
     const file = formData.get('file')
@@ -116,14 +264,19 @@ function App() {
     setUploadState('loading')
     setUploadMessage('正在解析章節並存入書庫…')
     try {
-      const response = await fetch(apiUrl('/api/books/import'), { method: 'POST', body: formData })
+      const response = await fetch(apiUrl('/api/books/import'), {
+        method: 'POST',
+        body: formData,
+        credentials: 'same-origin',
+        headers: { 'X-CSRF-TOKEN': authState.csrfToken },
+      })
       if (!response.ok) {
         const problem = await response.json().catch(() => null) as { detail?: string; title?: string } | null
         throw new Error(problem?.detail ?? problem?.title ?? `匯入失敗（${response.status}）`)
       }
 
       const imported = await response.json() as BookDetails
-      const listResponse = await fetch(apiUrl('/api/books'))
+      const listResponse = await fetch(apiUrl('/api/books'), { credentials: 'same-origin' })
       if (!listResponse.ok) throw new Error(`書庫重新整理失敗（${listResponse.status}）`)
       const items = await listResponse.json() as BookSummary[]
       setBooks(items)
@@ -140,6 +293,91 @@ function App() {
     }
   }
 
+  async function handleIssueCompanionToken() {
+    if (authState.status !== 'authenticated') return
+
+    setCompanionToken('')
+    setCompanionTokenState('loading')
+    setCompanionTokenMessage('正在建立只限書櫃同步的連線金鑰…')
+    try {
+      const response = await fetch(apiUrl('/api/auth/companion-token'), {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': authState.csrfToken },
+        body: JSON.stringify({}),
+      })
+      const body = await response.json().catch(() => null) as {
+        accessToken?: string
+        expiresAt?: string
+        detail?: string
+      } | null
+      if (!response.ok || !body?.accessToken) {
+        throw new Error(body?.detail ?? `建立連線金鑰失敗（${response.status}）`)
+      }
+
+      setCompanionToken(body.accessToken)
+      setCompanionTokenState('ready')
+      const expiresAt = body.expiresAt ? new Date(body.expiresAt).toLocaleString('zh-TW') : '7 天後'
+      setCompanionTokenMessage(`請立即複製到 Companion；有效期限至 ${expiresAt}。`)
+    } catch (error) {
+      setCompanionTokenState('error')
+      setCompanionTokenMessage(error instanceof Error ? error.message : '建立連線金鑰失敗。')
+    }
+  }
+
+  async function handleCopyCompanionToken() {
+    if (!companionToken) return
+    try {
+      await navigator.clipboard.writeText(companionToken)
+      setCompanionTokenMessage('連線金鑰已複製；請貼到 Companion。')
+    } catch {
+      setCompanionTokenMessage('瀏覽器不允許自動複製，請手動選取金鑰。')
+    }
+  }
+
+  async function handleRevokeCompanionTokens() {
+    if (authState.status !== 'authenticated') return
+
+    setCompanionTokenState('loading')
+    setCompanionTokenMessage('正在撤銷 Companion 連線金鑰…')
+    try {
+      const response = await fetch(apiUrl('/api/auth/companion-token/revoke'), {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': authState.csrfToken },
+        body: JSON.stringify({}),
+      })
+      if (!response.ok) throw new Error(`撤銷失敗（${response.status}）`)
+      setCompanionToken('')
+      setCompanionTokenState('ready')
+      setCompanionTokenMessage('所有 Companion 連線金鑰已撤銷。')
+    } catch (error) {
+      setCompanionTokenState('error')
+      setCompanionTokenMessage(error instanceof Error ? error.message : '撤銷連線金鑰失敗。')
+    }
+  }
+
+  async function handleLogout() {
+    if (authState.status !== 'authenticated') return
+
+    const response = await fetch(apiUrl('/api/auth/logout'), {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': authState.csrfToken },
+      body: JSON.stringify({}),
+    })
+    if (!response.ok) return
+
+    setBooks([])
+    setSelectedBookId(null)
+    setSelectedBook(null)
+    setCompanionToken('')
+    setCompanionTokenState('idle')
+    setCompanionTokenMessage('')
+    setAuthState({ status: 'loading', email: null, csrfToken: '' })
+    await loadAuthSession()
+  }
+
   async function handleLibraryRefresh() {
     setLibraryState('loading')
     try {
@@ -152,6 +390,18 @@ function App() {
     } catch {
       setLibraryState('error')
     }
+  }
+
+  if (authState.status === 'loading') {
+    return <main className="grid min-h-screen place-items-center bg-[#09070d] text-stone-400">正在確認 StoryVoice 登入狀態…</main>
+  }
+
+  if (authState.status === 'error') {
+    return <main className="grid min-h-screen place-items-center bg-[#09070d] px-6 text-center text-rose-200">無法連接登入服務，請重新整理頁面。</main>
+  }
+
+  if (authState.status === 'anonymous') {
+    return <AuthScreen csrfToken={authState.csrfToken} onAuthenticated={loadAuthSession} />
   }
 
   return (
@@ -175,6 +425,12 @@ function App() {
             <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,.85)]" />
             書庫功能可用
           </span>
+          {authState.status === 'authenticated' && (
+            <span className="hidden max-w-52 truncate text-xs text-stone-500 md:inline">{authState.email}</span>
+          )}
+          {authState.status === 'authenticated' && (
+            <button className="rounded-full border border-white/10 px-4 py-2 text-sm text-stone-300 transition hover:border-rose-300/30 hover:text-rose-200" onClick={handleLogout} type="button">登出</button>
+          )}
           <a
             className="rounded-full border border-white/10 bg-white/[.04] px-4 py-2 text-sm text-stone-200 transition hover:border-amber-300/30 hover:bg-amber-200/[.06]"
             href="https://github.com/NickYCLin/StoryVoice"
@@ -323,14 +579,35 @@ function App() {
             <span><strong className="font-semibold text-stone-200">進階：同步博客來書櫃書目</strong><span className="ml-2 text-stone-600">不含受保護內文</span></span>
             <span className="text-stone-600 transition group-open:rotate-45">＋</span>
           </summary>
-          <div className="grid gap-6 border-t border-white/[.06] px-5 py-6 sm:px-6 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+          <div className="grid gap-6 border-t border-white/[.06] px-5 py-6 sm:px-6 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
             <div className="min-w-0">
-              <p className="text-sm leading-7 text-stone-400">這條路只同步書名、作者、封面與官方閱讀連結，不會把電子書內文匯入 StoryVoice。第一次使用建議先走上方的直接上傳。</p>
+              <p className="text-sm leading-7 text-stone-400">這條路只同步書名、作者、封面、官方閱讀連結，以及頁面明確標示的版型／官方 TTS 狀態；不會把電子書內文匯入 StoryVoice。</p>
               <ol className="mt-4 grid gap-2 text-xs text-stone-500 sm:grid-cols-3">
                 <li><span className="mr-2 text-orange-200/70">01</span>登入博客來官方書櫃</li>
-                <li><span className="mr-2 text-orange-200/70">02</span>用 Companion 勾選同步</li>
-                <li><span className="mr-2 text-orange-200/70">03</span>回來重新整理書庫</li>
+                <li><span className="mr-2 text-orange-200/70">02</span>建立金鑰並貼到 Companion</li>
+                <li><span className="mr-2 text-orange-200/70">03</span>勾選同步後重新整理</li>
               </ol>
+              <div className="mt-5 rounded-2xl border border-orange-300/15 bg-orange-300/[.035] p-4">
+                <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+                  <div>
+                    <strong className="text-sm text-stone-200">StoryVoice 連線金鑰</strong>
+                    <p className="mt-1 text-xs leading-5 text-stone-500">只允許 Companion 把 metadata 同步到你的帳號；重新建立會撤銷舊金鑰。</p>
+                  </div>
+                  <div className="flex shrink-0 flex-wrap gap-2">
+                    <button className="secondary-button disabled:cursor-wait disabled:opacity-60" disabled={companionTokenState === 'loading'} onClick={handleIssueCompanionToken} type="button">
+                      {companionTokenState === 'loading' ? '處理中…' : companionToken ? '重新建立金鑰' : '建立連線金鑰'}
+                    </button>
+                    <button className="secondary-button disabled:cursor-wait disabled:opacity-60" disabled={companionTokenState === 'loading'} onClick={handleRevokeCompanionTokens} type="button">撤銷所有金鑰</button>
+                  </div>
+                </div>
+                {companionToken && (
+                  <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                    <input aria-label="只顯示一次的 StoryVoice 連線金鑰" className="auth-input min-w-0 flex-1 font-mono text-xs" readOnly type="text" value={companionToken} />
+                    <button className="secondary-button shrink-0" onClick={handleCopyCompanionToken} type="button">複製金鑰</button>
+                  </div>
+                )}
+                <p className={`mt-2 min-h-5 text-xs ${companionTokenState === 'error' ? 'text-rose-300' : 'text-stone-500'}`} role="status">{companionTokenMessage || '金鑰只會在建立當下顯示；請貼到 Companion 後再同步。'}</p>
+              </div>
             </div>
             <div className="grid gap-3 sm:grid-cols-3 lg:w-52 lg:grid-cols-1">
               <a className="secondary-button text-center" href="https://viewer-ebook.books.com.tw/viewer/index.html?readlist=all" rel="noreferrer" target="_blank">開啟官方書櫃 ↗</a>
@@ -374,6 +651,7 @@ function App() {
                     <p className="mt-1 truncate text-sm text-stone-500">{book.author}</p>
                     <div className="mt-7 flex flex-wrap items-center gap-3 text-xs text-stone-600">
                       <span>{book.chapterCount} 章</span><span>·</span><span>{book.sourceProvider === 'books-com-tw' ? '博客來' : book.fileType.toUpperCase()}</span><span>·</span><span>{book.status === 'Linked' ? '已連結' : book.status}</span>
+                      {book.nativeTtsAvailable === true && <><span>·</span><span className="text-emerald-300/80">官方 TTS</span></>}
                     </div>
                   </div>
                 </button>
@@ -390,6 +668,13 @@ function App() {
                       <p className="eyebrow">{selectedBook.sourceProvider === 'books-com-tw' ? 'Books.com.tw linked book' : 'Selected story'}</p>
                       <h3 className="mt-2 break-words font-serif text-3xl text-stone-100">{selectedBook.title}</h3>
                       <p className="mt-2 text-sm text-stone-500">{selectedBook.author} · {selectedBook.language} · {selectedBook.sourceProvider === 'books-com-tw' ? '博客來書櫃' : selectedBook.fileType.toUpperCase()}</p>
+                      {selectedBook.sourceProvider === 'books-com-tw' && (
+                        <p className="mt-2 text-xs text-stone-600">
+                          {selectedBook.ebookLayout === 'Reflowable' ? 'EPUB 流動版型' : selectedBook.ebookLayout === 'Fixed' ? 'EPUB 固定版型' : '版型未標示'}
+                          {' · '}
+                          {selectedBook.nativeTtsAvailable === true ? '博客來官方 TTS 可用' : selectedBook.nativeTtsAvailable === false ? '博客來官方 TTS 未開放' : '官方 TTS 狀態未標示'}
+                        </p>
+                      )}
                       {selectedBook.sourceUrl && (
                         <a className="mt-4 inline-flex text-sm text-orange-200 transition hover:text-orange-100" href={selectedBook.sourceUrl} rel="noreferrer" target="_blank">回博客來官方閱讀器 ↗</a>
                       )}
@@ -401,8 +686,8 @@ function App() {
                       <div className="library-state min-h-52">
                         <div>
                           <span className="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-2xl border border-orange-300/20 bg-orange-300/[.06] text-orange-200">↗</span>
-                          <h4 className="font-serif text-xl text-stone-200">書櫃資料已連結，內文仍在博客來</h4>
-                          <p className="mx-auto mt-3 max-w-md text-sm leading-7 text-stone-500">StoryVoice 不會抓取或解密受保護內容。要進行故事分析，請另外匯入你有權處理的無 DRM EPUB／TXT。</p>
+                          <h4 className="font-serif text-xl text-stone-200">{selectedBook.nativeTtsAvailable === true ? '這本書可用博客來官方 TTS' : '書櫃資料已連結，內文仍在博客來'}</h4>
+                          <p className="mx-auto mt-3 max-w-md text-sm leading-7 text-stone-500">{selectedBook.nativeTtsAvailable === true ? '請從上方官方連結開啟博客來 App／閱讀器使用授權朗讀；StoryVoice 不會接收書籍正文。' : 'StoryVoice 不會抓取或解密受保護內容。要進行故事分析，請另外匯入你有權處理的無 DRM EPUB／TXT。'}</p>
                           <a className="mt-5 inline-flex text-sm text-amber-200" href="#book-file">前往合法檔案匯入 ↑</a>
                         </div>
                       </div>

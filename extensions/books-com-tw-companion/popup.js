@@ -1,7 +1,9 @@
 import { validateStoryVoiceOrigin } from './storyvoice-origin.mjs'
+import { validateCompanionToken } from './companion-token.mjs'
 
 const state = { books: [] }
 const originInput = document.querySelector('#storyvoice-origin')
+const tokenInput = document.querySelector('#storyvoice-access-token')
 const count = document.querySelector('#count')
 const bookList = document.querySelector('#book-list')
 const status = document.querySelector('#status')
@@ -59,7 +61,17 @@ function renderBooks(books) {
     title.textContent = book.title
     title.title = book.title
     const author = document.createElement('small')
-    author.textContent = book.author
+    const ttsLabel = book.nativeTtsAvailable === true
+      ? ' · 官方 TTS'
+      : book.nativeTtsAvailable === false
+        ? ' · 未開放 TTS'
+        : ''
+    const layoutLabel = book.ebookLayout === 'Reflowable'
+      ? ' · 流動版'
+      : book.ebookLayout === 'Fixed'
+        ? ' · 固定版'
+        : ''
+    author.textContent = `${book.author}${ttsLabel}${layoutLabel}`
     copy.append(title, author)
     label.append(checkbox, cover, copy)
     bookList.append(label)
@@ -110,7 +122,11 @@ async function syncBooks() {
   setStatus('正在同步 metadata 到 StoryVoice…')
   try {
     const origin = validateStoryVoiceOrigin(originInput.value.trim())
-    await chrome.storage.local.set({ storyVoiceOrigin: origin })
+    const accessToken = validateCompanionToken(tokenInput.value)
+    await chrome.storage.local.set({
+      storyVoiceOrigin: origin,
+      storyVoiceAccessToken: accessToken
+    })
     let createdCount = 0
     let updatedCount = 0
     for (let offset = 0; offset < books.length; offset += IMPORT_BATCH_SIZE) {
@@ -120,11 +136,19 @@ async function syncBooks() {
         method: 'POST',
         credentials: 'omit',
         referrerPolicy: 'no-referrer',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`
+        },
         body: JSON.stringify({ books: batch })
       })
       const body = await response.json().catch(() => null)
-      if (!response.ok) throw new Error(body?.detail ?? `StoryVoice 回傳 ${response.status}`)
+      if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error('StoryVoice 連線金鑰已失效；請登入 StoryVoice 重新建立。')
+        }
+        throw new Error(body?.detail ?? `StoryVoice 回傳 ${response.status}`)
+      }
       createdCount += body.createdCount
       updatedCount += body.updatedCount
     }
@@ -148,7 +172,22 @@ originInput.addEventListener('change', () => {
   }
 })
 
-chrome.storage.local.get('storyVoiceOrigin').then(({ storyVoiceOrigin }) => {
+tokenInput.addEventListener('change', async () => {
+  try {
+    const accessToken = validateCompanionToken(tokenInput.value)
+    tokenInput.value = accessToken
+    await chrome.storage.local.set({ storyVoiceAccessToken: accessToken })
+    setStatus('StoryVoice 連線金鑰已保存在這個 extension。')
+  } catch (error) {
+    setStatus(error instanceof Error ? error.message : 'StoryVoice 連線金鑰格式不正確。', 'error')
+  }
+})
+
+chrome.storage.local.get(['storyVoiceOrigin', 'storyVoiceAccessToken']).then(({
+  storyVoiceOrigin,
+  storyVoiceAccessToken
+}) => {
   if (storyVoiceOrigin) originInput.value = storyVoiceOrigin
+  if (storyVoiceAccessToken) tokenInput.value = storyVoiceAccessToken
   scanShelf(false)
 })

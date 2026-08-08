@@ -16,6 +16,8 @@ h1 { margin: 0; font-family: Georgia, "Noto Serif TC", serif; font-size: 20px; }
 label { display: block; margin-bottom: 6px; color: #d1c1b7; font-size: 11px; }
 input { width: 100%; border: 1px solid #ffffff1f; border-radius: 10px; padding: 10px 11px; color: #f7f0e8; background: #ffffff0b; outline: none; }
 input:focus { border-color: #f1b96d88; box-shadow: 0 0 0 3px #f1b96d14; }
+.token-label { margin-top: 12px; }
+.token-help { margin: 6px 0 0; color: #756a6f; font-size: 10px; line-height: 1.5; }
 .toolbar { display: flex; align-items: center; justify-content: space-between; margin: 17px 0 9px; }
 .toolbar strong { font-size: 12px; }
 .toolbar-actions { display: flex; align-items: center; gap: 5px; }

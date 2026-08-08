@@ -19,8 +19,10 @@ test('normalizes official metadata and accepts the official cover asset domain',
     title: '  月下的故事  ',
     author: '  比比工程師 ',
     language: 'zh-TW',
-    sourceUrl: 'https://viewer-ebook.books.com.tw/viewer/epub_v3/?book_uni_id=E050145360#chapter',
-    coverImageUrl: 'https://im1.book.com.tw/image/getImage?i=E050145360'
+    sourceUrl: 'https://viewer-ebook.books.com.tw/viewer/epub_v3/?book_uni_id=E050145360&access_token=provider-secret#chapter',
+    coverImageUrl: 'https://im1.book.com.tw/image/getImage?i=E050145360&signature=provider-secret',
+    nativeTtsAvailable: true,
+    ebookLayout: 'Reflowable'
   })
 
   assert.deepEqual(book, {
@@ -29,8 +31,34 @@ test('normalizes official metadata and accepts the official cover asset domain',
     author: '比比工程師',
     language: 'zh-TW',
     sourceUrl: 'https://viewer-ebook.books.com.tw/viewer/epub_v3/?book_uni_id=E050145360',
-    coverImageUrl: 'https://im1.book.com.tw/image/getImage?i=E050145360'
+    coverImageUrl: 'https://im1.book.com.tw/image/getImage?i=E050145360',
+    nativeTtsAvailable: true,
+    ebookLayout: 'Reflowable'
   })
+})
+
+test('keeps official TTS metadata tri-state and rejects unknown layout labels', () => {
+  const unavailable = extractor.normalizeCandidate({
+    externalId: 'E050145363',
+    title: '固定版型書籍',
+    sourceUrl: 'https://www.books.com.tw/products/E050145363',
+    nativeTtsAvailable: false,
+    ebookLayout: 'Fixed'
+  })
+  const unknown = extractor.normalizeCandidate({
+    externalId: 'E050145364',
+    title: '未標示版型書籍',
+    sourceUrl: 'https://www.books.com.tw/products/E050145364',
+    nativeTtsAvailable: 'maybe',
+    ebookLayout: 'PDF'
+  })
+
+  assert.equal(unavailable.nativeTtsAvailable, false)
+  assert.equal(unavailable.ebookLayout, 'Fixed')
+  assert.equal(unknown.nativeTtsAvailable, null)
+  assert.equal(unknown.ebookLayout, null)
+  assert.equal(extractor.parseNativeTtsAvailable(null, 'TTS 語音朗讀無障礙體驗'), null)
+  assert.equal(extractor.parseNativeTtsAvailable(null, 'TTS 語音朗讀功能'), true)
 })
 
 test('rejects non-Books source links and drops non-Books cover links', () => {

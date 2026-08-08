@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 using StoryVoice.Application.BookImports;
@@ -16,6 +17,7 @@ public sealed class ApiExceptionHandler(
         var statusCode = exception switch
         {
             UnsupportedBookFormatException => StatusCodes.Status415UnsupportedMediaType,
+            AntiforgeryValidationException => StatusCodes.Status400BadRequest,
             ArgumentException or InvalidOperationException => StatusCodes.Status400BadRequest,
             _ => StatusCodes.Status500InternalServerError
         };

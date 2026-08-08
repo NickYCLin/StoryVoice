@@ -15,13 +15,14 @@ public sealed class BookImportApiTests(ApiFactory factory) : IClassFixture<ApiFa
     [Fact]
     public async Task Import_epub_uses_metadata_toc_and_reading_order()
     {
-        using var client = factory.CreateClient();
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
         using var content = new MultipartFormDataContent();
         var file = new ByteArrayContent(MinimalEpub.Create());
         file.Headers.ContentType = new MediaTypeHeaderValue("application/epub+zip");
         content.Add(file, "file", "moon.epub");
 
-        var response = await client.PostAsync(
+        var response = await client.PostMultipartWithCsrfAsync(
             "/api/books/import",
             content,
             TestContext.Current.CancellationToken);
@@ -49,13 +50,14 @@ public sealed class BookImportApiTests(ApiFactory factory) : IClassFixture<ApiFa
     [Fact]
     public async Task Import_invalid_epub_returns_bad_request()
     {
-        using var client = factory.CreateClient();
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
         using var content = new MultipartFormDataContent();
         var file = new ByteArrayContent([1, 2, 3, 4]);
         file.Headers.ContentType = new MediaTypeHeaderValue("application/epub+zip");
         content.Add(file, "file", "broken.epub");
 
-        var response = await client.PostAsync(
+        var response = await client.PostMultipartWithCsrfAsync(
             "/api/books/import",
             content,
             TestContext.Current.CancellationToken);
@@ -66,7 +68,8 @@ public sealed class BookImportApiTests(ApiFactory factory) : IClassFixture<ApiFa
     [Fact]
     public async Task Import_txt_creates_book_and_extracted_chapters()
     {
-        using var client = factory.CreateClient();
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
         using var content = new MultipartFormDataContent();
         var file = new ByteArrayContent(Encoding.UTF8.GetBytes("""
             第一章 起點
@@ -78,7 +81,7 @@ public sealed class BookImportApiTests(ApiFactory factory) : IClassFixture<ApiFa
         file.Headers.ContentType = new MediaTypeHeaderValue("text/plain");
         content.Add(file, "file", "月下故事.txt");
 
-        var response = await client.PostAsync(
+        var response = await client.PostMultipartWithCsrfAsync(
             "/api/books/import?author=StoryVoice&language=zh-TW",
             content,
             TestContext.Current.CancellationToken);
@@ -97,11 +100,12 @@ public sealed class BookImportApiTests(ApiFactory factory) : IClassFixture<ApiFa
     [Fact]
     public async Task Import_rejects_unsupported_file_types()
     {
-        using var client = factory.CreateClient();
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
         using var content = new MultipartFormDataContent();
         content.Add(new ByteArrayContent([1, 2, 3]), "file", "story.pdf");
 
-        var response = await client.PostAsync(
+        var response = await client.PostMultipartWithCsrfAsync(
             "/api/books/import",
             content,
             TestContext.Current.CancellationToken);

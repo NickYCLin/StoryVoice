@@ -12,7 +12,7 @@
     return roots.some((root) => host === root || host.endsWith(`.${root}`))
   }
 
-  function safeUrl(value, baseUrl, roots) {
+  function safeUrl(value, baseUrl, roots, canonicalQuery = null) {
     if (!value) return null
     try {
       const url = new URL(value, baseUrl)
@@ -20,6 +20,13 @@
         return null
       }
       url.hash = ''
+      url.search = ''
+      const canonicalHostMatches = canonicalQuery?.host === url.hostname.toLowerCase() ||
+        (canonicalQuery?.hostRoot && isAllowedHost(url.hostname, [canonicalQuery.hostRoot]))
+      if (canonicalQuery?.key && canonicalQuery?.value && canonicalHostMatches &&
+          url.pathname.startsWith(canonicalQuery.pathPrefix)) {
+        url.searchParams.set(canonicalQuery.key, canonicalQuery.value)
+      }
       return url.href
     } catch {
       return null
@@ -51,19 +58,49 @@
     return null
   }
 
+  function parseNativeTtsAvailable(value, visibleText = '') {
+    if (typeof value === 'boolean') return value
+    const normalized = normalizeText(value).toLowerCase()
+    if (['true', 'yes', '1', 'available', 'supported'].includes(normalized)) return true
+    if (['false', 'no', '0', 'unavailable', 'unsupported'].includes(normalized)) return false
+
+    const text = normalizeText(visibleText)
+    if (/TTS\s*語音朗讀(?:功能)?\s*[:：]?\s*(?:不支援|不可使用|否|未開放|未提供|無法使用|沒有)/i.test(text)) return false
+    if (/TTS\s*語音朗讀(?:功能)?\s*[:：]?\s*(?:支援|有此功能|可使用|是|已開放|提供)/i.test(text)) return true
+    if (/TTS\s*語音朗讀功能/i.test(text)) return true
+    return null
+  }
+
+  function parseEbookLayout(value, visibleText = '') {
+    const normalized = normalizeText(value).toLowerCase()
+    if (['reflowable', 'flow', 'epub-flow'].includes(normalized)) return 'Reflowable'
+    if (['fixed', 'fixed-layout', 'epub-fixed'].includes(normalized)) return 'Fixed'
+
+    const text = normalizeText(visibleText)
+    if (/EPUB\s*流動版型|流動版型/i.test(text)) return 'Reflowable'
+    if (/EPUB\s*固定版型|固定版型/i.test(text)) return 'Fixed'
+    return null
+  }
+
   function candidateFromLink(link, baseUrl) {
     const container = link.closest(
       '[data-book-uni-id], [data-book-id], [data-product-id], article, li, [class*="book-item"], [class*="book__item"], [class*="bookItem"]'
     ) ?? link.parentElement
-    const sourceUrl = safeUrl(link.href, baseUrl, sourceHosts)
-    if (!sourceUrl || !container) return null
-
-    const externalId = externalIdFromUrl(sourceUrl, container) ?? externalIdFromUrl(sourceUrl, link)
+    if (!container) return null
+    const externalId = externalIdFromUrl(link.href, container) ?? externalIdFromUrl(link.href, link)
     if (!externalId) return null
+    const sourceUrl = safeUrl(link.href, baseUrl, sourceHosts, {
+      host: 'viewer-ebook.books.com.tw',
+      pathPrefix: '/viewer/',
+      key: 'book_uni_id',
+      value: externalId
+    })
+    if (!sourceUrl) return null
 
     const image = container.querySelector('img')
     const titleNode = container.querySelector('[data-title], [class*="title"], h2, h3, h4')
     const authorNode = container.querySelector('[data-author], [class*="author"]')
+    const visibleText = container.textContent
     const title = firstMeaningfulText([
       container.dataset?.title,
       titleNode?.textContent,
@@ -81,8 +118,19 @@
       coverImageUrl: safeUrl(
         image?.currentSrc || image?.getAttribute('src') || image?.dataset?.src,
         baseUrl,
-        coverHosts
-      )
+        coverHosts,
+        {
+          hostRoot: 'book.com.tw',
+          pathPrefix: '/image/getImage',
+          key: 'i',
+          value: externalId
+        }
+      ),
+      nativeTtsAvailable: parseNativeTtsAvailable(
+        container.dataset?.nativeTtsAvailable ?? container.dataset?.ttsAvailable,
+        visibleText
+      ),
+      ebookLayout: parseEbookLayout(container.dataset?.ebookLayout, visibleText)
     }
   }
 
@@ -95,8 +143,14 @@
   function normalizeCandidate(candidate) {
     const externalId = normalizeText(candidate?.externalId)
     const title = normalizeText(candidate?.title)
-    const sourceUrl = safeUrl(candidate?.sourceUrl, 'https://viewer-ebook.books.com.tw/', sourceHosts)
-    if (!externalId || !/^[A-Za-z0-9._:-]{1,128}$/.test(externalId) || !title || !sourceUrl) return null
+    if (!externalId || !/^[A-Za-z0-9._:-]{1,128}$/.test(externalId) || !title) return null
+    const sourceUrl = safeUrl(candidate?.sourceUrl, 'https://viewer-ebook.books.com.tw/', sourceHosts, {
+      host: 'viewer-ebook.books.com.tw',
+      pathPrefix: '/viewer/',
+      key: 'book_uni_id',
+      value: externalId
+    })
+    if (!sourceUrl) return null
 
     return {
       externalId,
@@ -104,7 +158,14 @@
       author: normalizeText(candidate.author).slice(0, 300) || '未知作者',
       language: normalizeText(candidate.language).slice(0, 20) || 'zh-TW',
       sourceUrl,
-      coverImageUrl: safeUrl(candidate.coverImageUrl, sourceUrl, coverHosts)
+      coverImageUrl: safeUrl(candidate.coverImageUrl, sourceUrl, coverHosts, {
+        hostRoot: 'book.com.tw',
+        pathPrefix: '/image/getImage',
+        key: 'i',
+        value: externalId
+      }),
+      nativeTtsAvailable: parseNativeTtsAvailable(candidate.nativeTtsAvailable),
+      ebookLayout: parseEbookLayout(candidate.ebookLayout)
     }
   }
 
@@ -148,7 +209,15 @@
     return extractFromCandidates(collectCandidates(documentObject))
   }
 
-  const api = { crawlShelf, extractBooks, extractFromCandidates, externalIdFromUrl, normalizeCandidate }
+  const api = {
+    crawlShelf,
+    extractBooks,
+    extractFromCandidates,
+    externalIdFromUrl,
+    normalizeCandidate,
+    parseEbookLayout,
+    parseNativeTtsAvailable
+  }
   global.StoryVoiceBooksComTwExtractor = api
   if (typeof module !== 'undefined' && module.exports) module.exports = api
 })(globalThis)

@@ -21,6 +21,8 @@ public static class BookEndpoints
             var book = await service.CreateAsync(request, cancellationToken);
             return Results.Created(BookLocation(httpContext.Request.PathBase, book.Id), book);
         })
+        .RequireAuthorization(StoryVoicePolicies.UserSession)
+        .AddEndpointFilter<AntiforgeryEndpointFilter>()
         .WithName("CreateBook");
 
         group.MapPost("/import", async (
@@ -56,6 +58,8 @@ public static class BookEndpoints
             return Results.Created(BookLocation(httpContext.Request.PathBase, book.Id), book);
         })
         .DisableAntiforgery()
+        .RequireAuthorization(StoryVoicePolicies.UserSession)
+        .AddEndpointFilter<AntiforgeryEndpointFilter>()
         .WithName("ImportBook")
         .Produces<BookDetailsResponse>(StatusCodes.Status201Created)
         .ProducesProblem(StatusCodes.Status400BadRequest)
@@ -67,12 +71,15 @@ public static class BookEndpoints
             IBooksComTwBookshelfService bookshelfService,
             CancellationToken cancellationToken) =>
             Results.Ok(await bookshelfService.ImportAsync(request, cancellationToken)))
+            .RequireAuthorization(StoryVoicePolicies.BookshelfSync)
+            .AddEndpointFilter<AntiforgeryEndpointFilter>()
             .WithName("ImportBooksComTwBookshelf")
             .Produces<BooksComTwBookshelfImportResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest);
 
         group.MapGet("/", async (IBookService service, CancellationToken cancellationToken) =>
             Results.Ok(await service.ListAsync(cancellationToken)))
+            .RequireAuthorization(StoryVoicePolicies.UserSession)
             .WithName("ListBooks");
 
         group.MapGet("/{id:guid}", async (
@@ -83,6 +90,7 @@ public static class BookEndpoints
             var book = await service.GetAsync(id, cancellationToken);
             return book is null ? Results.NotFound() : Results.Ok(book);
         })
+        .RequireAuthorization(StoryVoicePolicies.UserSession)
         .WithName("GetBook");
 
         return endpoints;

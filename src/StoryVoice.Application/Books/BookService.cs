@@ -1,8 +1,11 @@
+using StoryVoice.Application.Authentication;
 using StoryVoice.Domain.Books;
 
 namespace StoryVoice.Application.Books;
 
-public sealed class BookService(IBookRepository repository) : IBookService
+public sealed class BookService(
+    IBookRepository repository,
+    ICurrentUser currentUser) : IBookService
 {
     public async Task<BookDetailsResponse> CreateAsync(
         CreateBookRequest request,
@@ -45,7 +48,12 @@ public sealed class BookService(IBookRepository repository) : IBookService
         IReadOnlyList<CreateChapterRequest>? chapters,
         CancellationToken cancellationToken)
     {
-        var book = Book.Create(title, author, language, originalFileName);
+        var book = Book.Create(
+            currentUser.UserId,
+            title,
+            author,
+            language,
+            originalFileName);
         if (!string.IsNullOrWhiteSpace(storagePath))
         {
             book.SetStoragePath(storagePath);

@@ -6,6 +6,7 @@
 - 書名與作者
 - 封面網址
 - 博客來官方閱讀／商品連結
+- 頁面明確標示的 EPUB 版型與博客來官方 TTS 狀態（未標示時保留未知）
 
 它不讀取或傳送博客來帳號、密碼、Cookie、localStorage、購買憑證或電子書內文，也不下載、解密或繞過 DRM。
 
@@ -15,16 +16,19 @@
    ```bash
    docker compose up -d --build
    ```
-2. 在 Chrome／Chromium 開啟 `chrome://extensions`。
-3. 開啟「開發人員模式」，選擇「載入未封裝項目」。
-4. 選擇本目錄：`extensions/books-com-tw-companion`。
-5. 前往 [博客來電子書櫃](https://viewer-ebook.books.com.tw/viewer/index.html?readlist=all)，直接在博客來完成登入。
-6. 點 extension 圖示後，可掃描目前頁面，或明確按下「展開完整書櫃」讓 Companion 捲動／點擊書櫃的「看更多」。
-7. 確認清單、勾選書籍，再同步到 StoryVoice。
+2. 登入 StoryVoice，在「進階：同步博客來書櫃書目」建立七天有效的連線金鑰。
+3. 在 Chrome／Chromium 開啟 `chrome://extensions`。
+4. 開啟「開發人員模式」，選擇「載入未封裝項目」。
+5. 選擇本目錄：`extensions/books-com-tw-companion`。
+6. 前往 [博客來電子書櫃](https://viewer-ebook.books.com.tw/viewer/index.html?readlist=all)，直接在博客來完成登入。
+7. 點 extension 圖示後貼上金鑰，可掃描目前頁面，或明確按下「展開完整書櫃」讓 Companion 捲動／點擊書櫃的「看更多」。
+8. 確認清單、勾選書籍，再同步到 StoryVoice。
 
 只允許把資料送到 `http://localhost:3000`、`http://127.0.0.1:3000`，或正式上線後的
 `https://aiprod.wrbtycg.tw/StoryVoice`。其他 host、port、path、HTTP 正式站、帳密 URL
 與 query/hash 全部拒絕，避免誤把私人書櫃 metadata 傳往其他主機。
+
+同步使用專用 Bearer 金鑰，不傳送 StoryVoice Cookie；金鑰只允許把書櫃 metadata 寫入簽發它的帳號。
 
 ## 驗證
 

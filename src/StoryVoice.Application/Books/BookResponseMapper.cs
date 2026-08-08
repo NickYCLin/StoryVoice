@@ -17,6 +17,8 @@ internal static class BookResponseMapper
         book.ExternalSourceId,
         book.SourceUrl,
         book.CoverImageUrl,
+        book.NativeTtsAvailable,
+        book.EbookLayout?.ToString(),
         book.SourceSyncedAt);
 
     public static BookDetailsResponse ToDetails(Book book) => new(
@@ -41,5 +43,7 @@ internal static class BookResponseMapper
         book.ExternalSourceId,
         book.SourceUrl,
         book.CoverImageUrl,
+        book.NativeTtsAvailable,
+        book.EbookLayout?.ToString(),
         book.SourceSyncedAt);
 }

@@ -8,9 +8,15 @@ public sealed class Book
     {
     }
 
-    private Book(string title, string author, string language, string originalFileName)
+    private Book(Guid ownerId, string title, string author, string language, string originalFileName)
     {
+        if (ownerId == Guid.Empty)
+        {
+            throw new ArgumentException("使用者識別碼不可為空白。", nameof(ownerId));
+        }
+
         Id = Guid.NewGuid();
+        OwnerId = ownerId;
         Title = Require(title, nameof(title));
         Author = Require(author, nameof(author));
         Language = Require(language, nameof(language));
@@ -21,6 +27,8 @@ public sealed class Book
     }
 
     public Guid Id { get; private set; }
+
+    public Guid? OwnerId { get; private set; }
 
     public string Title { get; private set; } = string.Empty;
 
@@ -42,6 +50,10 @@ public sealed class Book
 
     public string? CoverImageUrl { get; private set; }
 
+    public bool? NativeTtsAvailable { get; private set; }
+
+    public EbookLayout? EbookLayout { get; private set; }
+
     public DateTimeOffset? SourceSyncedAt { get; private set; }
 
     public BookStatus Status { get; private set; }
@@ -50,19 +62,27 @@ public sealed class Book
 
     public IReadOnlyCollection<Chapter> Chapters => _chapters.AsReadOnly();
 
-    public static Book Create(string title, string author, string language, string originalFileName) =>
-        new(title, author, language, originalFileName);
+    public static Book Create(
+        Guid ownerId,
+        string title,
+        string author,
+        string language,
+        string originalFileName) =>
+        new(ownerId, title, author, language, originalFileName);
 
     public static Book CreateExternal(
+        Guid ownerId,
         string title,
         string author,
         string language,
         string sourceProvider,
         string externalSourceId,
         string sourceUrl,
-        string? coverImageUrl)
+        string? coverImageUrl,
+        bool? nativeTtsAvailable = null,
+        EbookLayout? ebookLayout = null)
     {
-        var book = new Book(title, author, language, $"{externalSourceId}.link")
+        var book = new Book(ownerId, title, author, language, $"{externalSourceId}.link")
         {
             FileType = "external",
             Status = BookStatus.Linked,
@@ -70,6 +90,8 @@ public sealed class Book
             ExternalSourceId = Require(externalSourceId, nameof(externalSourceId)),
             SourceUrl = Require(sourceUrl, nameof(sourceUrl)),
             CoverImageUrl = NormalizeOptional(coverImageUrl),
+            NativeTtsAvailable = nativeTtsAvailable,
+            EbookLayout = ebookLayout,
             SourceSyncedAt = DateTimeOffset.UtcNow
         };
 
@@ -98,7 +120,9 @@ public sealed class Book
         string author,
         string language,
         string sourceUrl,
-        string? coverImageUrl)
+        string? coverImageUrl,
+        bool? nativeTtsAvailable = null,
+        EbookLayout? ebookLayout = null)
     {
         if (SourceProvider is null || ExternalSourceId is null)
         {
@@ -110,6 +134,16 @@ public sealed class Book
         Language = Require(language, nameof(language));
         SourceUrl = Require(sourceUrl, nameof(sourceUrl));
         CoverImageUrl = NormalizeOptional(coverImageUrl);
+        if (nativeTtsAvailable.HasValue)
+        {
+            NativeTtsAvailable = nativeTtsAvailable;
+        }
+
+        if (ebookLayout.HasValue)
+        {
+            EbookLayout = ebookLayout;
+        }
+
         SourceSyncedAt = DateTimeOffset.UtcNow;
     }
 
