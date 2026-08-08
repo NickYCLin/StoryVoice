@@ -13,6 +13,7 @@ const EXPECTED_COMPANION_FILES = [
   'popup.css',
   'popup.js',
   'extractor.js',
+  'page-bridge.js',
   'content.js',
   'storyvoice-origin.mjs',
   'companion-token.mjs',
