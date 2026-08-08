@@ -167,6 +167,7 @@ public sealed class AuthApiTests(ApiFactory factory) : IClassFixture<ApiFactory>
             cancellationToken);
         Assert.Equal(HttpStatusCode.Unauthorized, cookieOnlySyncResponse.StatusCode);
 
+        var externalId = $"E{Guid.NewGuid():N}";
         using var syncRequest = new HttpRequestMessage(
             HttpMethod.Post,
             "/api/books/sources/books-com-tw/import")
@@ -177,12 +178,12 @@ public sealed class AuthApiTests(ApiFactory factory) : IClassFixture<ApiFactory>
                 {
                     new
                     {
-                        externalId = $"E{Guid.NewGuid():N}",
+                        externalId,
                         title = "我的博客來藏書",
                         author = "博客來作者",
                         language = "zh-TW",
-                        sourceUrl = "https://www.books.com.tw/products/E050145360",
-                        coverImageUrl = "https://im1.book.com.tw/image/getImage?i=E050145360"
+                        sourceUrl = $"https://www.books.com.tw/products/{externalId}",
+                        coverImageUrl = $"https://im1.book.com.tw/image/getImage?i={externalId}"
                     }
                 }
             })

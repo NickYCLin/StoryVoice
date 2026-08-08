@@ -50,12 +50,62 @@
     }
   }
 
+  function sourceUrlMatchesExternalId(value, externalId) {
+    try {
+      const url = new URL(value, 'https://viewer-ebook.books.com.tw/')
+      if (url.protocol !== 'https:' || url.username || url.password || !isAllowedHost(url.hostname, sourceHosts)) {
+        return false
+      }
+
+      if (url.hostname.toLowerCase() === 'viewer-ebook.books.com.tw' &&
+          url.pathname.startsWith('/viewer/')) {
+        const identityKeys = ['book_uni_id', 'bookUniId', 'book_id', 'product_id', 'id']
+        const linkedIds = []
+        for (const [key, linkedId] of url.searchParams.entries()) {
+          if (identityKeys.some((identityKey) => identityKey.toLowerCase() === key.toLowerCase())) {
+            linkedIds.push(linkedId)
+          }
+        }
+        return linkedIds.every((linkedId) => linkedId.toLowerCase() === externalId.toLowerCase())
+      }
+
+      const isProductHost = ['books.com.tw', 'www.books.com.tw'].includes(url.hostname.toLowerCase())
+      const pathSegments = url.pathname.split('/').filter(Boolean)
+      return isProductHost && pathSegments.length === 2 &&
+        pathSegments[0].toLowerCase() === 'products' &&
+        pathSegments[1].toLowerCase() === externalId.toLowerCase()
+    } catch {
+      return false
+    }
+  }
+
   function firstMeaningfulText(values) {
     for (const value of values) {
       const text = normalizeText(value)
       if (text && !ignoredTitles.has(text)) return text
     }
     return null
+  }
+
+  function capabilityMarkerText(container) {
+    const nodes = container.querySelectorAll(
+      '[data-native-tts-available], [data-tts-available], [data-ebook-layout], [class~="tts-capability"], [class~="ebook-layout"], [class~="book-format"]'
+    )
+    const markers = []
+    for (const node of nodes) {
+      markers.push(node.textContent, node.getAttribute?.('aria-label'), node.getAttribute?.('title'))
+      const ttsValue = node.dataset?.nativeTtsAvailable ?? node.dataset?.ttsAvailable
+      const parsedTts = parseNativeTtsAvailable(ttsValue)
+      if (parsedTts === true) markers.push('TTS 語音朗讀功能：支援')
+      if (parsedTts === false) markers.push('TTS 語音朗讀功能：不支援')
+      const parsedLayout = parseEbookLayout(node.dataset?.ebookLayout)
+      if (parsedLayout === 'Reflowable') markers.push('EPUB 流動版型')
+      if (parsedLayout === 'Fixed') markers.push('EPUB 固定版型')
+    }
+    return markers
+      .map(normalizeText)
+      .filter((text) => text && !ignoredTitles.has(text))
+      .join(' ')
   }
 
   function parseNativeTtsAvailable(value, visibleText = '') {
@@ -88,7 +138,7 @@
     ) ?? link.parentElement
     if (!container) return null
     const externalId = externalIdFromUrl(link.href, container) ?? externalIdFromUrl(link.href, link)
-    if (!externalId) return null
+    if (!externalId || !sourceUrlMatchesExternalId(link.href, externalId)) return null
     const sourceUrl = safeUrl(link.href, baseUrl, sourceHosts, {
       host: 'viewer-ebook.books.com.tw',
       pathPrefix: '/viewer/',
@@ -100,7 +150,7 @@
     const image = container.querySelector('img')
     const titleNode = container.querySelector('[data-title], [class*="title"], h2, h3, h4')
     const authorNode = container.querySelector('[data-author], [class*="author"]')
-    const visibleText = container.textContent
+    const capabilityText = capabilityMarkerText(container)
     const title = firstMeaningfulText([
       container.dataset?.title,
       titleNode?.textContent,
@@ -128,9 +178,9 @@
       ),
       nativeTtsAvailable: parseNativeTtsAvailable(
         container.dataset?.nativeTtsAvailable ?? container.dataset?.ttsAvailable,
-        visibleText
+        capabilityText
       ),
-      ebookLayout: parseEbookLayout(container.dataset?.ebookLayout, visibleText)
+      ebookLayout: parseEbookLayout(container.dataset?.ebookLayout, capabilityText)
     }
   }
 
@@ -144,6 +194,7 @@
     const externalId = normalizeText(candidate?.externalId)
     const title = normalizeText(candidate?.title)
     if (!externalId || !/^[A-Za-z0-9._:-]{1,128}$/.test(externalId) || !title) return null
+    if (!sourceUrlMatchesExternalId(candidate?.sourceUrl, externalId)) return null
     const sourceUrl = safeUrl(candidate?.sourceUrl, 'https://viewer-ebook.books.com.tw/', sourceHosts, {
       host: 'viewer-ebook.books.com.tw',
       pathPrefix: '/viewer/',

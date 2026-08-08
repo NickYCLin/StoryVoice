@@ -121,8 +121,8 @@ public sealed class Book
         string language,
         string sourceUrl,
         string? coverImageUrl,
-        bool? nativeTtsAvailable = null,
-        EbookLayout? ebookLayout = null)
+        bool? nativeTtsAvailable,
+        EbookLayout? ebookLayout)
     {
         if (SourceProvider is null || ExternalSourceId is null)
         {
@@ -134,15 +134,8 @@ public sealed class Book
         Language = Require(language, nameof(language));
         SourceUrl = Require(sourceUrl, nameof(sourceUrl));
         CoverImageUrl = NormalizeOptional(coverImageUrl);
-        if (nativeTtsAvailable.HasValue)
-        {
-            NativeTtsAvailable = nativeTtsAvailable;
-        }
-
-        if (ebookLayout.HasValue)
-        {
-            EbookLayout = ebookLayout;
-        }
+        NativeTtsAvailable = nativeTtsAvailable;
+        EbookLayout = ebookLayout;
 
         SourceSyncedAt = DateTimeOffset.UtcNow;
     }

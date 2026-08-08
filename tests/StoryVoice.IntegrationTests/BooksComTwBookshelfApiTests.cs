@@ -91,6 +91,30 @@ public sealed class BooksComTwBookshelfApiTests(ApiFactory factory) : IClassFixt
         Assert.Equal("更新作者", refreshResult.Books[0].Author);
         Assert.False(refreshResult.Books[0].NativeTtsAvailable);
         Assert.Equal("Fixed", refreshResult.Books[0].EbookLayout);
+
+        var unknownResponse = await client.PostAsJsonAsync(ImportPath, new
+        {
+            books = new[]
+            {
+                new
+                {
+                    externalId = "E050145360",
+                    title = "月下的第一本書（狀態未標示）",
+                    author = "更新作者",
+                    language = "zh-TW",
+                    sourceUrl = "https://viewer-ebook.books.com.tw/viewer/epub_v3/?book_uni_id=E050145360",
+                    coverImageUrl = (string?)null,
+                    nativeTtsAvailable = (bool?)null,
+                    ebookLayout = (string?)null
+                }
+            }
+        }, cancellationToken);
+        var unknownResult = await unknownResponse.Content.ReadFromJsonAsync<ImportResultProbe>(cancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, unknownResponse.StatusCode);
+        Assert.NotNull(unknownResult);
+        Assert.Null(unknownResult.Books[0].NativeTtsAvailable);
+        Assert.Null(unknownResult.Books[0].EbookLayout);
     }
 
     [Fact]
@@ -113,6 +137,54 @@ public sealed class BooksComTwBookshelfApiTests(ApiFactory factory) : IClassFixt
                 }
             }
         }, TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Import_rejects_numeric_layout_values()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var client = await factory.CreateCompanionClientAsync(cancellationToken);
+
+        using var response = await client.PostAsJsonAsync(ImportPath, new
+        {
+            books = new[]
+            {
+                new
+                {
+                    externalId = "E050145362",
+                    title = "不合法版型",
+                    sourceUrl = "https://www.books.com.tw/products/E050145362",
+                    ebookLayout = "0"
+                }
+            }
+        }, cancellationToken);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("https://www.books.com.tw/products/E050145399")]
+    [InlineData("https://viewer-ebook.books.com.tw/viewer/epub_v3/?book_uni_id=E050145399")]
+    [InlineData("https://www.books.com.tw/web/sys_qalist/qa_1_80")]
+    public async Task Import_rejects_source_urls_that_do_not_identify_the_external_book(string sourceUrl)
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var client = await factory.CreateCompanionClientAsync(cancellationToken);
+
+        using var response = await client.PostAsJsonAsync(ImportPath, new
+        {
+            books = new[]
+            {
+                new
+                {
+                    externalId = "E050145398",
+                    title = "來源識別不一致",
+                    sourceUrl
+                }
+            }
+        }, cancellationToken);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }

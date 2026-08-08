@@ -14,6 +14,8 @@ public sealed class BooksComTwBookshelfService(
     private static readonly Regex ExternalIdPattern = new(
         "^[A-Za-z0-9._:-]{1,128}$",
         RegexOptions.CultureInvariant | RegexOptions.NonBacktracking);
+    private static readonly string[] ViewerExternalIdQueryKeys =
+        ["book_uni_id", "bookUniId", "book_id", "product_id", "id"];
 
     public async Task<BooksComTwBookshelfImportResponse> ImportAsync(
         BooksComTwBookshelfImportRequest request,
@@ -110,9 +112,12 @@ public sealed class BooksComTwBookshelfService(
             return null;
         }
 
-        return Enum.TryParse<EbookLayout>(value.Trim(), ignoreCase: true, out var layout)
-            ? layout
-            : throw new ArgumentException("ebookLayout 只接受 Reflowable 或 Fixed。", nameof(value));
+        return value.Trim().ToLowerInvariant() switch
+        {
+            "reflowable" => EbookLayout.Reflowable,
+            "fixed" => EbookLayout.Fixed,
+            _ => throw new ArgumentException("ebookLayout 僅支援 Reflowable 或 Fixed。", nameof(value))
+        };
     }
 
     private static string ValidateBooksUrl(
@@ -141,6 +146,30 @@ public sealed class BooksComTwBookshelfService(
             throw new ArgumentException($"{fieldName} 必須是安全的博客來 HTTPS 網址。", fieldName);
         }
 
+        if (!allowAssetDomain)
+        {
+            var isViewerUrl =
+                uri.Host.Equals("viewer-ebook.books.com.tw", StringComparison.OrdinalIgnoreCase) &&
+                uri.AbsolutePath.StartsWith("/viewer/", StringComparison.OrdinalIgnoreCase) &&
+                ViewerQueryMatchesExternalId(uri, externalId);
+            var pathSegments = uri
+                .GetComponents(UriComponents.Path, UriFormat.Unescaped)
+                .Split('/', StringSplitOptions.RemoveEmptyEntries);
+            var isProductHost = uri.Host.Equals("books.com.tw", StringComparison.OrdinalIgnoreCase) ||
+                uri.Host.Equals("www.books.com.tw", StringComparison.OrdinalIgnoreCase);
+            var isMatchingProductUrl = isProductHost &&
+                pathSegments.Length == 2 &&
+                pathSegments[0].Equals("products", StringComparison.OrdinalIgnoreCase) &&
+                pathSegments[1].Equals(externalId, StringComparison.OrdinalIgnoreCase);
+
+            if (!isViewerUrl && !isMatchingProductUrl)
+            {
+                throw new ArgumentException(
+                    $"{fieldName} 必須指向相同 externalId 的博客來商品或閱讀器。",
+                    fieldName);
+            }
+        }
+
         var sanitized = new UriBuilder(uri)
         {
             Fragment = string.Empty,
@@ -159,6 +188,27 @@ public sealed class BooksComTwBookshelfService(
         }
 
         return sanitized.Uri.AbsoluteUri;
+    }
+
+    private static bool ViewerQueryMatchesExternalId(Uri uri, string externalId)
+    {
+        foreach (var pair in uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var separator = pair.IndexOf('=');
+            var key = Uri.UnescapeDataString(separator >= 0 ? pair[..separator] : pair);
+            if (!ViewerExternalIdQueryKeys.Contains(key, StringComparer.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var value = separator >= 0 ? Uri.UnescapeDataString(pair[(separator + 1)..]) : string.Empty;
+            if (!value.Equals(externalId, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static string Require(string? value, string fieldName, int maximumLength)
