@@ -261,6 +261,39 @@ public sealed class BookInsightsApiTests(ApiFactory factory) : IClassFixture<Api
         Assert.All(unlinkedNotes, note => Assert.Null(note.ChapterId));
     }
 
+    [Fact]
+    public async Task Removing_nonexistent_link_preserves_direct_upload_summary_and_chapter_notes()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        var uploaded = await ImportTextAsync(client, cancellationToken);
+
+        using var summary = await PutWithCsrfAsync(
+            client,
+            $"/api/books/{uploaded.Id}/summary",
+            cancellationToken);
+        summary.EnsureSuccessStatusCode();
+        using var note = await client.PostWithCsrfAsync(
+            $"/api/books/{uploaded.Id}/notes",
+            new CreateReadingNoteRequest("直傳正文的章節筆記。", uploaded.Chapters[0].Id),
+            cancellationToken);
+        note.EnsureSuccessStatusCode();
+
+        using var unlink = await DeleteWithCsrfAsync(
+            client,
+            $"/api/books/{uploaded.Id}/content-link",
+            cancellationToken);
+        using var notesResponse = await client.GetAsync($"/api/books/{uploaded.Id}/notes", cancellationToken);
+        var notes = await notesResponse.Content.ReadFromJsonAsync<ReadingNoteResponse[]>(cancellationToken);
+        using var summaryResponse = await client.GetAsync($"/api/books/{uploaded.Id}/summary", cancellationToken);
+
+        Assert.Equal(HttpStatusCode.NoContent, unlink.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, summaryResponse.StatusCode);
+        Assert.NotNull(notes);
+        Assert.Single(notes);
+        Assert.Equal(uploaded.Chapters[0].Id, notes[0].ChapterId);
+    }
+
     private static async Task<BookDetailsResponse> ImportTextAsync(
         HttpClient client,
         CancellationToken cancellationToken)

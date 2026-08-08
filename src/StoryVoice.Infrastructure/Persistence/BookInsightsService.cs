@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using StoryVoice.Application.Authentication;
+using StoryVoice.Application.Books;
 using StoryVoice.Application.Insights;
 using StoryVoice.Domain.Books;
 using StoryVoice.Domain.Insights;
@@ -64,6 +65,11 @@ internal sealed class BookInsightsService(
         if (target is null)
         {
             return false;
+        }
+
+        if (target.ContentBookId is null)
+        {
+            return true;
         }
 
         target.UnlinkAuthorizedContent();
@@ -223,14 +229,7 @@ internal sealed class BookInsightsService(
 
     private static void EnsureProcessable(Book? book)
     {
-        var supportedFileType = string.Equals(book?.FileType, "epub", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(book?.FileType, "txt", StringComparison.OrdinalIgnoreCase);
-        if (book is null
-            || book.Status != BookStatus.Uploaded
-            || book.SourceProvider is not null
-            || string.IsNullOrWhiteSpace(book.StoragePath)
-            || !supportedFileType
-            || !book.Chapters.Any(chapter => !string.IsNullOrWhiteSpace(chapter.OriginalText)))
+        if (!AuthorizedTextPolicy.IsProcessable(book))
         {
             throw new BookTextUnavailableException(
                 "這本書目前沒有可處理的合法正文；請先上傳你合法持有、無 DRM 的 EPUB 或 TXT，並明確連結後再使用正文功能。");
