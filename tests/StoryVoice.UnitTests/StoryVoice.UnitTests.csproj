@@ -18,5 +18,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/StoryVoice.Domain/StoryVoice.Domain.csproj" />
+    <ProjectReference Include="../../src/StoryVoice.Infrastructure/StoryVoice.Infrastructure.csproj" />
   </ItemGroup>
 </Project>

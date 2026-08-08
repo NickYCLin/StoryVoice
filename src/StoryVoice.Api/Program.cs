@@ -1,10 +1,12 @@
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Serilog;
 using StackExchange.Redis;
 using StoryVoice.Api;
+using StoryVoice.Application.BookImports;
 using StoryVoice.Application.Books;
 using StoryVoice.Infrastructure;
 using StoryVoice.Infrastructure.Health;
@@ -24,6 +26,9 @@ builder.Services.AddExceptionHandler<ApiExceptionHandler>();
 builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.Services.AddScoped<IBookService, BookService>();
+builder.Services.AddScoped<IBookImportService, BookImportService>();
+builder.Services.Configure<FormOptions>(options =>
+    options.MultipartBodyLengthLimit = 10 * 1024 * 1024 + 64 * 1024);
 builder.Services.AddStoryVoiceInfrastructure(builder.Configuration);
 
 var healthChecks = builder.Services.AddHealthChecks()

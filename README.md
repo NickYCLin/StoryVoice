@@ -13,11 +13,12 @@ Phase 1 Foundation 已建立：
 - Redis-ready background processing boundary
 - React 19 + TypeScript + Vite + Tailwind CSS 4
 - Book / Chapter domain model and REST API
+- TXT multipart upload、中文／英文章節標題解析與單章 fallback
 - Serilog, OpenAPI, liveness/readiness health checks
 - Docker Compose development stack
 - Unit and integration tests + GitHub Actions CI
 
-AI、TTS 與 EPUB 上傳尚未假裝完成；它們會依 [`DEVELOPMENT_PLAN.md`](DEVELOPMENT_PLAN.md) 分階段落地。
+AI、TTS 與 EPUB 上傳尚未假裝完成；它們會依 [`DEVELOPMENT_PLAN.md`](DEVELOPMENT_PLAN.md) 分階段落地。TXT 匯入已可實際使用。
 
 ## Quick start
 
@@ -69,9 +70,23 @@ Vite proxies `/api` and `/health` to `http://localhost:8080`.
 
 ```text
 POST /api/books
+POST /api/books/import
 GET  /api/books
 GET  /api/books/{id}
 ```
+
+Import a UTF-8 TXT book (10 MiB maximum):
+
+```bash
+curl -X POST \
+  'http://localhost:8080/api/books/import?author=StoryVoice&language=zh-TW' \
+  -F 'file=@./story.txt;type=text/plain'
+```
+
+The TXT parser recognizes headings such as `第一章 月下相逢` and
+`Chapter 1: Moonlight`. When no heading is present, it imports the file as one
+chapter. EPUB is intentionally rejected until its parser and storage boundary
+are implemented.
 
 Example:
 
