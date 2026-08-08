@@ -117,11 +117,38 @@
     return Array.from(byId.values())
   }
 
+  async function crawlShelf({
+    readBooks,
+    revealMore,
+    waitForUpdate,
+    maxBooks = 500,
+    maxRounds = 30
+  }) {
+    const bookLimit = Math.max(1, Math.min(Number(maxBooks) || 500, 500))
+    const roundLimit = Math.max(1, Math.min(Number(maxRounds) || 30, 30))
+    let books = extractFromCandidates(await readBooks())
+    let rounds = 0
+    let truncated = books.length > bookLimit
+
+    while (!truncated && rounds < roundLimit) {
+      const revealed = await revealMore({ rounds, bookCount: books.length })
+      if (!revealed) break
+
+      rounds += 1
+      await waitForUpdate({ rounds, bookCount: books.length })
+      books = extractFromCandidates([...books, ...await readBooks()])
+      truncated = books.length > bookLimit
+    }
+
+    if (!truncated && rounds === roundLimit) truncated = true
+    return { books: books.slice(0, bookLimit), rounds, truncated }
+  }
+
   function extractBooks(documentObject = document) {
     return extractFromCandidates(collectCandidates(documentObject))
   }
 
-  const api = { extractBooks, extractFromCandidates, externalIdFromUrl, normalizeCandidate }
+  const api = { crawlShelf, extractBooks, extractFromCandidates, externalIdFromUrl, normalizeCandidate }
   global.StoryVoiceBooksComTwExtractor = api
   if (typeof module !== 'undefined' && module.exports) module.exports = api
 })(globalThis)

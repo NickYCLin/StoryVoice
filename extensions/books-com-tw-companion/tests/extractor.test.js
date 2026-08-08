@@ -68,3 +68,44 @@ test('deduplicates the currently visible shelf by external id and keeps latest m
   assert.equal(books[0].title, '新書名')
   assert.equal(books[0].author, '新版作者')
 })
+
+test('explicit full-shelf crawl merges virtualized cards and stops when no more content can be revealed', async () => {
+  const pages = [
+    [{ externalId: 'A', title: '第一本', sourceUrl: 'https://www.books.com.tw/products/A' }],
+    [{ externalId: 'B', title: '第二本', sourceUrl: 'https://www.books.com.tw/products/B' }]
+  ]
+  let page = 0
+
+  const result = await extractor.crawlShelf({
+    readBooks: () => pages[page],
+    revealMore: () => {
+      if (page >= pages.length - 1) return false
+      page += 1
+      return true
+    },
+    waitForUpdate: async () => {},
+    maxBooks: 10,
+    maxRounds: 10
+  })
+
+  assert.deepEqual(result.books.map((book) => book.externalId), ['A', 'B'])
+  assert.equal(result.rounds, 1)
+  assert.equal(result.truncated, false)
+})
+
+test('full-shelf crawl enforces a local book cap and reports truncation', async () => {
+  const result = await extractor.crawlShelf({
+    readBooks: () => [
+      { externalId: 'A', title: '第一本', sourceUrl: 'https://www.books.com.tw/products/A' },
+      { externalId: 'B', title: '第二本', sourceUrl: 'https://www.books.com.tw/products/B' },
+      { externalId: 'C', title: '第三本', sourceUrl: 'https://www.books.com.tw/products/C' }
+    ],
+    revealMore: () => false,
+    waitForUpdate: async () => {},
+    maxBooks: 2,
+    maxRounds: 10
+  })
+
+  assert.deepEqual(result.books.map((book) => book.externalId), ['A', 'B'])
+  assert.equal(result.truncated, true)
+})

@@ -1,6 +1,6 @@
 # StoryVoice 博客來書櫃 Companion
 
-這個 Chrome／Chromium Manifest V3 extension 只會從**目前開啟、已載入的博客來電子書櫃頁面**讀取可見 metadata，並同步到本機 StoryVoice：
+這個 Chrome／Chromium Manifest V3 extension 只會從**目前開啟的博客來電子書櫃頁面**讀取已呈現的 metadata，並同步到本機 StoryVoice：
 
 - 書籍識別碼
 - 書名與作者
@@ -19,7 +19,8 @@
 3. 開啟「開發人員模式」，選擇「載入未封裝項目」。
 4. 選擇本目錄：`extensions/books-com-tw-companion`。
 5. 前往 [博客來電子書櫃](https://viewer-ebook.books.com.tw/viewer/index.html?readlist=all)，直接在博客來完成登入。
-6. 先捲動或按「看更多」載入要同步的書，再點 extension 圖示、勾選書籍並同步。
+6. 點 extension 圖示後，可掃描目前頁面，或明確按下「展開完整書櫃」讓 Companion 捲動／點擊書櫃的「看更多」。
+7. 確認清單、勾選書籍，再同步到 StoryVoice。
 
 預設只允許把資料送到 `http://localhost:3000` 或 `http://127.0.0.1:3000`，避免誤把私人書櫃 metadata 傳往其他主機。
 
@@ -29,11 +30,13 @@
 npm run check
 ```
 
-測試涵蓋官方來源 URL 限制、識別碼抽取、metadata 正規化與去重。`tests/shelf-fixture.html` 可用真實 Chromium 驗證 DOM adapter。
+測試涵蓋官方來源 URL 限制、識別碼抽取、metadata 正規化、去重、完整書櫃合併與 500 本安全上限。`tests/shelf-fixture.html` 可用真實 Chromium 驗證 DOM adapter。
 
 ## MVP 邊界
 
-- 只同步當前頁面已載入的項目，不呼叫博客來未公開 API。
+- 「展開完整書櫃」只操作書櫃頁面上的捲動／看更多，最多 30 輪、500 本；不呼叫博客來未公開 API。
+- 即使選擇完整掃描，也不會進入書籍閱讀器或讀取章節內文。
+- API 每批最多接收 200 本；Companion 會在本機分批送出勾選項目。
 - StoryVoice 中的連結書籍狀態是 `Linked`，沒有章節內文。
 - 要進行故事解析與語音生成，仍須由使用者另外匯入合法取得、無 DRM 的 EPUB／TXT。
 - 博客來若調整書櫃 DOM，可能需要更新 extractor；extension 會在找不到項目時明確提示，不會改用帳密或 Cookie 抓取。

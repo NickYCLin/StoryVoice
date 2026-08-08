@@ -1362,6 +1362,7 @@ docker compose up
 - [x] Book Library UI
 - [x] 博客來書櫃 metadata 匯入 API（idempotent）
 - [x] Books.com.tw Companion extension
+- [x] 使用者觸發的完整書櫃展開掃描（bounded visible-DOM crawl）
 - [x] Linked 書籍來源、封面與官方閱讀連結 UI
 
 Acceptance Criteria：
@@ -1379,7 +1380,7 @@ Acceptance Criteria：
 
 博客來官方書櫃登入
 ↓
-Companion 只讀目前頁面可見 metadata
+Companion 只在使用者觸發後展開並讀取書櫃頁面已呈現的 metadata
 ↓
 StoryVoice 建立／更新 Linked 書籍
 ↓

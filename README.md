@@ -102,7 +102,8 @@ books, and expand the parsed chapter text in the read-only library view.
 ### 博客來電子書櫃 Companion
 
 Chrome／Chromium 可載入 [`extensions/books-com-tw-companion`](extensions/books-com-tw-companion)，
-從使用者已登入的官方電子書櫃同步**目前頁面可見**的書名、作者、封面與官方閱讀連結。
+從使用者已登入的官方電子書櫃同步已呈現的書名、作者、封面與官方閱讀連結；
+使用者也能明確觸發有輪次／數量上限的完整書櫃展開掃描。
 Companion 不讀取帳密、Cookie、購買憑證或電子書內文，也不呼叫博客來未公開 API。
 
 同步後的書籍狀態為 `Linked`，可以在 StoryVoice 書庫辨識來源並回到博客來官方閱讀器；
