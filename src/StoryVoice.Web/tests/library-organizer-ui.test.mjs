@@ -28,3 +28,11 @@ test('device tags are explicitly local-only and persisted without a server reque
   assert.ok(app.includes('localStorage.setItem(deviceTagsStorageKey'))
   assert.doesNotMatch(app, /fetch\([^)]*deviceTagsStorageKey/)
 })
+
+test('logout clears private catalog and upload state before another account can sign in', () => {
+  const logoutBody = app.match(/async function handleLogout\(\) \{([\s\S]*?)\n  \}/)?.[1] ?? ''
+  assert.ok(logoutBody.includes('setCatalogFilters({ ...defaultCatalogFilters })'))
+  assert.ok(logoutBody.includes("setDeviceTagDraft('')"))
+  assert.ok(logoutBody.includes("setUploadMessage('')"))
+  assert.ok(logoutBody.includes("setCompanionTokenMessage('')"))
+})
