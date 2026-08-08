@@ -9,6 +9,11 @@ type BookSummary = {
   status: string
   chapterCount: number
   createdAt: string
+  sourceProvider: string | null
+  externalSourceId: string | null
+  sourceUrl: string | null
+  coverImageUrl: string | null
+  sourceSyncedAt: string | null
 }
 
 type Chapter = {
@@ -129,6 +134,20 @@ function App() {
     } catch (error) {
       setUploadState('error')
       setUploadMessage(error instanceof Error ? error.message : '匯入失敗，請稍後再試。')
+    }
+  }
+
+  async function handleLibraryRefresh() {
+    setLibraryState('loading')
+    try {
+      const response = await fetch('/api/books')
+      if (!response.ok) throw new Error(`API returned ${response.status}`)
+      const items = await response.json() as BookSummary[]
+      setBooks(items)
+      setSelectedBookId(items[0]?.id ?? null)
+      setLibraryState('ready')
+    } catch {
+      setLibraryState('error')
     }
   }
 
@@ -263,6 +282,33 @@ function App() {
           <span className="rounded-full border border-white/[.08] px-3 py-1 text-xs text-stone-500">{books.length} 本</span>
         </div>
 
+        <div className="mb-8 grid gap-6 overflow-hidden rounded-3xl border border-orange-300/15 bg-gradient-to-br from-orange-300/[.07] via-white/[.02] to-rose-300/[.04] p-5 sm:p-7 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+          <div className="min-w-0">
+            <div className="flex items-start gap-4">
+              <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl border border-orange-300/20 bg-orange-200/[.08] font-serif text-sm text-orange-200">博客</span>
+              <div>
+                <p className="eyebrow">Books.com.tw bookshelf</p>
+                <h3 className="mt-2 font-serif text-2xl text-stone-100">從博客來電子書櫃開始</h3>
+                <p className="mt-3 max-w-2xl text-sm leading-7 text-stone-400">
+                  Companion 只同步目前頁面可見的書名、作者、封面與官方閱讀連結；帳密、Cookie、購書憑證和受保護內文都留在博客來。
+                </p>
+              </div>
+            </div>
+            <ol className="mt-6 grid gap-2 text-xs text-stone-500 sm:grid-cols-3">
+              <li><span className="mr-2 text-orange-200/70">01</span>在官方書櫃登入並載入書籍</li>
+              <li><span className="mr-2 text-orange-200/70">02</span>用 Companion 勾選並同步</li>
+              <li><span className="mr-2 text-orange-200/70">03</span>回來重新整理 StoryVoice</li>
+            </ol>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3 lg:w-52 lg:grid-cols-1">
+            <a className="primary-button text-center" href="https://viewer-ebook.books.com.tw/viewer/index.html?readlist=all" rel="noreferrer" target="_blank">開啟官方書櫃 ↗</a>
+            <a className="secondary-button text-center" href="https://github.com/NickYCLin/StoryVoice/tree/main/extensions/books-com-tw-companion" rel="noreferrer" target="_blank">安裝 Companion ↗</a>
+            <button className="secondary-button disabled:cursor-wait disabled:opacity-60" disabled={libraryState === 'loading'} onClick={handleLibraryRefresh} type="button">
+              {libraryState === 'loading' ? '重新整理中…' : '重新整理書庫'}
+            </button>
+          </div>
+        </div>
+
         <form className="mb-8 grid gap-4 rounded-3xl border border-amber-300/10 bg-amber-200/[.025] p-5 sm:grid-cols-[1fr_auto] sm:items-center sm:p-6" onSubmit={handleUpload}>
           <div className="min-w-0">
             <label className="block text-sm font-semibold text-stone-200" htmlFor="book-file">匯入新故事</label>
@@ -304,12 +350,16 @@ function App() {
                   onClick={() => setSelectedBookId(book.id)}
                   type="button"
                 >
-                  <div className="book-cover"><span>{book.title.slice(0, 1)}</span></div>
+                  <div className="book-cover">
+                    {book.coverImageUrl
+                      ? <img alt="" loading="lazy" referrerPolicy="no-referrer" src={book.coverImageUrl} />
+                      : <span>{book.title.slice(0, 1)}</span>}
+                  </div>
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-serif text-xl text-stone-100">{book.title}</p>
                     <p className="mt-1 truncate text-sm text-stone-500">{book.author}</p>
                     <div className="mt-7 flex flex-wrap items-center gap-3 text-xs text-stone-600">
-                      <span>{book.chapterCount} 章</span><span>·</span><span>{book.fileType.toUpperCase()}</span><span>·</span><span>{book.status}</span>
+                      <span>{book.chapterCount} 章</span><span>·</span><span>{book.sourceProvider === 'books-com-tw' ? '博客來' : book.fileType.toUpperCase()}</span><span>·</span><span>{book.status === 'Linked' ? '已連結' : book.status}</span>
                     </div>
                   </div>
                 </button>
@@ -323,13 +373,26 @@ function App() {
                 <div>
                   <div className="flex flex-col justify-between gap-4 border-b border-white/[.07] pb-6 sm:flex-row sm:items-start">
                     <div className="min-w-0">
-                      <p className="eyebrow">Selected story</p>
+                      <p className="eyebrow">{selectedBook.sourceProvider === 'books-com-tw' ? 'Books.com.tw linked book' : 'Selected story'}</p>
                       <h3 className="mt-2 break-words font-serif text-3xl text-stone-100">{selectedBook.title}</h3>
-                      <p className="mt-2 text-sm text-stone-500">{selectedBook.author} · {selectedBook.language} · {selectedBook.fileType.toUpperCase()}</p>
+                      <p className="mt-2 text-sm text-stone-500">{selectedBook.author} · {selectedBook.language} · {selectedBook.sourceProvider === 'books-com-tw' ? '博客來書櫃' : selectedBook.fileType.toUpperCase()}</p>
+                      {selectedBook.sourceUrl && (
+                        <a className="mt-4 inline-flex text-sm text-orange-200 transition hover:text-orange-100" href={selectedBook.sourceUrl} rel="noreferrer" target="_blank">回博客來官方閱讀器 ↗</a>
+                      )}
                     </div>
                     <span className="shrink-0 rounded-full border border-white/[.08] px-3 py-1 text-xs text-stone-500">{selectedBook.chapters.length} 章</span>
                   </div>
                   <div className="mt-5 space-y-3">
+                    {selectedBook.chapters.length === 0 && selectedBook.sourceProvider === 'books-com-tw' && (
+                      <div className="library-state min-h-52">
+                        <div>
+                          <span className="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-2xl border border-orange-300/20 bg-orange-300/[.06] text-orange-200">↗</span>
+                          <h4 className="font-serif text-xl text-stone-200">書櫃資料已連結，內文仍在博客來</h4>
+                          <p className="mx-auto mt-3 max-w-md text-sm leading-7 text-stone-500">StoryVoice 不會抓取或解密受保護內容。要進行故事分析，請另外匯入你有權處理的無 DRM EPUB／TXT。</p>
+                          <a className="mt-5 inline-flex text-sm text-amber-200" href="#book-file">前往合法檔案匯入 ↑</a>
+                        </div>
+                      </div>
+                    )}
                     {selectedBook.chapters.map((chapter) => (
                       <details className="chapter-panel group" key={chapter.id}>
                         <summary className="flex cursor-pointer list-none items-center gap-4 px-4 py-4 text-left">

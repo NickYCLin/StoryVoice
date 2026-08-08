@@ -212,6 +212,10 @@ Book
 - Author
 - Language
 - CoverUrl
+- SourceProvider
+- ExternalSourceId
+- SourceUrl
+- SourceSyncedAt
 - OriginalFileName
 - FileType
 - Status
@@ -221,6 +225,7 @@ Book
 Status：
 
 ```text
+Linked
 Uploaded
 Parsing
 Analyzing
@@ -1355,6 +1360,9 @@ docker compose up
 - [x] TOC
 - [x] Chapter Extraction（TXT / EPUB）
 - [x] Book Library UI
+- [x] 博客來書櫃 metadata 匯入 API（idempotent）
+- [x] Books.com.tw Companion extension
+- [x] Linked 書籍來源、封面與官方閱讀連結 UI
 
 Acceptance Criteria：
 
@@ -1365,7 +1373,17 @@ Acceptance Criteria：
 ↓
 解析出 Chapters
 ↓
-Web 可以看到章節
+前端可看到章節列表
+
+或：
+
+博客來官方書櫃登入
+↓
+Companion 只讀目前頁面可見 metadata
+↓
+StoryVoice 建立／更新 Linked 書籍
+↓
+前端可辨識博客來來源並回到官方閱讀器
 ```
 
 ---

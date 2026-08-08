@@ -14,6 +14,7 @@ Phase 1 Foundation 已建立：
 - React 19 + TypeScript + Vite + Tailwind CSS 4
 - Book / Chapter domain model and REST API
 - EPUB / TXT multipart upload、metadata、TOC 與章節解析
+- 博客來電子書櫃 Companion：同步可見 metadata 與官方閱讀連結
 - Serilog, OpenAPI, liveness/readiness health checks
 - Docker Compose development stack
 - Unit and integration tests + GitHub Actions CI
@@ -72,6 +73,7 @@ Vite proxies `/api` and `/health` to `http://localhost:8080`.
 ```text
 POST /api/books
 POST /api/books/import
+POST /api/books/sources/books-com-tw/import
 GET  /api/books
 GET  /api/books/{id}
 ```
@@ -96,6 +98,16 @@ expansion is capped at 100 MiB and 5,000 entries.
 
 Open `http://localhost:3000/#library` to import EPUB/TXT files, switch between
 books, and expand the parsed chapter text in the read-only library view.
+
+### 博客來電子書櫃 Companion
+
+Chrome／Chromium 可載入 [`extensions/books-com-tw-companion`](extensions/books-com-tw-companion)，
+從使用者已登入的官方電子書櫃同步**目前頁面可見**的書名、作者、封面與官方閱讀連結。
+Companion 不讀取帳密、Cookie、購買憑證或電子書內文，也不呼叫博客來未公開 API。
+
+同步後的書籍狀態為 `Linked`，可以在 StoryVoice 書庫辨識來源並回到博客來官方閱讀器；
+若要進行故事分析與語音生成，仍須另外匯入使用者有權處理的無 DRM EPUB／TXT。
+安裝與測試步驟見 [Companion README](extensions/books-com-tw-companion/README.md)。
 
 Example:
 
@@ -149,7 +161,7 @@ tests/
 
 ## Roadmap
 
-1. **Book Import** — EPUB / TXT upload, metadata, TOC and chapter extraction
+1. **Book Import** — EPUB / TXT upload、博客來書櫃 metadata link、TOC and chapter extraction
 2. **Story Analyzer** — narrator, dialogue, speaker, emotion and confidence
 3. **Character Bible** — aliases, merge, voice lock and cross-chapter consistency
 4. **Voice Casting / TTS** — provider abstraction, preview, cache and segment regeneration
@@ -160,6 +172,7 @@ tests/
 ## Security and content rights
 
 - StoryVoice **does not provide DRM circumvention**.
+- 博客來 Companion 不接收帳密／Cookie，也不下載或解密博客來電子書內文。
 - Process only content you own or have the right to transform.
 - API keys belong in environment variables or a secret manager, never Git.
 - Uploaded books, generated audio, analysis results and runtime volumes are ignored by Git.
