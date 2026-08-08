@@ -34,6 +34,7 @@ jobs:
           cache: npm
           cache-dependency-path: src/StoryVoice.Web/package-lock.json
       - run: npm ci
+      - run: npm test
       - run: npm run lint
       - run: npm run build
       - run: npm run build

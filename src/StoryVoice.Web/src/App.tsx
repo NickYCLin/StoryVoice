@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useState, type CSSProperties, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useState, type CSSProperties, type FormEvent } from 'react'
+
+import {
+  filterAndSortBooks,
+  normalizeDeviceTag,
+  type DeviceBookTags,
+  type LibraryCatalogFilters,
+} from './libraryCatalog'
 
 type AuthSession = {
   authenticated: boolean
@@ -47,6 +54,34 @@ type LoadState = 'idle' | 'loading' | 'ready' | 'error'
 const basePath = import.meta.env.BASE_URL.replace(/\/+$/, '')
 const apiUrl = (path: string) => `${basePath}${path.startsWith('/') ? path : `/${path}`}`
 const companionDownloadUrl = `${import.meta.env.BASE_URL}storyvoice-books-companion.zip`
+const deviceTagsStorageKey = 'storyvoice:device-book-tags:v1'
+const defaultCatalogFilters: LibraryCatalogFilters = {
+  query: '',
+  source: 'all',
+  layout: 'all',
+  tts: 'all',
+  tag: 'all',
+  sort: 'created-desc',
+}
+
+function readDeviceBookTags(): DeviceBookTags {
+  try {
+    const stored = JSON.parse(localStorage.getItem(deviceTagsStorageKey) ?? '{}') as unknown
+    if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return {}
+
+    return Object.fromEntries(Object.entries(stored).flatMap(([bookId, values]) => {
+      if (!Array.isArray(values)) return []
+      const tags = values
+        .filter((value): value is string => typeof value === 'string')
+        .map(normalizeDeviceTag)
+        .filter((value): value is string => value !== null)
+        .slice(0, 8)
+      return tags.length > 0 ? [[bookId, tags]] : []
+    }))
+  } catch {
+    return {}
+  }
+}
 
 const pipeline = [
   ['01', '整理章節', '解析 EPUB／TXT，建立可閱讀的章節與書庫。', '目前可用'],
@@ -171,6 +206,25 @@ function App() {
   const [detailState, setDetailState] = useState<LoadState>('idle')
   const [uploadState, setUploadState] = useState<LoadState>('idle')
   const [uploadMessage, setUploadMessage] = useState('')
+  const [catalogFilters, setCatalogFilters] = useState<LibraryCatalogFilters>(defaultCatalogFilters)
+  const [deviceBookTags, setDeviceBookTags] = useState<DeviceBookTags>(readDeviceBookTags)
+  const [deviceTagDraft, setDeviceTagDraft] = useState('')
+
+  const visibleBooks = useMemo(
+    () => filterAndSortBooks(books, catalogFilters, deviceBookTags),
+    [books, catalogFilters, deviceBookTags],
+  )
+  const availableDeviceTags = useMemo(
+    () => [...new Set(books.flatMap((book) => deviceBookTags[book.id] ?? []))]
+      .sort((left, right) => left.localeCompare(right, 'zh-TW')),
+    [books, deviceBookTags],
+  )
+  const hasCatalogFilters = catalogFilters.query !== ''
+    || catalogFilters.source !== 'all'
+    || catalogFilters.layout !== 'all'
+    || catalogFilters.tts !== 'all'
+    || catalogFilters.tag !== 'all'
+    || catalogFilters.sort !== 'created-desc'
 
   const loadAuthSession = useCallback(async () => {
     try {
@@ -216,6 +270,24 @@ function App() {
   }, [authState.status])
 
   useEffect(() => {
+    if (libraryState !== 'ready' || books.length === 0) return
+    if (visibleBooks.length === 0) {
+      setSelectedBookId(null)
+      return
+    }
+    if (!selectedBookId || !visibleBooks.some((book) => book.id === selectedBookId)) {
+      setSelectedBookId(visibleBooks[0].id)
+    }
+  }, [books.length, libraryState, selectedBookId, visibleBooks])
+
+  useEffect(() => {
+    if (catalogFilters.tag !== 'all' && !availableDeviceTags.includes(catalogFilters.tag)) {
+      setCatalogFilters((current) => ({ ...current, tag: 'all' }))
+    }
+  }, [availableDeviceTags, catalogFilters.tag])
+
+  useEffect(() => {
+    setDeviceTagDraft('')
     if (authState.status !== 'authenticated' || !selectedBookId) {
       setSelectedBook(null)
       setDetailState('idle')
@@ -243,6 +315,42 @@ function App() {
 
     return () => controller.abort()
   }, [authState.status, selectedBookId])
+
+  function saveDeviceBookTags(update: (current: DeviceBookTags) => DeviceBookTags) {
+    setDeviceBookTags((current) => {
+      const next = update(current)
+      try {
+        localStorage.setItem(deviceTagsStorageKey, JSON.stringify(next))
+      } catch {
+        // The organizer remains usable for this page even if private browsing blocks storage.
+      }
+      return next
+    })
+  }
+
+  function handleAddDeviceTag(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!selectedBookId) return
+    const tag = normalizeDeviceTag(deviceTagDraft)
+    if (!tag) return
+
+    saveDeviceBookTags((current) => {
+      const existing = current[selectedBookId] ?? []
+      if (existing.length >= 8 || existing.some((value) => value.localeCompare(tag, 'zh-TW', { sensitivity: 'base' }) === 0)) return current
+      return { ...current, [selectedBookId]: [...existing, tag] }
+    })
+    setDeviceTagDraft('')
+  }
+
+  function removeDeviceTag(bookId: string, tag: string) {
+    saveDeviceBookTags((current) => {
+      const remaining = (current[bookId] ?? []).filter((value) => value !== tag)
+      const next = { ...current }
+      if (remaining.length > 0) next[bookId] = remaining
+      else delete next[bookId]
+      return next
+    })
+  }
 
   async function handleUpload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -545,8 +653,8 @@ function App() {
         <div className="mb-10 flex flex-col justify-between gap-6 sm:flex-row sm:items-end">
           <div>
             <p className="eyebrow">Start here</p>
-            <h2 className="mt-3 font-serif text-4xl tracking-tight sm:text-5xl">先匯入一本書。</h2>
-            <p className="mt-4 max-w-2xl text-sm leading-7 text-stone-400">這是目前最直接、最完整的使用方式。匯入完成後，下方會立刻出現書籍與章節。</p>
+            <h2 className="mt-3 font-serif text-4xl tracking-tight sm:text-5xl">整理你的故事書庫。</h2>
+            <p className="mt-4 max-w-2xl text-sm leading-7 text-stone-400">搜尋、篩選、排序並加上此裝置標籤；有合法正文的 EPUB／TXT 仍可直接匯入章節。</p>
           </div>
           <span className="rounded-full border border-white/[.08] px-3 py-1 text-xs text-stone-500">書庫已有 {books.length} 本</span>
         </div>
@@ -630,6 +738,69 @@ function App() {
           </div>
         </details>
 
+        {libraryState === 'ready' && books.length > 0 && (
+          <section aria-label="書庫整理工具" className="mb-6 rounded-3xl border border-white/[.07] bg-white/[.018] p-5 sm:p-6">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <label className="text-xs text-stone-500 sm:col-span-2 lg:col-span-1">
+                搜尋書名、作者、書籍 ID 或標籤
+                <input
+                  className="auth-input mt-2"
+                  onChange={(event) => setCatalogFilters((current) => ({ ...current, query: event.target.value }))}
+                  placeholder="輸入關鍵字"
+                  type="search"
+                  value={catalogFilters.query}
+                />
+              </label>
+              <label className="text-xs text-stone-500">
+                來源
+                <select className="auth-input mt-2" onChange={(event) => setCatalogFilters((current) => ({ ...current, source: event.target.value as LibraryCatalogFilters['source'] }))} value={catalogFilters.source}>
+                  <option value="all">全部來源</option>
+                  <option value="books-com-tw">博客來連結</option>
+                  <option value="uploaded">StoryVoice 匯入</option>
+                </select>
+              </label>
+              <label className="text-xs text-stone-500">
+                博客來版型
+                <select className="auth-input mt-2" onChange={(event) => setCatalogFilters((current) => ({ ...current, layout: event.target.value as LibraryCatalogFilters['layout'] }))} value={catalogFilters.layout}>
+                  <option value="all">全部版型</option>
+                  <option value="Reflowable">流動版</option>
+                  <option value="Fixed">固定版</option>
+                  <option value="unknown">未標示／非博客來</option>
+                </select>
+              </label>
+              <label className="text-xs text-stone-500">
+                博客來官方 TTS
+                <select className="auth-input mt-2" onChange={(event) => setCatalogFilters((current) => ({ ...current, tts: event.target.value as LibraryCatalogFilters['tts'] }))} value={catalogFilters.tts}>
+                  <option value="all">全部狀態</option>
+                  <option value="true">可用</option>
+                  <option value="false">未開放</option>
+                  <option value="unknown">未標示／非博客來</option>
+                </select>
+              </label>
+              <label className="text-xs text-stone-500">
+                此裝置標籤
+                <select className="auth-input mt-2" disabled={availableDeviceTags.length === 0} onChange={(event) => setCatalogFilters((current) => ({ ...current, tag: event.target.value }))} value={catalogFilters.tag}>
+                  <option value="all">全部標籤</option>
+                  {availableDeviceTags.map((tag) => <option key={tag} value={tag}>{tag}</option>)}
+                </select>
+              </label>
+              <label className="text-xs text-stone-500">
+                排序
+                <select className="auth-input mt-2" onChange={(event) => setCatalogFilters((current) => ({ ...current, sort: event.target.value as LibraryCatalogFilters['sort'] }))} value={catalogFilters.sort}>
+                  <option value="created-desc">最近加入</option>
+                  <option value="title">書名</option>
+                  <option value="author">作者</option>
+                  <option value="synced-desc">最近同步</option>
+                </select>
+              </label>
+            </div>
+            <div className="mt-5 flex flex-col justify-between gap-3 border-t border-white/[.06] pt-4 text-xs text-stone-500 sm:flex-row sm:items-center">
+              <span role="status">符合 {visibleBooks.length}／全部 {books.length} 本</span>
+              <button className="secondary-button disabled:opacity-40" disabled={!hasCatalogFilters} onClick={() => setCatalogFilters(defaultCatalogFilters)} type="button">清除條件</button>
+            </div>
+          </section>
+        )}
+
         {libraryState === 'loading' && <div className="library-state">正在連接 StoryVoice API…</div>}
         {libraryState === 'error' && <div className="library-state border-rose-400/20 text-rose-200">API 尚未連線。請確認後端服務已啟動。</div>}
         {libraryState === 'ready' && books.length === 0 && (
@@ -642,10 +813,19 @@ function App() {
             </div>
           </div>
         )}
-        {libraryState === 'ready' && books.length > 0 && (
+        {libraryState === 'ready' && books.length > 0 && visibleBooks.length === 0 && (
+          <div className="library-state min-h-56">
+            <div>
+              <h3 className="font-serif text-2xl text-stone-200">沒有符合條件的書。</h3>
+              <p className="mt-3 text-sm text-stone-500">換一組條件，或清除全部篩選。</p>
+              <button className="secondary-button mt-5" onClick={() => setCatalogFilters(defaultCatalogFilters)} type="button">清除條件</button>
+            </div>
+          </div>
+        )}
+        {libraryState === 'ready' && visibleBooks.length > 0 && (
           <div className="grid gap-6 lg:grid-cols-[minmax(0,.82fr)_minmax(0,1.18fr)]">
             <div className="space-y-3">
-              {books.map((book) => (
+              {visibleBooks.map((book) => (
                 <button
                   className={`book-card w-full text-left ${selectedBookId === book.id ? 'selected-book' : ''}`}
                   key={book.id}
@@ -664,6 +844,13 @@ function App() {
                       <span>{book.chapterCount} 章</span><span>·</span><span>{book.sourceProvider === 'books-com-tw' ? '博客來' : book.fileType.toUpperCase()}</span><span>·</span><span>{book.status === 'Linked' ? '已連結' : book.status}</span>
                       {book.nativeTtsAvailable === true && <><span>·</span><span className="text-emerald-300/80">官方 TTS</span></>}
                     </div>
+                    {(deviceBookTags[book.id]?.length ?? 0) > 0 && (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {deviceBookTags[book.id].slice(0, 3).map((tag) => (
+                          <span className="rounded-full border border-sky-300/15 bg-sky-300/[.04] px-2 py-1 text-[10px] text-sky-200/70" key={tag}>{tag}</span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </button>
               ))}
@@ -691,6 +878,35 @@ function App() {
                       )}
                     </div>
                     <span className="shrink-0 rounded-full border border-white/[.08] px-3 py-1 text-xs text-stone-500">{selectedBook.chapters.length} 章</span>
+                  </div>
+                  <div className="mt-5 rounded-2xl border border-sky-300/10 bg-sky-300/[.025] p-4">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <strong className="mr-1 text-xs text-stone-300">此裝置標籤</strong>
+                      {(deviceBookTags[selectedBook.id] ?? []).map((tag) => (
+                        <button
+                          aria-label={`移除標籤 ${tag}`}
+                          className="rounded-full border border-sky-300/15 bg-sky-300/[.05] px-2.5 py-1 text-xs text-sky-200/80 transition hover:border-rose-300/25 hover:text-rose-200"
+                          key={tag}
+                          onClick={() => removeDeviceTag(selectedBook.id, tag)}
+                          type="button"
+                        >
+                          {tag} ×
+                        </button>
+                      ))}
+                      {(deviceBookTags[selectedBook.id]?.length ?? 0) === 0 && <span className="text-xs text-stone-600">尚未加標籤</span>}
+                    </div>
+                    <form className="mt-3 flex flex-col gap-2 sm:flex-row" onSubmit={handleAddDeviceTag}>
+                      <input
+                        aria-label="新增此裝置標籤"
+                        className="auth-input min-w-0 flex-1"
+                        maxLength={24}
+                        onChange={(event) => setDeviceTagDraft(event.target.value)}
+                        placeholder="例如：待讀、小說、工作"
+                        value={deviceTagDraft}
+                      />
+                      <button className="secondary-button shrink-0" disabled={!normalizeDeviceTag(deviceTagDraft) || (deviceBookTags[selectedBook.id]?.length ?? 0) >= 8} type="submit">加入標籤</button>
+                    </form>
+                    <p className="mt-2 text-[10px] leading-5 text-stone-600">最多 8 個，只保存在目前瀏覽器；不會傳到博客來。</p>
                   </div>
                   <div className="mt-5 space-y-3">
                     {selectedBook.chapters.length === 0 && selectedBook.sourceProvider === 'books-com-tw' && (
