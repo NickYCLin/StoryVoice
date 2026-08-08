@@ -17,12 +17,14 @@
    docker compose up -d --build
    ```
 2. 登入 StoryVoice，在「進階：同步博客來書櫃書目」建立七天有效的連線金鑰。
-3. 在 Chrome／Chromium 開啟 `chrome://extensions`。
-4. 開啟「開發人員模式」，選擇「載入未封裝項目」。
-5. 選擇本目錄：`extensions/books-com-tw-companion`。
-6. 前往 [博客來電子書櫃](https://viewer-ebook.books.com.tw/viewer/index.html?readlist=all)，直接在博客來完成登入。
-7. 點 extension 圖示後貼上金鑰，可掃描目前頁面，或明確按下「展開完整書櫃」讓 Companion 捲動／點擊書櫃的「看更多」。
-8. 確認清單、勾選書籍，再同步到 StoryVoice。
+3. 從正式 StoryVoice 的「下載 Companion ZIP」取得安裝包並解壓縮；固定下載位址為
+   `https://aiprod.wrbtycg.tw/StoryVoice/storyvoice-books-companion.zip`。
+4. 在 Chrome／Chromium 開啟 `chrome://extensions`。
+5. 開啟「開發人員模式」，選擇「載入未封裝項目」。
+6. 選擇剛才解壓縮後的資料夾。
+7. 前往 [博客來電子書櫃](https://viewer-ebook.books.com.tw/viewer/index.html?readlist=all)，直接在博客來完成登入。
+8. 點 extension 圖示後貼上金鑰，可掃描目前頁面，或明確按下「展開完整書櫃」讓 Companion 捲動／點擊書櫃的「看更多」。
+9. 確認清單、勾選書籍，再同步到 StoryVoice。
 
 預設把資料送到正式站 `https://aiprod.wrbtycg.tw/StoryVoice`；本機開發時也可明確切換成
 `http://localhost:3000` 或 `http://127.0.0.1:3000`。其他 host、port、path、HTTP 正式站、帳密 URL

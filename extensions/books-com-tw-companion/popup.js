@@ -153,7 +153,12 @@ async function syncBooks() {
       updatedCount += body.updatedCount
     }
 
-    setStatus(`同步完成：新增 ${createdCount} 本、更新 ${updatedCount} 本。`, 'success')
+    setStatus(`同步完成：新增 ${createdCount} 本、更新 ${updatedCount} 本。正在開啟 StoryVoice 書庫…`, 'success')
+    try {
+      await chrome.tabs.create({ url: `${origin}/#library` })
+    } catch {
+      setStatus(`同步完成：新增 ${createdCount} 本、更新 ${updatedCount} 本；請回 StoryVoice 重新整理書庫。`, 'success')
+    }
   } catch (error) {
     setStatus(error instanceof Error ? error.message : '同步失敗，請確認 StoryVoice 已啟動。', 'error')
   } finally {

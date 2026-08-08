@@ -46,6 +46,7 @@ type LoadState = 'idle' | 'loading' | 'ready' | 'error'
 
 const basePath = import.meta.env.BASE_URL.replace(/\/+$/, '')
 const apiUrl = (path: string) => `${basePath}${path.startsWith('/') ? path : `/${path}`}`
+const companionDownloadUrl = `${import.meta.env.BASE_URL}storyvoice-books-companion.zip`
 
 const pipeline = [
   ['01', '整理章節', '解析 EPUB／TXT，建立可閱讀的章節與書庫。', '目前可用'],
@@ -587,6 +588,16 @@ function App() {
                 <li><span className="mr-2 text-orange-200/70">02</span>建立金鑰並貼到 Companion</li>
                 <li><span className="mr-2 text-orange-200/70">03</span>勾選同步後重新整理</li>
               </ol>
+              <div className="mt-5 rounded-2xl border border-sky-300/15 bg-sky-300/[.035] p-4">
+                <strong className="text-sm text-stone-200">第一次安裝 Companion</strong>
+                <ol className="mt-3 space-y-2 text-xs leading-6 text-stone-500">
+                  <li><span className="mr-2 text-sky-200/70">1.</span>按「下載 Companion ZIP」，下載後解壓縮。</li>
+                  <li><span className="mr-2 text-sky-200/70">2.</span>在 Chrome 網址列輸入 <code className="text-sky-200">chrome://extensions</code>，開啟「開發人員模式」。</li>
+                  <li><span className="mr-2 text-sky-200/70">3.</span>按「載入未封裝項目」，選擇剛才解壓縮後的資料夾。</li>
+                </ol>
+                <p className="mt-3 text-xs leading-5 text-stone-600">Chrome 基於安全規則，這一步必須由你親自確認；安裝後不用提供博客來帳密給 StoryVoice。</p>
+                <a className="mt-3 inline-flex text-xs text-sky-200 transition hover:text-sky-100" href="https://github.com/NickYCLin/StoryVoice/tree/main/extensions/books-com-tw-companion" rel="noreferrer" target="_blank">檢視 Companion 原始碼 ↗</a>
+              </div>
               <div className="mt-5 rounded-2xl border border-orange-300/15 bg-orange-300/[.035] p-4">
                 <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
                   <div>
@@ -610,8 +621,8 @@ function App() {
               </div>
             </div>
             <div className="grid gap-3 sm:grid-cols-3 lg:w-52 lg:grid-cols-1">
+              <a className="primary-button text-center" download href={companionDownloadUrl}>下載 Companion ZIP</a>
               <a className="secondary-button text-center" href="https://viewer-ebook.books.com.tw/viewer/index.html?readlist=all" rel="noreferrer" target="_blank">開啟官方書櫃 ↗</a>
-              <a className="secondary-button text-center" href="https://github.com/NickYCLin/StoryVoice/tree/main/extensions/books-com-tw-companion" rel="noreferrer" target="_blank">安裝 Companion ↗</a>
               <button className="secondary-button disabled:cursor-wait disabled:opacity-60" disabled={libraryState === 'loading'} onClick={handleLibraryRefresh} type="button">
                 {libraryState === 'loading' ? '重新整理中…' : '重新整理書庫'}
               </button>
