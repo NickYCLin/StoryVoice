@@ -176,6 +176,16 @@ test('rejects source links that do not identify the same external book', () => {
     querySelectorAll: () => [link]
   }), [])
 
+  const genericViewer = extractor.normalizeCandidate({
+    externalId: 'E050145362',
+    title: '書櫃卡片以 DOM 識別碼建立官方入口',
+    sourceUrl: 'https://viewer-ebook.books.com.tw/viewer/index.html?readlist=all'
+  })
+  assert.equal(
+    genericViewer.sourceUrl,
+    'https://viewer-ebook.books.com.tw/viewer/index.html?book_uni_id=E050145362'
+  )
+
   assert.equal(extractor.normalizeCandidate({
     externalId: 'E050145362',
     title: '不是書籍入口',

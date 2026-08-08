@@ -192,6 +192,7 @@ public sealed class BooksComTwBookshelfService(
 
     private static bool ViewerQueryMatchesExternalId(Uri uri, string externalId)
     {
+        var foundExternalId = false;
         foreach (var pair in uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
         {
             var separator = pair.IndexOf('=');
@@ -201,6 +202,7 @@ public sealed class BooksComTwBookshelfService(
                 continue;
             }
 
+            foundExternalId = true;
             var value = separator >= 0 ? Uri.UnescapeDataString(pair[(separator + 1)..]) : string.Empty;
             if (!value.Equals(externalId, StringComparison.OrdinalIgnoreCase))
             {
@@ -208,7 +210,7 @@ public sealed class BooksComTwBookshelfService(
             }
         }
 
-        return true;
+        return foundExternalId;
     }
 
     private static string Require(string? value, string fieldName, int maximumLength)

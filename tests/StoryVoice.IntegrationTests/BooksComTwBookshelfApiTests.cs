@@ -167,6 +167,7 @@ public sealed class BooksComTwBookshelfApiTests(ApiFactory factory) : IClassFixt
     [Theory]
     [InlineData("https://www.books.com.tw/products/E050145399")]
     [InlineData("https://viewer-ebook.books.com.tw/viewer/epub_v3/?book_uni_id=E050145399")]
+    [InlineData("https://viewer-ebook.books.com.tw/viewer/index.html?readlist=all")]
     [InlineData("https://www.books.com.tw/web/sys_qalist/qa_1_80")]
     public async Task Import_rejects_source_urls_that_do_not_identify_the_external_book(string sourceUrl)
     {
