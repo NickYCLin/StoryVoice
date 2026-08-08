@@ -35,10 +35,10 @@ const basePath = import.meta.env.BASE_URL.replace(/\/+$/, '')
 const apiUrl = (path: string) => `${basePath}${path.startsWith('/') ? path : `/${path}`}`
 
 const pipeline = [
-  ['01', '理解章節', '解析 EPUB、章節、段落與對話邊界。'],
-  ['02', '辨識角色', '建立 Character Bible，讓角色跨章節保持一致。'],
-  ['03', '導演演出', '決定說話者、情緒、語氣、停頓與節奏。'],
-  ['04', '合成聲音', '透過可替換的 TTS Provider 生成多角色音訊。'],
+  ['01', '整理章節', '解析 EPUB／TXT，建立可閱讀的章節與書庫。', '目前可用'],
+  ['02', '辨識角色', '建立 Character Bible，讓角色跨章節保持一致。', '開發中'],
+  ['03', '導演演出', '決定說話者、情緒、語氣、停頓與節奏。', '開發中'],
+  ['04', '合成聲音', '透過可替換的 TTS Provider 生成多角色音訊。', '開發中'],
 ]
 
 function App() {
@@ -173,7 +173,7 @@ function App() {
         <div className="flex items-center gap-4">
           <span className="hidden items-center gap-2 text-xs text-stone-400 sm:flex">
             <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,.85)]" />
-            Foundation online
+            書庫功能可用
           </span>
           <a
             className="rounded-full border border-white/10 bg-white/[.04] px-4 py-2 text-sm text-stone-200 transition hover:border-amber-300/30 hover:bg-amber-200/[.06]"
@@ -186,31 +186,29 @@ function App() {
         </div>
       </header>
 
-      <section id="top" className="relative z-10 mx-auto grid min-h-[78vh] max-w-7xl items-center gap-16 px-6 py-20 lg:grid-cols-[1.08fr_.92fr] lg:px-10 lg:py-28">
+      <section id="top" className="relative z-10 mx-auto grid min-h-[74vh] max-w-7xl items-center gap-16 px-6 py-16 lg:grid-cols-[1.08fr_.92fr] lg:px-10 lg:py-24">
         <div>
           <p className="mb-6 flex items-center gap-3 text-xs font-semibold uppercase tracking-[.3em] text-amber-300/80">
             <span className="h-px w-10 bg-amber-300/50" />
-            Turn books into performances
+            從一本書開始
           </p>
           <h1 className="max-w-4xl font-serif text-5xl leading-[1.04] tracking-[-.04em] text-stone-50 sm:text-6xl lg:text-7xl">
-            不只是念書。
-            <span className="mt-2 block bg-gradient-to-r from-amber-200 via-orange-300 to-rose-300 bg-clip-text text-transparent">
-              <span className="block sm:inline">讓故事真正</span><span className="whitespace-nowrap">開口。</span>
-            </span>
+            把電子書放進來，
+            <span className="mt-2 block bg-gradient-to-r from-amber-200 via-orange-300 to-rose-300 bg-clip-text text-transparent">先讓章節清楚亮起來。</span>
           </h1>
-          <p className="mt-8 max-w-2xl text-base leading-8 text-stone-400 sm:text-lg">
-            StoryVoice 先理解旁白、角色與情緒，再用一致的聲線演出每一章。
-            核心不是文字轉語音，而是一位能讀懂故事的 AI 導演。
+          <p className="mt-8 max-w-2xl text-base leading-8 text-stone-300 sm:text-lg">
+            只要準備一個無 DRM 的 EPUB 或 UTF-8 TXT，StoryVoice 會替你解析章節、整理書庫，並保留原始內容供閱讀。
           </p>
-          <div className="mt-10 flex flex-wrap gap-4">
-            <a className="primary-button" href="#library">查看書庫</a>
-            <a className="secondary-button" href="#pipeline">探索處理流程</a>
+          <p className="mt-3 max-w-2xl text-sm leading-7 text-stone-500">
+            目前可用：匯入書籍、解析章節、閱讀管理。角色辨識與多聲線演出正在開發中。
+          </p>
+          <div className="mt-10 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+            <a className="primary-button" href="#book-file">開始使用：匯入一本書</a>
+            <a className="secondary-button" href="#quick-start">先看 3 步教學</a>
           </div>
-          <div className="mt-14 flex flex-wrap gap-x-8 gap-y-3 text-xs uppercase tracking-[.18em] text-stone-600">
-            <span>EPUB / TXT</span>
-            <span>Character Bible</span>
-            <span>Multi Voice</span>
-            <span>Provider Agnostic</span>
+          <div className="mt-10 flex flex-wrap gap-3 text-xs">
+            <span className="rounded-full border border-emerald-300/20 bg-emerald-300/[.07] px-3 py-1.5 text-emerald-200">✓ EPUB / TXT 匯入可用</span>
+            <span className="rounded-full border border-white/[.08] px-3 py-1.5 text-stone-500">角色與語音功能開發中</span>
           </div>
         </div>
 
@@ -219,10 +217,10 @@ function App() {
           <div className="stage-card relative overflow-hidden rounded-[2rem] border border-white/10 bg-[#120f18]/85 p-6 shadow-2xl shadow-black/50 backdrop-blur-xl sm:p-8">
             <div className="mb-10 flex items-center justify-between">
               <div>
-                <p className="text-[10px] uppercase tracking-[.28em] text-stone-600">Now directing</p>
-                <h2 className="mt-2 font-serif text-2xl">月色下的序章</h2>
+                <p className="text-[10px] uppercase tracking-[.28em] text-stone-600">產品願景預覽</p>
+                <h2 className="mt-2 font-serif text-2xl">未來的多角色演出</h2>
               </div>
-              <span className="rounded-full border border-rose-300/20 bg-rose-300/10 px-3 py-1 text-xs text-rose-200">情緒分析中</span>
+              <span className="rounded-full border border-amber-300/20 bg-amber-300/10 px-3 py-1 text-xs text-amber-200">功能開發中</span>
             </div>
 
             <div className="voice-wave mb-10" aria-label="音訊波形視覺化">
@@ -252,25 +250,36 @@ function App() {
         </div>
       </section>
 
-      <section id="pipeline" className="relative z-10 border-y border-white/[.06] bg-white/[.018]">
-        <div className="mx-auto max-w-7xl px-6 py-24 lg:px-10">
-          <div className="mb-12 flex flex-col justify-between gap-5 md:flex-row md:items-end">
-            <div>
-              <p className="eyebrow">From page to performance</p>
-              <h2 className="mt-3 max-w-2xl font-serif text-4xl tracking-tight sm:text-5xl">一本書，四層理解。</h2>
-            </div>
-            <p className="max-w-md text-sm leading-7 text-stone-500">每一層都有明確資料邊界，也都能人工修訂。AI 可以導演，不能替你失控。</p>
+      <section id="quick-start" className="relative z-10 border-y border-white/[.06] bg-white/[.018]">
+        <div className="mx-auto max-w-7xl px-6 py-20 lg:px-10">
+          <div className="mb-10 max-w-3xl">
+            <p className="eyebrow">Quick start</p>
+            <h2 className="mt-3 font-serif text-4xl tracking-tight sm:text-5xl">第一次來？照這 3 步就能開始。</h2>
+            <p className="mt-4 text-sm leading-7 text-stone-400">不用先設定 AI 金鑰，也不用安裝桌面程式。先把一本書整理進書庫，後面的功能才有故事可接手。</p>
           </div>
 
-          <div className="grid gap-px overflow-hidden rounded-3xl border border-white/[.07] bg-white/[.07] md:grid-cols-2 lg:grid-cols-4">
-            {pipeline.map(([number, title, description]) => (
-              <article className="group bg-[#0d0a11] p-7 transition hover:bg-[#151019]" key={number}>
-                <span className="font-mono text-xs text-amber-300/50">{number}</span>
-                <h3 className="mt-12 font-serif text-2xl text-stone-100">{title}</h3>
-                <p className="mt-4 text-sm leading-7 text-stone-500">{description}</p>
-                <div className="mt-8 h-px w-10 bg-gradient-to-r from-amber-300/60 to-transparent transition-all group-hover:w-20" />
-              </article>
-            ))}
+          <ol className="grid gap-4 lg:grid-cols-3">
+            <li className="rounded-3xl border border-white/[.08] bg-[#0d0a11] p-6 sm:p-7">
+              <span className="grid h-10 w-10 place-items-center rounded-2xl bg-amber-200/10 font-mono text-sm text-amber-200">01</span>
+              <h3 className="mt-6 font-serif text-2xl text-stone-100">準備一本電子書</h3>
+              <p className="mt-3 text-sm leading-7 text-stone-500">使用你有權處理、沒有 DRM 的 EPUB，或 UTF-8 編碼 TXT；檔案上限 10 MiB。</p>
+            </li>
+            <li className="rounded-3xl border border-amber-300/20 bg-gradient-to-br from-amber-200/[.08] to-orange-300/[.03] p-6 sm:p-7">
+              <span className="grid h-10 w-10 place-items-center rounded-2xl bg-amber-200/15 font-mono text-sm text-amber-100">02</span>
+              <h3 className="mt-6 font-serif text-2xl text-stone-100">選擇檔案並匯入</h3>
+              <p className="mt-3 text-sm leading-7 text-stone-400">按下方的「選擇檔案」，再點「匯入並解析」。完成後會自動選中這本書。</p>
+              <a className="mt-6 inline-flex text-sm font-semibold text-amber-200 transition hover:text-amber-100" href="#book-file">前往選擇檔案 ↓</a>
+            </li>
+            <li className="rounded-3xl border border-white/[.08] bg-[#0d0a11] p-6 sm:p-7">
+              <span className="grid h-10 w-10 place-items-center rounded-2xl bg-rose-200/10 font-mono text-sm text-rose-200">03</span>
+              <h3 className="mt-6 font-serif text-2xl text-stone-100">選書並展開章節</h3>
+              <p className="mt-3 text-sm leading-7 text-stone-500">左邊選一本書，右邊點章節名稱，就能檢查解析後的內容。先做到這裡就成功了。</p>
+            </li>
+          </ol>
+
+          <div className="mt-6 flex flex-col justify-between gap-4 rounded-2xl border border-sky-300/10 bg-sky-300/[.035] px-5 py-4 text-sm text-stone-400 sm:flex-row sm:items-center">
+            <p><strong className="text-stone-200">手邊沒有 EPUB？</strong> 可以先建立一個 UTF-8 TXT，放入幾段自己寫的文字測試。</p>
+            <a className="shrink-0 font-semibold text-sky-200 transition hover:text-sky-100" href="#library">直接前往故事書庫 ↓</a>
           </div>
         </div>
       </section>
@@ -278,59 +287,60 @@ function App() {
       <section id="library" className="relative z-10 mx-auto max-w-7xl px-6 py-24 lg:px-10">
         <div className="mb-10 flex flex-col justify-between gap-6 sm:flex-row sm:items-end">
           <div>
-            <p className="eyebrow">Your library</p>
-            <h2 className="mt-3 font-serif text-4xl tracking-tight sm:text-5xl">故事書庫</h2>
-            <p className="mt-4 max-w-xl text-sm leading-7 text-stone-500">上傳你有權使用的 EPUB 或 UTF-8 TXT；StoryVoice 會保留原始檔並依 TOC／標題解析章節。</p>
+            <p className="eyebrow">Start here</p>
+            <h2 className="mt-3 font-serif text-4xl tracking-tight sm:text-5xl">先匯入一本書。</h2>
+            <p className="mt-4 max-w-2xl text-sm leading-7 text-stone-400">這是目前最直接、最完整的使用方式。匯入完成後，下方會立刻出現書籍與章節。</p>
           </div>
-          <span className="rounded-full border border-white/[.08] px-3 py-1 text-xs text-stone-500">{books.length} 本</span>
+          <span className="rounded-full border border-white/[.08] px-3 py-1 text-xs text-stone-500">書庫已有 {books.length} 本</span>
         </div>
 
-        <div className="mb-8 grid gap-6 overflow-hidden rounded-3xl border border-orange-300/15 bg-gradient-to-br from-orange-300/[.07] via-white/[.02] to-rose-300/[.04] p-5 sm:p-7 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
-          <div className="min-w-0">
-            <div className="flex items-start gap-4">
-              <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl border border-orange-300/20 bg-orange-200/[.08] font-serif text-sm text-orange-200">博客</span>
-              <div>
-                <p className="eyebrow">Books.com.tw bookshelf</p>
-                <h3 className="mt-2 font-serif text-2xl text-stone-100">從博客來電子書櫃開始</h3>
-                <p className="mt-3 max-w-2xl text-sm leading-7 text-stone-400">
-                  Companion 只同步目前頁面可見的書名、作者、封面與官方閱讀連結；帳密、Cookie、購書憑證和受保護內文都留在博客來。
-                </p>
-              </div>
+        <form className="mb-6 overflow-hidden rounded-3xl border border-amber-300/20 bg-gradient-to-br from-amber-200/[.08] via-white/[.025] to-orange-300/[.04] p-5 sm:p-7" onSubmit={handleUpload}>
+          <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+            <div className="min-w-0">
+              <span className="inline-flex rounded-full border border-emerald-300/20 bg-emerald-300/[.08] px-3 py-1 text-xs font-semibold text-emerald-200">推薦方式</span>
+              <label className="mt-4 block font-serif text-2xl text-stone-100" htmlFor="book-file">選擇 EPUB 或 TXT</label>
+              <p className="mt-2 text-sm leading-7 text-stone-400">只要準備一個無 DRM 的 EPUB 或 UTF-8 TXT。選好後按「匯入並解析」，不用填其他欄位。</p>
+              <input
+                accept=".epub,.txt,application/epub+zip,text/plain"
+                className="mt-5 block w-full scroll-mt-6 cursor-pointer rounded-2xl border border-white/10 bg-black/20 p-2.5 text-sm text-stone-400 file:mr-4 file:rounded-xl file:border-0 file:bg-amber-200/10 file:px-4 file:py-2.5 file:font-semibold file:text-amber-100 hover:border-amber-300/25"
+                id="book-file"
+                name="file"
+                required
+                type="file"
+              />
+              <p className={`mt-3 min-h-5 text-xs ${uploadState === 'error' ? 'text-rose-300' : uploadState === 'ready' ? 'text-emerald-300' : 'text-stone-500'}`} role="status">
+                {uploadMessage || '支援 EPUB、UTF-8 TXT，最大 10 MiB；請只處理你有權使用的內容。'}
+              </p>
             </div>
-            <ol className="mt-6 grid gap-2 text-xs text-stone-500 sm:grid-cols-3">
-              <li><span className="mr-2 text-orange-200/70">01</span>在官方書櫃登入並載入書籍</li>
-              <li><span className="mr-2 text-orange-200/70">02</span>用 Companion 勾選並同步</li>
-              <li><span className="mr-2 text-orange-200/70">03</span>回來重新整理 StoryVoice</li>
-            </ol>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-3 lg:w-52 lg:grid-cols-1">
-            <a className="primary-button text-center" href="https://viewer-ebook.books.com.tw/viewer/index.html?readlist=all" rel="noreferrer" target="_blank">開啟官方書櫃 ↗</a>
-            <a className="secondary-button text-center" href="https://github.com/NickYCLin/StoryVoice/tree/main/extensions/books-com-tw-companion" rel="noreferrer" target="_blank">安裝 Companion ↗</a>
-            <button className="secondary-button disabled:cursor-wait disabled:opacity-60" disabled={libraryState === 'loading'} onClick={handleLibraryRefresh} type="button">
-              {libraryState === 'loading' ? '重新整理中…' : '重新整理書庫'}
+            <button className="primary-button w-full disabled:cursor-wait disabled:opacity-60 lg:w-auto" disabled={uploadState === 'loading'} type="submit">
+              {uploadState === 'loading' ? '正在解析，請稍候…' : '匯入並解析'}
             </button>
           </div>
-        </div>
-
-        <form className="mb-8 grid gap-4 rounded-3xl border border-amber-300/10 bg-amber-200/[.025] p-5 sm:grid-cols-[1fr_auto] sm:items-center sm:p-6" onSubmit={handleUpload}>
-          <div className="min-w-0">
-            <label className="block text-sm font-semibold text-stone-200" htmlFor="book-file">匯入新故事</label>
-            <input
-              accept=".epub,.txt,application/epub+zip,text/plain"
-              className="mt-3 block w-full cursor-pointer rounded-xl border border-white/10 bg-black/20 p-2 text-sm text-stone-400 file:mr-4 file:rounded-lg file:border-0 file:bg-amber-200/10 file:px-4 file:py-2 file:font-semibold file:text-amber-200 hover:border-amber-300/20"
-              id="book-file"
-              name="file"
-              required
-              type="file"
-            />
-            <p className={`mt-2 min-h-5 text-xs ${uploadState === 'error' ? 'text-rose-300' : uploadState === 'ready' ? 'text-emerald-300' : 'text-stone-600'}`} role="status">
-              {uploadMessage || '最大 10 MiB；不處理 DRM 或未授權內容。'}
-            </p>
-          </div>
-          <button className="primary-button w-full disabled:cursor-wait disabled:opacity-60 sm:w-auto" disabled={uploadState === 'loading'} type="submit">
-            {uploadState === 'loading' ? '匯入中…' : '匯入書庫'}
-          </button>
         </form>
+
+        <details className="group mb-10 overflow-hidden rounded-2xl border border-white/[.07] bg-white/[.018]">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-4 text-sm text-stone-300 sm:px-6">
+            <span><strong className="font-semibold text-stone-200">進階：同步博客來書櫃書目</strong><span className="ml-2 text-stone-600">不含受保護內文</span></span>
+            <span className="text-stone-600 transition group-open:rotate-45">＋</span>
+          </summary>
+          <div className="grid gap-6 border-t border-white/[.06] px-5 py-6 sm:px-6 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+            <div className="min-w-0">
+              <p className="text-sm leading-7 text-stone-400">這條路只同步書名、作者、封面與官方閱讀連結，不會把電子書內文匯入 StoryVoice。第一次使用建議先走上方的直接上傳。</p>
+              <ol className="mt-4 grid gap-2 text-xs text-stone-500 sm:grid-cols-3">
+                <li><span className="mr-2 text-orange-200/70">01</span>登入博客來官方書櫃</li>
+                <li><span className="mr-2 text-orange-200/70">02</span>用 Companion 勾選同步</li>
+                <li><span className="mr-2 text-orange-200/70">03</span>回來重新整理書庫</li>
+              </ol>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3 lg:w-52 lg:grid-cols-1">
+              <a className="secondary-button text-center" href="https://viewer-ebook.books.com.tw/viewer/index.html?readlist=all" rel="noreferrer" target="_blank">開啟官方書櫃 ↗</a>
+              <a className="secondary-button text-center" href="https://github.com/NickYCLin/StoryVoice/tree/main/extensions/books-com-tw-companion" rel="noreferrer" target="_blank">安裝 Companion ↗</a>
+              <button className="secondary-button disabled:cursor-wait disabled:opacity-60" disabled={libraryState === 'loading'} onClick={handleLibraryRefresh} type="button">
+                {libraryState === 'loading' ? '重新整理中…' : '重新整理書庫'}
+              </button>
+            </div>
+          </div>
+        </details>
 
         {libraryState === 'loading' && <div className="library-state">正在連接 StoryVoice API…</div>}
         {libraryState === 'error' && <div className="library-state border-rose-400/20 text-rose-200">API 尚未連線。請確認後端服務已啟動。</div>}
@@ -338,8 +348,9 @@ function App() {
           <div className="library-state min-h-64">
             <div>
               <span className="mx-auto mb-5 grid h-14 w-14 place-items-center rounded-2xl border border-amber-300/20 bg-amber-300/[.06] text-2xl">◇</span>
-              <h3 className="font-serif text-2xl text-stone-200">書庫還在等第一個故事</h3>
-              <p className="mt-3 text-sm text-stone-500">選擇上方的 EPUB 或 TXT，第一個章節很快就會點亮。</p>
+              <h3 className="font-serif text-2xl text-stone-200">還沒有書，從上面的檔案選擇開始。</h3>
+              <p className="mx-auto mt-3 max-w-md text-sm leading-7 text-stone-500">選好 EPUB 或 TXT，再按「匯入並解析」。完成後，書名與章節會出現在這裡。</p>
+              <a className="mt-5 inline-flex text-sm font-semibold text-amber-200 transition hover:text-amber-100" href="#book-file">回到選擇檔案 ↑</a>
             </div>
           </div>
         )}
@@ -412,6 +423,32 @@ function App() {
             </aside>
           </div>
         )}
+      </section>
+
+      <section id="pipeline" className="relative z-10 border-y border-white/[.06] bg-white/[.018]">
+        <div className="mx-auto max-w-7xl px-6 py-20 lg:px-10">
+          <div className="mb-12 flex flex-col justify-between gap-5 md:flex-row md:items-end">
+            <div>
+              <p className="eyebrow">Product roadmap</p>
+              <h2 className="mt-3 max-w-2xl font-serif text-4xl tracking-tight sm:text-5xl">書庫是第一步，聲音演出在後面。</h2>
+            </div>
+            <p className="max-w-md text-sm leading-7 text-stone-500">這裡是產品藍圖，不是現在每一項都能操作。綠色標記代表正式可用，其餘功能仍在開發。</p>
+          </div>
+
+          <div className="grid gap-px overflow-hidden rounded-3xl border border-white/[.07] bg-white/[.07] md:grid-cols-2 lg:grid-cols-4">
+            {pipeline.map(([number, title, description, status]) => (
+              <article className="group bg-[#0d0a11] p-7 transition hover:bg-[#151019]" key={number}>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="font-mono text-xs text-amber-300/50">{number}</span>
+                  <span className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold ${status === '目前可用' ? 'border-emerald-300/20 bg-emerald-300/[.07] text-emerald-200' : 'border-white/[.08] text-stone-600'}`}>{status}</span>
+                </div>
+                <h3 className="mt-10 font-serif text-2xl text-stone-100">{title}</h3>
+                <p className="mt-4 text-sm leading-7 text-stone-500">{description}</p>
+                <div className="mt-8 h-px w-10 bg-gradient-to-r from-amber-300/60 to-transparent transition-all group-hover:w-20" />
+              </article>
+            ))}
+          </div>
+        </div>
       </section>
 
       <footer className="relative z-10 border-t border-white/[.06] px-6 py-8 text-center text-xs leading-6 text-stone-600">
