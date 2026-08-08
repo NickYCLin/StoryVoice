@@ -42,6 +42,8 @@ public sealed class Book
 
     public string? StoragePath { get; private set; }
 
+    public Guid? ContentBookId { get; private set; }
+
     public string? SourceProvider { get; private set; }
 
     public string? ExternalSourceId { get; private set; }
@@ -114,6 +116,23 @@ public sealed class Book
     {
         StoragePath = Require(storagePath, nameof(storagePath));
     }
+
+    public void LinkAuthorizedContent(Guid contentBookId)
+    {
+        if (Status != BookStatus.Linked)
+        {
+            throw new InvalidOperationException("只有外部書目可以連結另一本已授權正文。");
+        }
+
+        if (contentBookId == Guid.Empty || contentBookId == Id)
+        {
+            throw new ArgumentException("正文書籍識別碼無效。", nameof(contentBookId));
+        }
+
+        ContentBookId = contentBookId;
+    }
+
+    public void UnlinkAuthorizedContent() => ContentBookId = null;
 
     public void UpdateExternalMetadata(
         string title,

@@ -19,7 +19,9 @@ internal static class BookResponseMapper
         book.CoverImageUrl,
         book.NativeTtsAvailable,
         book.EbookLayout?.ToString(),
-        book.SourceSyncedAt);
+        book.SourceSyncedAt,
+        book.ContentBookId,
+        HasAuthorizedText(book));
 
     public static BookDetailsResponse ToDetails(Book book) => new(
         book.Id,
@@ -45,5 +47,15 @@ internal static class BookResponseMapper
         book.CoverImageUrl,
         book.NativeTtsAvailable,
         book.EbookLayout?.ToString(),
-        book.SourceSyncedAt);
+        book.SourceSyncedAt,
+        book.ContentBookId,
+        HasAuthorizedText(book));
+
+    private static bool HasAuthorizedText(Book book) =>
+        book.Status == BookStatus.Uploaded
+        && book.SourceProvider is null
+        && !string.IsNullOrWhiteSpace(book.StoragePath)
+        && (string.Equals(book.FileType, "epub", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(book.FileType, "txt", StringComparison.OrdinalIgnoreCase))
+        && book.Chapters.Any(chapter => !string.IsNullOrWhiteSpace(chapter.OriginalText));
 }

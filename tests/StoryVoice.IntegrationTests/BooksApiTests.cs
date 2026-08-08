@@ -28,6 +28,7 @@ public sealed class BooksApiTests(ApiFactory factory) : IClassFixture<ApiFactory
         Assert.NotNull(created);
         Assert.Equal("月下故事", created.Title);
         Assert.Single(created.Chapters);
+        Assert.False(created.AuthorizedTextAvailable);
 
         var getResponse = await client.GetAsync($"/api/books/{created.Id}", cancellationToken);
         var fetched = await getResponse.Content.ReadFromJsonAsync<BookDetailsResponse>(cancellationToken);

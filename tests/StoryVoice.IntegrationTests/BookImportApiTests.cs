@@ -36,6 +36,7 @@ public sealed class BookImportApiTests(ApiFactory factory) : IClassFixture<ApiFa
         Assert.Equal("zh-TW", imported.Language);
         Assert.Equal("epub", imported.FileType);
         Assert.Equal(2, imported.Chapters.Count);
+        Assert.True(imported.AuthorizedTextAvailable);
         Assert.Equal("第一章 月影", imported.Chapters[0].Title);
 
         await using var scope = factory.Services.CreateAsyncScope();

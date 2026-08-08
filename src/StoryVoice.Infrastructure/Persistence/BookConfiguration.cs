@@ -18,6 +18,7 @@ internal sealed class BookConfiguration : IEntityTypeConfiguration<Book>
         builder.Property(book => book.OriginalFileName).HasMaxLength(500).IsRequired();
         builder.Property(book => book.FileType).HasMaxLength(20).IsRequired();
         builder.Property(book => book.StoragePath).HasMaxLength(500);
+        builder.Property(book => book.ContentBookId);
         builder.Property(book => book.SourceProvider).HasMaxLength(50);
         builder.Property(book => book.ExternalSourceId).HasMaxLength(128);
         builder.Property(book => book.SourceUrl).HasMaxLength(2_000);
@@ -34,6 +35,11 @@ internal sealed class BookConfiguration : IEntityTypeConfiguration<Book>
             .WithMany()
             .HasForeignKey(book => book.OwnerId)
             .OnDelete(DeleteBehavior.Cascade);
+        builder.HasOne<Book>()
+            .WithMany()
+            .HasForeignKey(book => book.ContentBookId)
+            .OnDelete(DeleteBehavior.Restrict);
+        builder.HasIndex(book => book.ContentBookId);
         builder.HasMany(book => book.Chapters)
             .WithOne()
             .HasForeignKey(chapter => chapter.BookId)
