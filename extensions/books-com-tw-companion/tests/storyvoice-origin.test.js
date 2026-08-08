@@ -1,5 +1,18 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
+const { readFileSync } = require('node:fs')
+const { join } = require('node:path')
+
+const extensionRoot = join(__dirname, '..')
+
+test('popup defaults to the deployed HTTPS StoryVoice origin', () => {
+  const popup = readFileSync(join(extensionRoot, 'popup.html'), 'utf8')
+
+  assert.match(
+    popup,
+    /id="storyvoice-origin"[^>]*value="https:\/\/aiprod\.wrbtycg\.tw\/StoryVoice"/
+  )
+})
 
 test('accepts the exact local StoryVoice origins', async () => {
   const { validateStoryVoiceOrigin } = await import('../storyvoice-origin.mjs')

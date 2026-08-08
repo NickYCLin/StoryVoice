@@ -24,8 +24,8 @@
 7. 點 extension 圖示後貼上金鑰，可掃描目前頁面，或明確按下「展開完整書櫃」讓 Companion 捲動／點擊書櫃的「看更多」。
 8. 確認清單、勾選書籍，再同步到 StoryVoice。
 
-只允許把資料送到 `http://localhost:3000`、`http://127.0.0.1:3000`，或正式上線後的
-`https://aiprod.wrbtycg.tw/StoryVoice`。其他 host、port、path、HTTP 正式站、帳密 URL
+預設把資料送到正式站 `https://aiprod.wrbtycg.tw/StoryVoice`；本機開發時也可明確切換成
+`http://localhost:3000` 或 `http://127.0.0.1:3000`。其他 host、port、path、HTTP 正式站、帳密 URL
 與 query/hash 全部拒絕，避免誤把私人書櫃 metadata 傳往其他主機。
 
 同步使用專用 Bearer 金鑰，不傳送 StoryVoice Cookie；金鑰只允許把書櫃 metadata 寫入簽發它的帳號。

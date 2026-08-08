@@ -11,7 +11,7 @@ public sealed class BooksComTwBookshelfApiTests(ApiFactory factory) : IClassFixt
     public async Task Import_is_idempotent_and_refreshes_visible_metadata()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
-        using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        using var client = await factory.CreateCompanionClientAsync(cancellationToken);
         var firstRequest = new
         {
             books = new[]
@@ -41,7 +41,7 @@ public sealed class BooksComTwBookshelfApiTests(ApiFactory factory) : IClassFixt
             }
         };
 
-        var firstResponse = await client.PostWithCsrfAsync(
+        var firstResponse = await client.PostAsJsonAsync(
             ImportPath,
             firstRequest,
             cancellationToken);
@@ -63,7 +63,7 @@ public sealed class BooksComTwBookshelfApiTests(ApiFactory factory) : IClassFixt
             "https://im1.book.com.tw/image/getImage?i=E050145360",
             ttsBook.CoverImageUrl);
 
-        var refreshResponse = await client.PostWithCsrfAsync(ImportPath, new
+        var refreshResponse = await client.PostAsJsonAsync(ImportPath, new
         {
             books = new[]
             {
@@ -97,9 +97,9 @@ public sealed class BooksComTwBookshelfApiTests(ApiFactory factory) : IClassFixt
     public async Task Import_rejects_non_books_com_tw_links()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
-        using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        using var client = await factory.CreateCompanionClientAsync(cancellationToken);
 
-        var response = await client.PostWithCsrfAsync(ImportPath, new
+        var response = await client.PostAsJsonAsync(ImportPath, new
         {
             books = new[]
             {

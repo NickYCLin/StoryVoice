@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "StoryVoice 博客來書櫃 Companion",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "從目前開啟的博客來電子書櫃同步已呈現的書籍 metadata 到 StoryVoice。",
   "permissions": ["activeTab", "storage"],
   "host_permissions": [

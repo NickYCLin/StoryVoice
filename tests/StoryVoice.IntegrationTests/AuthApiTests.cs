@@ -150,6 +150,23 @@ public sealed class AuthApiTests(ApiFactory factory) : IClassFixture<ApiFactory>
         Assert.StartsWith("svc_", accessToken, StringComparison.Ordinal);
         Assert.InRange(expiresAt, DateTimeOffset.UtcNow.AddDays(6), DateTimeOffset.UtcNow.AddDays(7).AddMinutes(1));
 
+        using var cookieOnlySyncResponse = await ownerClient.PostWithCsrfAsync(
+            "/api/books/sources/books-com-tw/import",
+            new
+            {
+                books = new[]
+                {
+                    new
+                    {
+                        externalId = $"E{Guid.NewGuid():N}",
+                        title = "一般登入不可冒充 Companion",
+                        sourceUrl = "https://www.books.com.tw/products/E050145360"
+                    }
+                }
+            },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.Unauthorized, cookieOnlySyncResponse.StatusCode);
+
         using var syncRequest = new HttpRequestMessage(
             HttpMethod.Post,
             "/api/books/sources/books-com-tw/import")
@@ -171,7 +188,7 @@ public sealed class AuthApiTests(ApiFactory factory) : IClassFixture<ApiFactory>
             })
         };
         syncRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-        using var syncResponse = await ownerClient.SendAsync(syncRequest, cancellationToken);
+        using var syncResponse = await otherClient.SendAsync(syncRequest, cancellationToken);
         Assert.Equal(HttpStatusCode.OK, syncResponse.StatusCode);
 
         using var bearerOnlyClient = factory.CreateCookieClient();

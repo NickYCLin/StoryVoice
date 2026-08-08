@@ -99,17 +99,11 @@ builder.Services.AddAuthorizationBuilder()
     })
     .AddPolicy(StoryVoicePolicies.BookshelfSync, policy =>
     {
-        policy.AddAuthenticationSchemes(
-            IdentityConstants.ApplicationScheme,
-            CompanionAuthenticationDefaults.Scheme);
+        policy.AddAuthenticationSchemes(CompanionAuthenticationDefaults.Scheme);
         policy.RequireAuthenticatedUser();
-        policy.RequireAssertion(context =>
-            context.User.Identities.Any(identity =>
-                identity.IsAuthenticated &&
-                identity.AuthenticationType == IdentityConstants.ApplicationScheme) ||
-            context.User.HasClaim(
-                CompanionAuthenticationDefaults.ScopeClaim,
-                CompanionAuthenticationDefaults.BookshelfSyncScope));
+        policy.RequireClaim(
+            CompanionAuthenticationDefaults.ScopeClaim,
+            CompanionAuthenticationDefaults.BookshelfSyncScope);
     });
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
