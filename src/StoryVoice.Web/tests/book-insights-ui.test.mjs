@@ -24,5 +24,13 @@ test('manual notes work independently from provider text and mutations carry CSR
   assert.ok(app.includes('這裡只保存你親自輸入的帳號筆記'))
   assert.ok(app.includes("body: JSON.stringify({ body, chapterId: null })"))
   assert.ok(app.includes("method: 'DELETE'"))
-  assert.ok(app.includes("'X-CSRF-TOKEN': csrfToken"))
+  assert.ok(app.includes("headers: { 'X-CSRF-TOKEN': csrfToken }"))
+})
+
+test('owner-scoped source metadata corrections cover title, author, cover, and reset', () => {
+  assert.ok(app.includes('書名、作者與封面校正'))
+  assert.ok(app.includes('/metadata-corrections`'))
+  assert.ok(app.includes('重新同步也不會覆蓋校正'))
+  assert.ok(app.includes('還原來源資料'))
+  assert.ok(app.includes("{ 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken }"))
 })

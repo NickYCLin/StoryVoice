@@ -93,6 +93,22 @@ public static class BookEndpoints
         .RequireAuthorization(StoryVoicePolicies.UserSession)
         .WithName("GetBook");
 
+        group.MapPut("/{id:guid}/metadata-corrections", async (
+            Guid id,
+            UpdateBookMetadataCorrectionsRequest request,
+            IBookMetadataCorrectionService service,
+            CancellationToken cancellationToken) =>
+        {
+            var book = await service.UpdateAsync(id, request, cancellationToken);
+            return book is null ? Results.NotFound() : Results.Ok(book);
+        })
+        .RequireAuthorization(StoryVoicePolicies.UserSession)
+        .AddEndpointFilter<AntiforgeryEndpointFilter>()
+        .WithName("UpdateBookMetadataCorrections")
+        .Produces<BookDetailsResponse>(StatusCodes.Status200OK)
+        .ProducesProblem(StatusCodes.Status400BadRequest)
+        .ProducesProblem(StatusCodes.Status404NotFound);
+
         return endpoints;
     }
 

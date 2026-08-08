@@ -25,6 +25,7 @@ public static class DependencyInjection
             options.RootPath = configuration[$"{BookStorageOptions.SectionName}:RootPath"]
                 ?? options.RootPath);
         services.AddScoped<IBookRepository, BookRepository>();
+        services.AddScoped<IBookMetadataCorrectionService, BookMetadataCorrectionService>();
         services.AddScoped<IBookInsightsService, BookInsightsService>();
         services.AddScoped<CompanionTokenService>();
         services.AddSingleton<IBookImportParser, PlainTextBookParser>();

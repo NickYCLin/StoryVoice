@@ -23,6 +23,9 @@ internal sealed class BookConfiguration : IEntityTypeConfiguration<Book>
         builder.Property(book => book.ExternalSourceId).HasMaxLength(128);
         builder.Property(book => book.SourceUrl).HasMaxLength(2_000);
         builder.Property(book => book.CoverImageUrl).HasMaxLength(2_000);
+        builder.Property(book => book.TitleCorrection).HasMaxLength(500);
+        builder.Property(book => book.AuthorCorrection).HasMaxLength(300);
+        builder.Property(book => book.CoverImageUrlCorrection).HasMaxLength(2_000);
         builder.Property(book => book.NativeTtsAvailable);
         builder.Property(book => book.EbookLayout).HasConversion<string>().HasMaxLength(20);
         builder.Property(book => book.SourceSyncedAt);

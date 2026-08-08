@@ -36,6 +36,9 @@ type BookSummary = {
   sourceSyncedAt: string | null
   contentBookId: string | null
   authorizedTextAvailable: boolean
+  titleCorrection: string | null
+  authorCorrection: string | null
+  coverImageUrlCorrection: string | null
 }
 
 type Chapter = {
@@ -49,6 +52,11 @@ type Chapter = {
 type BookDetails = Omit<BookSummary, 'chapterCount'> & {
   originalFileName: string
   chapters: Chapter[]
+}
+
+function toBookSummary(book: BookDetails): BookSummary {
+  const { chapters, originalFileName: _originalFileName, ...summary } = book
+  return { ...summary, chapterCount: chapters.length }
 }
 
 type SummaryExcerpt = {
@@ -228,9 +236,15 @@ type BookInsightsPanelProps = {
   book: BookDetails
   books: BookSummary[]
   csrfToken: string
+  onBookUpdated: (book: BookDetails) => void
 }
 
-function BookInsightsPanel({ book, books, csrfToken }: BookInsightsPanelProps) {
+function BookInsightsPanel({ book, books, csrfToken, onBookUpdated }: BookInsightsPanelProps) {
+  const [metadataTitle, setMetadataTitle] = useState(book.title)
+  const [metadataAuthor, setMetadataAuthor] = useState(book.author)
+  const [metadataCover, setMetadataCover] = useState(book.coverImageUrl ?? '')
+  const [metadataState, setMetadataState] = useState<LoadState>('idle')
+  const [metadataMessage, setMetadataMessage] = useState('')
   const [linkedContentId, setLinkedContentId] = useState(book.contentBookId ?? '')
   const [contentSelection, setContentSelection] = useState(book.contentBookId ?? '')
   const [linkState, setLinkState] = useState<LoadState>('idle')
@@ -292,6 +306,32 @@ function BookInsightsPanel({ book, books, csrfToken }: BookInsightsPanelProps) {
 
     return () => controller.abort()
   }, [book.id, book.contentBookId])
+
+  async function handleMetadataCorrection(clear = false) {
+    setMetadataState('loading')
+    setMetadataMessage(clear ? '正在還原來源 metadata…' : '正在保存人工校正…')
+    try {
+      const response = await fetch(apiUrl(`/api/books/${book.id}/metadata-corrections`), {
+        method: 'PUT',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken },
+        body: JSON.stringify(clear
+          ? { title: null, author: null, coverImageUrl: null }
+          : { title: metadataTitle, author: metadataAuthor, coverImageUrl: metadataCover || null }),
+      })
+      if (!response.ok) throw new Error(await responseProblem(response, '書目校正保存失敗。'))
+      const updated = await response.json() as BookDetails
+      setMetadataTitle(updated.title)
+      setMetadataAuthor(updated.author)
+      setMetadataCover(updated.coverImageUrl ?? '')
+      setMetadataState('ready')
+      setMetadataMessage(clear ? '已還原最近同步的來源 metadata。' : '人工校正已保存；後續同步不會覆蓋。')
+      onBookUpdated(updated)
+    } catch (error) {
+      setMetadataState('error')
+      setMetadataMessage(error instanceof Error ? error.message : '書目校正保存失敗。')
+    }
+  }
 
   async function handleContentLink() {
     setLinkState('loading')
@@ -382,6 +422,22 @@ function BookInsightsPanel({ book, books, csrfToken }: BookInsightsPanelProps) {
 
   return (
     <div className="mt-5 space-y-5">
+      {book.sourceProvider === 'books-com-tw' && (
+        <section className="rounded-2xl border border-sky-300/10 bg-sky-300/[.025] p-4" aria-label="作者與封面校正">
+          <h4 className="font-serif text-lg text-stone-200">書名、作者與封面校正</h4>
+          <p className="mt-2 text-xs leading-6 text-stone-500">人工校正只影響你的 StoryVoice 書庫顯示；博客來同步資料仍保留，重新同步也不會覆蓋校正。</p>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <label className="text-xs text-stone-500">顯示書名<input className="auth-input mt-2" maxLength={500} onChange={(event) => setMetadataTitle(event.target.value)} value={metadataTitle} /></label>
+            <label className="text-xs text-stone-500">顯示作者<input className="auth-input mt-2" maxLength={300} onChange={(event) => setMetadataAuthor(event.target.value)} value={metadataAuthor} /></label>
+            <label className="text-xs text-stone-500 sm:col-span-2">封面圖片網址<input className="auth-input mt-2" maxLength={2000} onChange={(event) => setMetadataCover(event.target.value)} placeholder="https://…" type="url" value={metadataCover} /></label>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button className="secondary-button disabled:cursor-wait disabled:opacity-60" disabled={metadataState === 'loading' || !metadataTitle.trim() || !metadataAuthor.trim()} onClick={() => handleMetadataCorrection(false)} type="button">保存校正</button>
+            <button className="text-xs text-stone-500 transition hover:text-stone-300 disabled:opacity-40" disabled={metadataState === 'loading' || (!book.titleCorrection && !book.authorCorrection && !book.coverImageUrlCorrection)} onClick={() => handleMetadataCorrection(true)} type="button">還原來源資料</button>
+          </div>
+          <p className={`mt-2 min-h-5 text-xs ${metadataState === 'error' ? 'text-rose-300' : 'text-stone-500'}`} role="status">{metadataMessage}</p>
+        </section>
+      )}
       {book.sourceProvider === 'books-com-tw' && (
         <section className="rounded-2xl border border-orange-300/10 bg-orange-300/[.025] p-4" aria-label="合法正文連結">
           <h4 className="font-serif text-lg text-stone-200">連結你合法持有的正文</h4>
@@ -486,6 +542,11 @@ function App() {
     || catalogFilters.tts !== 'all'
     || catalogFilters.tag !== 'all'
     || catalogFilters.sort !== 'created-desc'
+
+  const handleBookUpdated = useCallback((updated: BookDetails) => {
+    setSelectedBook(updated)
+    setBooks((current) => current.map((book) => book.id === updated.id ? toBookSummary(updated) : book))
+  }, [])
 
   const loadAuthSession = useCallback(async () => {
     try {
@@ -1180,6 +1241,7 @@ function App() {
                     books={books}
                     csrfToken={authState.csrfToken}
                     key={selectedBook.id}
+                    onBookUpdated={handleBookUpdated}
                   />
                   <div className="mt-5 space-y-3">
                     {selectedBook.chapters.length === 0 && selectedBook.sourceProvider === 'books-com-tw' && (

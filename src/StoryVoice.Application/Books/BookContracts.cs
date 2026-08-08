@@ -41,7 +41,10 @@ public sealed record BookSummaryResponse(
     string? EbookLayout,
     DateTimeOffset? SourceSyncedAt,
     Guid? ContentBookId,
-    bool AuthorizedTextAvailable);
+    bool AuthorizedTextAvailable,
+    string? TitleCorrection,
+    string? AuthorCorrection,
+    string? CoverImageUrlCorrection);
 
 public sealed record BookDetailsResponse(
     Guid Id,
@@ -61,4 +64,12 @@ public sealed record BookDetailsResponse(
     string? EbookLayout,
     DateTimeOffset? SourceSyncedAt,
     Guid? ContentBookId,
-    bool AuthorizedTextAvailable);
+    bool AuthorizedTextAvailable,
+    string? TitleCorrection,
+    string? AuthorCorrection,
+    string? CoverImageUrlCorrection);
+
+public sealed record UpdateBookMetadataCorrectionsRequest(
+    string? Title,
+    string? Author,
+    string? CoverImageUrl);

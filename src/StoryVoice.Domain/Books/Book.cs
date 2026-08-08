@@ -52,6 +52,12 @@ public sealed class Book
 
     public string? CoverImageUrl { get; private set; }
 
+    public string? TitleCorrection { get; private set; }
+
+    public string? AuthorCorrection { get; private set; }
+
+    public string? CoverImageUrlCorrection { get; private set; }
+
     public bool? NativeTtsAvailable { get; private set; }
 
     public EbookLayout? EbookLayout { get; private set; }
@@ -134,6 +140,31 @@ public sealed class Book
 
     public void UnlinkAuthorizedContent() => ContentBookId = null;
 
+    public void SetMetadataCorrections(
+        string? title,
+        string? author,
+        string? coverImageUrl)
+    {
+        if (SourceProvider is null || ExternalSourceId is null)
+        {
+            throw new InvalidOperationException("只有外部來源書目可以套用人工 metadata 校正。");
+        }
+
+        var normalizedTitle = NormalizeCorrection(title, 500, nameof(title));
+        var normalizedAuthor = NormalizeCorrection(author, 300, nameof(author));
+        var normalizedCover = NormalizeCorrection(coverImageUrl, 2_000, nameof(coverImageUrl));
+        if (normalizedCover is not null
+            && (!Uri.TryCreate(normalizedCover, UriKind.Absolute, out var uri)
+                || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)))
+        {
+            throw new ArgumentException("封面網址必須是有效的 HTTP 或 HTTPS 網址。", nameof(coverImageUrl));
+        }
+
+        TitleCorrection = string.Equals(normalizedTitle, Title, StringComparison.Ordinal) ? null : normalizedTitle;
+        AuthorCorrection = string.Equals(normalizedAuthor, Author, StringComparison.Ordinal) ? null : normalizedAuthor;
+        CoverImageUrlCorrection = string.Equals(normalizedCover, CoverImageUrl, StringComparison.Ordinal) ? null : normalizedCover;
+    }
+
     public void UpdateExternalMetadata(
         string title,
         string author,
@@ -171,4 +202,15 @@ public sealed class Book
 
     private static string? NormalizeOptional(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static string? NormalizeCorrection(string? value, int maximumLength, string parameterName)
+    {
+        var normalized = NormalizeOptional(value);
+        if (normalized?.Length > maximumLength)
+        {
+            throw new ArgumentException($"欄位不可超過 {maximumLength} 個字元。", parameterName);
+        }
+
+        return normalized;
+    }
 }

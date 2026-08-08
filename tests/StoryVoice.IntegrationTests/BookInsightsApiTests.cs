@@ -127,6 +127,65 @@ public sealed class BookInsightsApiTests(ApiFactory factory) : IClassFixture<Api
         Assert.Equal(HttpStatusCode.NotFound, linkAsOther.StatusCode);
     }
 
+    [Fact]
+    public async Task External_metadata_corrections_are_owner_scoped_and_reversible()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var owner = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        using var other = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        using var companion = await CreateCompanionClientAsync(owner, cancellationToken);
+        var linked = await ImportLinkedBookAsync(companion, cancellationToken);
+
+        using var update = await PutWithCsrfAsync(
+            owner,
+            $"/api/books/{linked.Id}/metadata-corrections",
+            new UpdateBookMetadataCorrectionsRequest(
+                "人工校正書名",
+                "人工校正作者",
+                "https://example.test/corrected-cover.jpg"),
+            cancellationToken);
+        var corrected = await update.Content.ReadFromJsonAsync<BookDetailsResponse>(cancellationToken);
+        using var otherUpdate = await PutWithCsrfAsync(
+            other,
+            $"/api/books/{linked.Id}/metadata-corrections",
+            new UpdateBookMetadataCorrectionsRequest("越權", null, null),
+            cancellationToken);
+        using var clear = await PutWithCsrfAsync(
+            owner,
+            $"/api/books/{linked.Id}/metadata-corrections",
+            new UpdateBookMetadataCorrectionsRequest(null, null, null),
+            cancellationToken);
+        var restored = await clear.Content.ReadFromJsonAsync<BookDetailsResponse>(cancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, update.StatusCode);
+        Assert.NotNull(corrected);
+        Assert.Equal("人工校正書名", corrected.Title);
+        Assert.Equal("人工校正作者", corrected.Author);
+        Assert.Equal("https://example.test/corrected-cover.jpg", corrected.CoverImageUrl);
+        Assert.Equal(HttpStatusCode.NotFound, otherUpdate.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, clear.StatusCode);
+        Assert.NotNull(restored);
+        Assert.Equal("外部書目", restored.Title);
+        Assert.Equal("測試作者", restored.Author);
+        Assert.Null(restored.TitleCorrection);
+    }
+
+    [Fact]
+    public async Task Uploaded_book_rejects_provider_metadata_corrections()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        var uploaded = await ImportTextAsync(client, cancellationToken);
+
+        using var response = await PutWithCsrfAsync(
+            client,
+            $"/api/books/{uploaded.Id}/metadata-corrections",
+            new UpdateBookMetadataCorrectionsRequest("不應接受", null, null),
+            cancellationToken);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
     private static async Task<BookDetailsResponse> ImportTextAsync(
         HttpClient client,
         CancellationToken cancellationToken)
@@ -217,7 +276,10 @@ public sealed class BookInsightsApiTests(ApiFactory factory) : IClassFixture<Api
             "Reflowable",
             DateTimeOffset.UtcNow,
             null,
-            false);
+            false,
+            null,
+            null,
+            null);
     }
 
     private static async Task<HttpResponseMessage> PutWithCsrfAsync(

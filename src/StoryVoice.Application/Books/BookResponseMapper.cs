@@ -2,12 +2,12 @@ using StoryVoice.Domain.Books;
 
 namespace StoryVoice.Application.Books;
 
-internal static class BookResponseMapper
+public static class BookResponseMapper
 {
     public static BookSummaryResponse ToSummary(Book book) => new(
         book.Id,
-        book.Title,
-        book.Author,
+        book.TitleCorrection ?? book.Title,
+        book.AuthorCorrection ?? book.Author,
         book.Language,
         book.FileType,
         book.Status.ToString(),
@@ -16,17 +16,20 @@ internal static class BookResponseMapper
         book.SourceProvider,
         book.ExternalSourceId,
         book.SourceUrl,
-        book.CoverImageUrl,
+        book.CoverImageUrlCorrection ?? book.CoverImageUrl,
         book.NativeTtsAvailable,
         book.EbookLayout?.ToString(),
         book.SourceSyncedAt,
         book.ContentBookId,
-        HasAuthorizedText(book));
+        HasAuthorizedText(book),
+        book.TitleCorrection,
+        book.AuthorCorrection,
+        book.CoverImageUrlCorrection);
 
     public static BookDetailsResponse ToDetails(Book book) => new(
         book.Id,
-        book.Title,
-        book.Author,
+        book.TitleCorrection ?? book.Title,
+        book.AuthorCorrection ?? book.Author,
         book.Language,
         book.OriginalFileName,
         book.FileType,
@@ -44,12 +47,15 @@ internal static class BookResponseMapper
         book.SourceProvider,
         book.ExternalSourceId,
         book.SourceUrl,
-        book.CoverImageUrl,
+        book.CoverImageUrlCorrection ?? book.CoverImageUrl,
         book.NativeTtsAvailable,
         book.EbookLayout?.ToString(),
         book.SourceSyncedAt,
         book.ContentBookId,
-        HasAuthorizedText(book));
+        HasAuthorizedText(book),
+        book.TitleCorrection,
+        book.AuthorCorrection,
+        book.CoverImageUrlCorrection);
 
     private static bool HasAuthorizedText(Book book) =>
         book.Status == BookStatus.Uploaded
