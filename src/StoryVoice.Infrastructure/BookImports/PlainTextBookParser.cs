@@ -127,7 +127,7 @@ public sealed partial class PlainTextBookParser : IBookImportParser
     }
 
     [GeneratedRegex(
-        @"^\s*(?<title>(?:第[0-9０-９一二三四五六七八九十百千兩〇零]+[章回節篇卷](?:\s+|[:：、.\-])?.*|Chapter\s+[0-9]+(?:\s+|[:：.\-])?.*))\s*$",
+        @"^\s*(?<title>(?:第[0-9０-９一二三四五六七八九十百千兩〇零]+(?:[章回節篇卷](?:\s+|[:：、.\-])?.*|話(?:\s+.*|[:：、.\-].*|))|Chapter\s+[0-9]+(?:\s+|[:：.\-])?.*))\s*$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex ChapterHeading();
 }
