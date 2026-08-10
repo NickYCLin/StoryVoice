@@ -70,6 +70,8 @@ services:
       Narration__AudioRootPath: /data/audio
       Narration__Voice: zh-TW-YunJheNeural
       Narration__Rate: -5%
+      Narration__ProviderTimeoutMinutes: ${NARRATION_PROVIDER_TIMEOUT_MINUTES:-180}
+      Narration__LeaseMinutes: ${NARRATION_LEASE_MINUTES:-185}
     volumes:
       - book-storage:/data/books
       - audio-storage:/data/audio

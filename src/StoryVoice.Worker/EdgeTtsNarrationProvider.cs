@@ -17,6 +17,7 @@ public sealed class EdgeTtsNarrationProvider(ILogger<EdgeTtsNarrationProvider> l
         }
 
         var scriptPath = Path.Combine(AppContext.BaseDirectory, "edge_tts_provider.py");
+        CleanupTemporaryDirectories(outputPath, logger);
         var startInfo = new ProcessStartInfo("python3")
         {
             RedirectStandardInput = true,
@@ -33,41 +34,83 @@ public sealed class EdgeTtsNarrationProvider(ILogger<EdgeTtsNarrationProvider> l
         startInfo.ArgumentList.Add($"--rate={rate}");
 
         using var process = new Process { StartInfo = startInfo };
-        if (!process.Start())
-        {
-            throw new InvalidOperationException("無法啟動神經語音 provider。");
-        }
-
-        var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
         try
         {
-            await process.StandardInput.WriteAsync(text.AsMemory(), cancellationToken);
-            process.StandardInput.Close();
-            await process.WaitForExitAsync(cancellationToken);
-        }
-        catch (OperationCanceledException)
-        {
-            TryKill(process);
-            throw;
-        }
+            if (!process.Start())
+            {
+                throw new InvalidOperationException("無法啟動神經語音 provider。");
+            }
 
-        var stderr = await stderrTask;
-        if (process.ExitCode != 0)
-        {
-            logger.LogWarning(
-                "Edge TTS provider exited with code {ExitCode}; diagnostic length {DiagnosticLength}",
-                process.ExitCode,
-                stderr.Length);
-            throw new InvalidOperationException("神經語音 provider 執行失敗。");
-        }
+            var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
+            try
+            {
+                await process.StandardInput.WriteAsync(text.AsMemory(), cancellationToken);
+                process.StandardInput.Close();
+                await process.WaitForExitAsync(cancellationToken);
+            }
+            catch
+            {
+                await TerminateAsync(process);
+                throw;
+            }
 
-        if (!File.Exists(outputPath) || new FileInfo(outputPath).Length < 1)
+            var stderr = await stderrTask;
+            if (process.ExitCode != 0)
+            {
+                logger.LogWarning(
+                    "Edge TTS provider exited with code {ExitCode}; diagnostic length {DiagnosticLength}",
+                    process.ExitCode,
+                    stderr.Length);
+                throw new InvalidOperationException("神經語音 provider 執行失敗。");
+            }
+
+            if (!File.Exists(outputPath) || new FileInfo(outputPath).Length < 1)
+            {
+                throw new InvalidOperationException("神經語音 provider 沒有產生音訊。");
+            }
+        }
+        finally
         {
-            throw new InvalidOperationException("神經語音 provider 沒有產生音訊。");
+            CleanupTemporaryDirectories(outputPath, logger);
         }
     }
 
-    private static void TryKill(Process process)
+    internal static void CleanupTemporaryDirectories(string outputPath, ILogger logger)
+    {
+        var directory = Path.GetDirectoryName(Path.GetFullPath(outputPath));
+        if (directory is null || !Directory.Exists(directory))
+        {
+            return;
+        }
+
+        try
+        {
+            foreach (var temporaryDirectory in Directory.EnumerateDirectories(
+                directory,
+                "edge-tts-*",
+                SearchOption.TopDirectoryOnly))
+            {
+                try
+                {
+                    Directory.Delete(temporaryDirectory, recursive: true);
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                {
+                    logger.LogWarning(
+                        exception,
+                        "Unable to remove an Edge TTS temporary directory");
+                }
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            logger.LogWarning(
+                exception,
+                "Unable to enumerate Edge TTS temporary directories");
+        }
+    }
+
+    private static async Task TerminateAsync(Process process)
     {
         try
         {
@@ -75,6 +118,14 @@ public sealed class EdgeTtsNarrationProvider(ILogger<EdgeTtsNarrationProvider> l
             {
                 process.Kill(entireProcessTree: true);
             }
+        }
+        catch (InvalidOperationException)
+        {
+        }
+
+        try
+        {
+            await process.WaitForExitAsync(CancellationToken.None);
         }
         catch (InvalidOperationException)
         {
