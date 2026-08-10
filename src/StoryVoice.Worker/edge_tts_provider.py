@@ -49,6 +49,7 @@ async def synthesize_text(
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
     communicator_factory: Callable[..., Any] | None = None,
     delay: Callable[[float], Awaitable[None]] | None = None,
+    progress_reporter: Callable[[int, int], None] | None = None,
 ) -> None:
     if not text.strip():
         raise ValueError("narration text is empty")
@@ -82,6 +83,8 @@ async def synthesize_text(
                         ) from error
                     await wait(float(2 ** (attempt - 1)))
             audio_parts.append(part)
+            if progress_reporter is not None:
+                progress_reporter(index + 1, len(chunks))
 
         candidate = work / "complete.mp3"
         with candidate.open("wb") as destination:
@@ -101,7 +104,17 @@ async def main() -> None:
     args = parser.parse_args()
 
     text = sys.stdin.read()
-    await synthesize_text(text, args.output, args.voice, args.rate)
+    await synthesize_text(
+        text,
+        args.output,
+        args.voice,
+        args.rate,
+        progress_reporter=lambda completed, total: print(
+            f"STORYVOICE_PROGRESS {completed}/{total}",
+            file=sys.stderr,
+            flush=True,
+        ),
+    )
 
 
 if __name__ == "__main__":

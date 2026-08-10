@@ -46,6 +46,18 @@ const statusLabels: Record<NarrationJob['status'], string> = {
   Cancelled: '已取消',
 }
 
+function mergeFreshJobs(current: NarrationJob[], incomingJobs: NarrationJob[], bookId: string) {
+  const currentForBook = current.filter((job) => job.bookId === bookId)
+  const currentById = new Map(currentForBook.map((job) => [job.id, job]))
+  const incomingIds = new Set(incomingJobs.map((job) => job.id))
+  const merged = incomingJobs.map((incoming) => {
+    const existing = currentById.get(incoming.id)
+    if (!existing || Date.parse(incoming.updatedAt) >= Date.parse(existing.updatedAt)) return incoming
+    return existing
+  })
+  return [...merged, ...currentForBook.filter((job) => !incomingIds.has(job.id))]
+}
+
 export function NarrationPanel({ book, csrfToken }: Props) {
   const [jobs, setJobs] = useState<NarrationJob[]>([])
   const [attested, setAttested] = useState(false)
@@ -63,7 +75,8 @@ export function NarrationPanel({ book, csrfToken }: Props) {
       signal,
     })
     if (!response.ok) throw new Error(await responseProblem(response, '朗讀工作讀取失敗。'))
-    setJobs(await response.json() as NarrationJob[])
+    const incomingJobs = await response.json() as NarrationJob[]
+    setJobs((current) => mergeFreshJobs(current, incomingJobs, book.id))
   }, [book.id])
 
   useEffect(() => {
@@ -81,10 +94,21 @@ export function NarrationPanel({ book, csrfToken }: Props) {
 
   useEffect(() => {
     if (!active) return
-    const timer = window.setInterval(() => {
-      loadJobs().catch(() => undefined)
-    }, 2_000)
-    return () => window.clearInterval(timer)
+    let stopped = false
+    let timer = 0
+    let requestController: AbortController | null = null
+    const poll = async () => {
+      requestController = new AbortController()
+      await loadJobs(requestController.signal).catch(() => undefined)
+      requestController = null
+      if (!stopped) timer = window.setTimeout(poll, 2_000)
+    }
+    timer = window.setTimeout(poll, 2_000)
+    return () => {
+      stopped = true
+      requestController?.abort()
+      window.clearTimeout(timer)
+    }
   }, [active, loadJobs])
 
   async function createNarration() {
@@ -181,6 +205,26 @@ export function NarrationPanel({ book, csrfToken }: Props) {
               </div>
               <span className="rounded-full bg-stone-100 px-3 py-1 text-xs font-bold text-stone-700">{job.progressPercent}%</span>
             </div>
+            {(job.status === 'Queued' || job.status === 'Running') && (
+              <div className="mt-3">
+                <div
+                  aria-label="語音產製進度"
+                  aria-valuemax={100}
+                  aria-valuemin={0}
+                  aria-valuenow={job.progressPercent}
+                  className="h-2 overflow-hidden rounded-full bg-stone-200"
+                  role="progressbar"
+                >
+                  <div
+                    className="h-full rounded-full bg-amber-600 transition-[width] duration-300 motion-reduce:transition-none"
+                    style={{ width: `${job.progressPercent}%` }}
+                  />
+                </div>
+                <p className="mt-1 text-xs font-semibold text-stone-600">
+                  {job.status === 'Queued' ? '等待執行' : '分塊語音合成中'}
+                </p>
+              </div>
+            )}
             {(job.status === 'Queued' || job.status === 'Running') && (
               <button
                 className="mt-3 rounded-full border border-stone-300 px-4 py-2 text-xs font-bold text-stone-700"

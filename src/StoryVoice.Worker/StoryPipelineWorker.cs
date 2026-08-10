@@ -208,6 +208,14 @@ public sealed class StoryPipelineWorker(
                     temporaryPath,
                     job.Voice,
                     job.Rate,
+                    async (progress, progressCancellationToken) =>
+                    {
+                        await ReportSynthesisProgressAsync(
+                            db,
+                            claim,
+                            progress,
+                            progressCancellationToken);
+                    },
                     providerCancellation.Token);
             }
             finally
@@ -316,6 +324,53 @@ public sealed class StoryPipelineWorker(
         {
             DeleteIfExists(temporaryPath);
             DeleteIfExists(uncommittedAudioPath);
+        }
+    }
+
+    internal static int CalculateSynthesisProgress(int completedChunks, int totalChunks)
+    {
+        if (completedChunks < 1 || totalChunks < 1 || completedChunks > totalChunks)
+        {
+            throw new ArgumentOutOfRangeException(nameof(completedChunks));
+        }
+
+        var mapped = 10 + (int)((long)completedChunks * 85 / totalChunks);
+        return Math.Clamp(mapped, 11, 95);
+    }
+
+    private async Task ReportSynthesisProgressAsync(
+        StoryVoiceDbContext db,
+        ClaimedJob claim,
+        NarrationSynthesisProgress progress,
+        CancellationToken cancellationToken)
+    {
+        var progressPercent = CalculateSynthesisProgress(
+            progress.CompletedChunks,
+            progress.TotalChunks);
+        var updatedAt = DateTimeOffset.UtcNow;
+        try
+        {
+            await db.NarrationJobs
+                .Where(item => item.Id == claim.JobId
+                    && item.Status == NarrationJobStatus.Running
+                    && item.LeaseOwner == claim.LeaseOwner
+                    && item.ProgressPercent < progressPercent)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(item => item.ProgressPercent, progressPercent)
+                    .SetProperty(item => item.UpdatedAt, updatedAt)
+                    .SetProperty(item => item.ConcurrencyStamp, Guid.NewGuid()),
+                    cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(
+                exception,
+                "Unable to persist narration progress for job {JobId}",
+                claim.JobId);
         }
     }
 

@@ -9,6 +9,7 @@ public sealed class EdgeTtsNarrationProvider(ILogger<EdgeTtsNarrationProvider> l
         string outputPath,
         string voice,
         string rate,
+        Func<NarrationSynthesisProgress, CancellationToken, Task>? progressCallback,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(text))
@@ -41,27 +42,34 @@ public sealed class EdgeTtsNarrationProvider(ILogger<EdgeTtsNarrationProvider> l
                 throw new InvalidOperationException("無法啟動神經語音 provider。");
             }
 
-            var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
+            var stderrTask = ReadDiagnosticsAsync(
+                process.StandardError,
+                progressCallback,
+                cancellationToken);
+            var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
             try
             {
                 await process.StandardInput.WriteAsync(text.AsMemory(), cancellationToken);
                 process.StandardInput.Close();
                 await process.WaitForExitAsync(cancellationToken);
+                var diagnosticLength = await stderrTask;
+                _ = await stdoutTask;
+
+                if (process.ExitCode != 0)
+                {
+                    logger.LogWarning(
+                        "Edge TTS provider exited with code {ExitCode}; diagnostic length {DiagnosticLength}",
+                        process.ExitCode,
+                        diagnosticLength);
+                    throw new InvalidOperationException("神經語音 provider 執行失敗。");
+                }
             }
             catch
             {
                 await TerminateAsync(process);
+                await IgnoreFailureAsync(stderrTask);
+                await IgnoreFailureAsync(stdoutTask);
                 throw;
-            }
-
-            var stderr = await stderrTask;
-            if (process.ExitCode != 0)
-            {
-                logger.LogWarning(
-                    "Edge TTS provider exited with code {ExitCode}; diagnostic length {DiagnosticLength}",
-                    process.ExitCode,
-                    stderr.Length);
-                throw new InvalidOperationException("神經語音 provider 執行失敗。");
             }
 
             if (!File.Exists(outputPath) || new FileInfo(outputPath).Length < 1)
@@ -72,6 +80,63 @@ public sealed class EdgeTtsNarrationProvider(ILogger<EdgeTtsNarrationProvider> l
         finally
         {
             CleanupTemporaryDirectories(outputPath, logger);
+        }
+    }
+
+    internal static bool TryParseProgress(
+        string line,
+        out NarrationSynthesisProgress progress)
+    {
+        const string prefix = "STORYVOICE_PROGRESS ";
+        progress = new NarrationSynthesisProgress(0, 0);
+        if (!line.StartsWith(prefix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var value = line.AsSpan(prefix.Length);
+        var separator = value.IndexOf('/');
+        if (separator < 1
+            || separator == value.Length - 1
+            || !int.TryParse(value[..separator], out var completed)
+            || !int.TryParse(value[(separator + 1)..], out var total)
+            || completed < 1
+            || total < 1
+            || completed > total)
+        {
+            return false;
+        }
+
+        progress = new NarrationSynthesisProgress(completed, total);
+        return true;
+    }
+
+    private static async Task<int> ReadDiagnosticsAsync(
+        StreamReader reader,
+        Func<NarrationSynthesisProgress, CancellationToken, Task>? progressCallback,
+        CancellationToken cancellationToken)
+    {
+        var diagnosticLength = 0;
+        while (await reader.ReadLineAsync(cancellationToken) is { } line)
+        {
+            diagnosticLength += line.Length + 1;
+            if (progressCallback is not null && TryParseProgress(line, out var progress))
+            {
+                await progressCallback(progress, cancellationToken);
+            }
+        }
+
+        return diagnosticLength;
+    }
+
+    private static async Task IgnoreFailureAsync(Task task)
+    {
+        try
+        {
+            await task;
+        }
+        catch
+        {
         }
     }
 

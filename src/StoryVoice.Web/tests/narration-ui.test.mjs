@@ -19,12 +19,28 @@ test('narration discloses external neural provider and distinguishes official TT
   assert.ok(panel.includes('音訊完成後保存於你的私人 StoryVoice 帳號'))
 })
 
+test('narration renders durable accessible progress instead of a static status badge', () => {
+  assert.ok(panel.includes('role="progressbar"'))
+  assert.ok(panel.includes('aria-valuenow={job.progressPercent}'))
+  assert.ok(panel.includes('style={{ width: `${job.progressPercent}%` }}'))
+  assert.ok(panel.includes("job.status === 'Queued' ? '等待執行' : '分塊語音合成中'"))
+})
+
+test('narration polling is serialized and stale responses cannot regress durable state', () => {
+  assert.ok(panel.includes('window.setTimeout'))
+  assert.ok(!panel.includes('window.setInterval'))
+  assert.ok(panel.includes('mergeFreshJobs'))
+  assert.ok(panel.includes('Date.parse(incoming.updatedAt) >= Date.parse(existing.updatedAt)'))
+  assert.ok(panel.includes('job.bookId === bookId'))
+  assert.ok(app.includes('<NarrationPanel key={selectedBook.id} book={selectedBook} csrfToken={authState.csrfToken} />'))
+})
+
 test('narration mutations use CSRF, poll durable jobs, support cancel and private audio playback', () => {
   assert.ok(panel.includes("'X-CSRF-TOKEN': csrfToken"))
-  assert.ok(panel.includes('window.setInterval'))
+  assert.ok(panel.includes('window.setTimeout'))
   assert.ok(panel.includes('/cancel`'))
   assert.ok(panel.includes('/audio`)}'))
   assert.ok(panel.includes('<audio'))
-  assert.ok(app.includes('<NarrationPanel book={selectedBook} csrfToken={authState.csrfToken} />'))
+  assert.ok(app.includes('<NarrationPanel key={selectedBook.id} book={selectedBook} csrfToken={authState.csrfToken} />'))
   assert.ok(app.includes('onBookUpdated({ ...book, contentBookId: contentSelection || null })'))
 })

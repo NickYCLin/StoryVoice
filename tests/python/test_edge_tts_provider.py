@@ -70,6 +70,30 @@ class EdgeTtsProviderTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual([output], list(Path(directory).iterdir()))
 
+    async def test_synthesize_text_reports_completed_chunks_only_after_success(self):
+        reports = []
+
+        class FakeCommunicate:
+            def __init__(self, text, voice, rate):
+                self.text = text
+
+            async def save(self, path):
+                Path(path).write_bytes(f"audio:{self.text}|".encode())
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "book.mp3"
+            await provider.synthesize_text(
+                "第一段。第二段。",
+                str(output),
+                "voice",
+                "+0%",
+                max_chars=4,
+                communicator_factory=FakeCommunicate,
+                progress_reporter=lambda completed, total: reports.append((completed, total)),
+            )
+
+        self.assertEqual([(1, 2), (2, 2)], reports)
+
     async def test_synthesize_text_does_not_publish_partial_audio_after_failure(self):
         class FailingCommunicate:
             def __init__(self, text, voice, rate):

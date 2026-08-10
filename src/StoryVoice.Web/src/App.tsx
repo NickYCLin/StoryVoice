@@ -1252,7 +1252,7 @@ function App() {
                     key={selectedBook.id}
                     onBookUpdated={handleBookUpdated}
                   />
-                  <NarrationPanel book={selectedBook} csrfToken={authState.csrfToken} />
+                  <NarrationPanel key={selectedBook.id} book={selectedBook} csrfToken={authState.csrfToken} />
                   <div className="mt-5 space-y-3">
                     {selectedBook.chapters.length === 0 && selectedBook.sourceProvider === 'books-com-tw' && (
                       <div className="library-state min-h-52">
