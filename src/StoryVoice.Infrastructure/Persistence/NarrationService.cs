@@ -26,7 +26,9 @@ internal sealed class NarrationService(
 
         var jobs = await dbContext.NarrationJobs
             .AsNoTracking()
-            .Where(job => job.OwnerId == currentUser.UserId && job.BookId == bookId)
+            .Where(job => job.OwnerId == currentUser.UserId
+                && job.BookId == bookId
+                && job.Visibility == NarrationArtifactVisibility.Published)
             .OrderByDescending(job => job.CreatedAt)
             .ToListAsync(cancellationToken);
         return jobs.Select(ToResponse).ToArray();
@@ -73,6 +75,11 @@ internal sealed class NarrationService(
             cancellationToken);
         if (existing is not null)
         {
+            if (existing.Visibility != NarrationArtifactVisibility.Published)
+            {
+                return null;
+            }
+
             return await RequeueIfTerminalAsync(existing.Id, cancellationToken);
         }
 
@@ -107,13 +114,18 @@ internal sealed class NarrationService(
                 throw;
             }
 
+            if (existing.Visibility != NarrationArtifactVisibility.Published)
+            {
+                return null;
+            }
+
             return await RequeueIfTerminalAsync(existing.Id, cancellationToken);
         }
     }
 
     public async Task<NarrationJobResponse?> GetAsync(Guid jobId, CancellationToken cancellationToken)
     {
-        var job = await OwnedJobs().SingleOrDefaultAsync(item => item.Id == jobId, cancellationToken);
+        var job = await OwnedRegularJobs().SingleOrDefaultAsync(item => item.Id == jobId, cancellationToken);
         return job is null ? null : ToResponse(job);
     }
 
@@ -123,7 +135,9 @@ internal sealed class NarrationService(
         {
             dbContext.ChangeTracker.Clear();
             var job = await dbContext.NarrationJobs.SingleOrDefaultAsync(
-                item => item.Id == jobId && item.OwnerId == currentUser.UserId,
+                item => item.Id == jobId
+                    && item.OwnerId == currentUser.UserId
+                    && item.Visibility == NarrationArtifactVisibility.Published,
                 cancellationToken);
             if (job is null)
             {
@@ -151,7 +165,7 @@ internal sealed class NarrationService(
         }
 
         dbContext.ChangeTracker.Clear();
-        var latest = await OwnedJobs().SingleOrDefaultAsync(item => item.Id == jobId, cancellationToken);
+        var latest = await OwnedRegularJobs().SingleOrDefaultAsync(item => item.Id == jobId, cancellationToken);
         return latest is null ? null : ToResponse(latest);
     }
 
@@ -159,14 +173,14 @@ internal sealed class NarrationService(
         Guid jobId,
         CancellationToken cancellationToken)
     {
-        var job = await OwnedJobs().SingleOrDefaultAsync(item => item.Id == jobId, cancellationToken);
-        if (job?.Status != NarrationJobStatus.Completed || string.IsNullOrWhiteSpace(job.AudioRelativePath))
+        var job = await OwnedRegularJobs().SingleOrDefaultAsync(item => item.Id == jobId, cancellationToken);
+        if (job is null || !job.IsAvailableForRegularPlayback)
         {
             return null;
         }
 
         var root = Path.GetFullPath(options.Value.AudioRootPath);
-        var path = Path.GetFullPath(Path.Combine(root, job.AudioRelativePath));
+        var path = Path.GetFullPath(Path.Combine(root, job.AudioRelativePath!));
         var rootPrefix = root.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
         if (!path.StartsWith(rootPrefix, StringComparison.Ordinal) || !File.Exists(path))
         {
@@ -184,7 +198,9 @@ internal sealed class NarrationService(
         {
             dbContext.ChangeTracker.Clear();
             var job = await dbContext.NarrationJobs.SingleOrDefaultAsync(
-                item => item.Id == jobId && item.OwnerId == currentUser.UserId,
+                item => item.Id == jobId
+                    && item.OwnerId == currentUser.UserId
+                    && item.Visibility == NarrationArtifactVisibility.Published,
                 cancellationToken);
             if (job is null)
             {
@@ -212,15 +228,17 @@ internal sealed class NarrationService(
         }
 
         dbContext.ChangeTracker.Clear();
-        var latest = await OwnedJobs().SingleOrDefaultAsync(item => item.Id == jobId, cancellationToken);
+        var latest = await OwnedRegularJobs().SingleOrDefaultAsync(item => item.Id == jobId, cancellationToken);
         return latest is null ? null : ToResponse(latest);
     }
 
     private IQueryable<Book> OwnedBooks() =>
         dbContext.Books.AsNoTracking().Where(book => book.OwnerId == currentUser.UserId);
 
-    private IQueryable<NarrationJob> OwnedJobs() =>
-        dbContext.NarrationJobs.AsNoTracking().Where(job => job.OwnerId == currentUser.UserId);
+    private IQueryable<NarrationJob> OwnedRegularJobs() =>
+        dbContext.NarrationJobs.AsNoTracking().Where(job =>
+            job.OwnerId == currentUser.UserId
+            && job.Visibility == NarrationArtifactVisibility.Published);
 
     private static NarrationJobResponse ToResponse(NarrationJob job) =>
         new(

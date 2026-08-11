@@ -171,6 +171,52 @@ public sealed class LibraryStatusApiTests(ApiFactory factory) : IClassFixture<Ap
     }
 
     [Fact]
+    public async Task Matrix_ignores_staged_and_historical_artifacts_for_current_library_state()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        var currentBook = await ImportTextAsync(client, cancellationToken);
+        var hiddenOnlyBook = await ImportTextAsync(client, cancellationToken);
+        using var publishedCreate = await client.PostWithCsrfAsync(
+            $"/api/books/{currentBook.Id}/narrations/",
+            new CreateNarrationRequest(true),
+            cancellationToken);
+        var published = await publishedCreate.Content.ReadFromJsonAsync<NarrationJobResponse>(cancellationToken);
+        Assert.NotNull(published);
+
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+            var ownerId = await db.Books
+                .Where(book => book.Id == currentBook.Id)
+                .Select(book => book.OwnerId!.Value)
+                .SingleAsync(cancellationToken);
+            db.NarrationJobs.AddRange(
+                NarrationArtifactTestData.CompletedStaged(ownerId, currentBook.Id, currentBook.Id),
+                NarrationArtifactTestData.CompletedHistorical(ownerId, currentBook.Id, currentBook.Id),
+                NarrationArtifactTestData.CompletedStaged(ownerId, hiddenOnlyBook.Id, hiddenOnlyBook.Id),
+                NarrationArtifactTestData.CompletedHistorical(ownerId, hiddenOnlyBook.Id, hiddenOnlyBook.Id));
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        var matrix = await client.GetFromJsonAsync<LibraryBookStatusResponse[]>(
+            "/api/library/status-matrix/",
+            cancellationToken);
+        Assert.NotNull(matrix);
+
+        var current = Assert.Single(matrix, item => item.BookId == currentBook.Id);
+        Assert.Equal("Queued", current.StoryVoiceNarrationStatus);
+        Assert.True(current.StoryVoiceNarrationMatchesAuthorizedText);
+        Assert.Equal("processing", current.State);
+
+        var hiddenOnly = Assert.Single(matrix, item => item.BookId == hiddenOnlyBook.Id);
+        Assert.Null(hiddenOnly.StoryVoiceNarrationStatus);
+        Assert.False(hiddenOnly.StoryVoiceNarrationMatchesAuthorizedText);
+        Assert.Equal("ready", hiddenOnly.State);
+        Assert.Null(hiddenOnly.BlockedReason);
+    }
+
+    [Fact]
     public async Task Matrix_is_owner_scoped()
     {
         var cancellationToken = TestContext.Current.CancellationToken;

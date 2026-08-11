@@ -46,7 +46,9 @@ public sealed class LibraryStatusService(
             .ToDictionary(group => group.Key, group => group.Count());
         var narrationJobs = await dbContext.NarrationJobs
             .AsNoTracking()
-            .Where(job => job.OwnerId == currentUser.UserId && bookIds.Contains(job.BookId))
+            .Where(job => job.OwnerId == currentUser.UserId
+                && job.Visibility == NarrationArtifactVisibility.Published
+                && bookIds.Contains(job.BookId))
             .Select(job => new
             {
                 job.BookId,

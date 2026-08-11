@@ -119,6 +119,115 @@ public sealed class NarrationApiTests(ApiFactory factory) : IClassFixture<ApiFac
     }
 
     [Fact]
+    public async Task Regular_endpoints_hide_staged_and_historical_artifacts()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        var book = await ImportTextAsync(client, cancellationToken);
+        using var publishedCreate = await client.PostWithCsrfAsync(
+            $"/api/books/{book.Id}/narrations/",
+            new CreateNarrationRequest(true),
+            cancellationToken);
+        var published = await publishedCreate.Content.ReadFromJsonAsync<NarrationJobResponse>(cancellationToken);
+        Assert.NotNull(published);
+
+        NarrationJob staged;
+        NarrationJob queuedStaged;
+        NarrationJob historical;
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+            var ownerId = await db.Books
+                .Where(candidate => candidate.Id == book.Id)
+                .Select(candidate => candidate.OwnerId!.Value)
+                .SingleAsync(cancellationToken);
+            staged = NarrationArtifactTestData.CompletedStaged(ownerId, book.Id, book.Id);
+            queuedStaged = NarrationArtifactTestData.QueuedStaged(ownerId, book.Id, book.Id);
+            historical = NarrationArtifactTestData.CompletedHistorical(ownerId, book.Id, book.Id);
+            db.NarrationJobs.AddRange(staged, queuedStaged, historical);
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        await NarrationArtifactTestData.WriteAudioAsync(factory.StorageRoot, staged, cancellationToken);
+        await NarrationArtifactTestData.WriteAudioAsync(factory.StorageRoot, historical, cancellationToken);
+
+        using var listResponse = await client.GetAsync(
+            $"/api/books/{book.Id}/narrations/",
+            cancellationToken);
+        var listed = await listResponse.Content.ReadFromJsonAsync<NarrationJobResponse[]>(cancellationToken);
+        Assert.NotNull(listed);
+        Assert.Equal([published.Id], listed.Select(job => job.Id));
+
+        foreach (var hidden in new[] { staged, queuedStaged, historical })
+        {
+            using var get = await client.GetAsync($"/api/narrations/{hidden.Id}/", cancellationToken);
+            using var audio = await client.GetAsync($"/api/narrations/{hidden.Id}/audio", cancellationToken);
+            using var cancel = await client.PostWithCsrfAsync(
+                $"/api/narrations/{hidden.Id}/cancel",
+                new { },
+                cancellationToken);
+
+            Assert.Equal(HttpStatusCode.NotFound, get.StatusCode);
+            Assert.Equal(HttpStatusCode.NotFound, audio.StatusCode);
+            Assert.Equal(HttpStatusCode.NotFound, cancel.StatusCode);
+        }
+
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+            var persisted = await db.NarrationJobs.AsNoTracking()
+                .Where(job => job.Id == staged.Id
+                    || job.Id == queuedStaged.Id
+                    || job.Id == historical.Id)
+                .ToDictionaryAsync(job => job.Id, cancellationToken);
+            Assert.Equal(NarrationArtifactVisibility.Staged, persisted[staged.Id].Visibility);
+            Assert.Equal(NarrationArtifactVisibility.Staged, persisted[queuedStaged.Id].Visibility);
+            Assert.Equal(NarrationArtifactVisibility.Historical, persisted[historical.Id].Visibility);
+            Assert.Equal(NarrationJobStatus.Completed, persisted[staged.Id].Status);
+            Assert.Equal(NarrationJobStatus.Queued, persisted[queuedStaged.Id].Status);
+            Assert.False(persisted[queuedStaged.Id].CancellationRequested);
+            Assert.Equal(NarrationJobStatus.Completed, persisted[historical.Id].Status);
+        }
+    }
+
+    [Fact]
+    public async Task Create_hides_a_historical_single_voice_idempotency_match()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        var book = await ImportTextAsync(client, cancellationToken);
+        using var firstCreate = await client.PostWithCsrfAsync(
+            $"/api/books/{book.Id}/narrations/",
+            new CreateNarrationRequest(true),
+            cancellationToken);
+        var original = await firstCreate.Content.ReadFromJsonAsync<NarrationJobResponse>(cancellationToken);
+        Assert.NotNull(original);
+
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+            var job = await db.NarrationJobs.SingleAsync(item => item.Id == original.Id, cancellationToken);
+            job.Claim("historical-idempotency-test", DateTimeOffset.UtcNow.AddMinutes(5));
+            job.Complete(Path.Combine(job.OwnerId.ToString("N"), $"{job.Id:N}.mp3"), 4);
+            NarrationArtifactTestData.MarkHistorical(job);
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        using var repeatedCreate = await client.PostWithCsrfAsync(
+            $"/api/books/{book.Id}/narrations/",
+            new CreateNarrationRequest(true),
+            cancellationToken);
+
+        Assert.Equal(HttpStatusCode.NotFound, repeatedCreate.StatusCode);
+        await using var verifyScope = factory.Services.CreateAsyncScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+        var persisted = await verifyDb.NarrationJobs.AsNoTracking()
+            .SingleAsync(item => item.Id == original.Id, cancellationToken);
+        Assert.Equal(NarrationArtifactVisibility.Historical, persisted.Visibility);
+        Assert.Equal(NarrationJobStatus.Completed, persisted.Status);
+    }
+
+    [Fact]
     public async Task Concurrency_stamp_blocks_stale_completion_and_requeue_transitions()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
