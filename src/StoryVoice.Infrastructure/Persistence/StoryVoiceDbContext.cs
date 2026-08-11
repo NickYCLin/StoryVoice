@@ -48,6 +48,16 @@ public sealed class StoryVoiceDbContext(DbContextOptions<StoryVoiceDbContext> op
 
     public DbSet<CollectionShare> CollectionShares => Set<CollectionShare>();
 
+    public DbSet<ChapterSpeechPlanDraft> ChapterSpeechPlanDrafts => Set<ChapterSpeechPlanDraft>();
+
+    public DbSet<SpeechSegmentDraft> SpeechSegmentDrafts => Set<SpeechSegmentDraft>();
+
+    public DbSet<ConfirmedSpeechPlanRevision> ConfirmedSpeechPlanRevisions => Set<ConfirmedSpeechPlanRevision>();
+
+    public DbSet<ConfirmedSpeechSegment> ConfirmedSpeechSegments => Set<ConfirmedSpeechSegment>();
+
+    public DbSet<NarrationJobSpeechPlan> NarrationJobSpeechPlans => Set<NarrationJobSpeechPlan>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);

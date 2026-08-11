@@ -7,6 +7,7 @@ using StoryVoice.Application.Collections;
 using StoryVoice.Application.Insights;
 using StoryVoice.Application.Library;
 using StoryVoice.Application.Narrations;
+using StoryVoice.Application.Narrations.SpeechPlanning;
 using StoryVoice.Application.Series;
 using StoryVoice.Infrastructure.BookImports;
 using StoryVoice.Infrastructure.Identity;
@@ -71,6 +72,11 @@ public static class DependencyInjection
         services.AddScoped<ISharedCollectionService, SharedCollectionService>();
         services.AddScoped<PostgreSqlCastEpochActivationPublisher>();
         services.AddScoped<CompanionTokenService>();
+        services.AddSingleton<ChineseSpeechSegmenter>();
+        services.AddSingleton<ISpeakerAttributionProvider>(
+            _ => new LocalSpeakerAttributionProvider(new RuleBasedSpeakerAttributionProvider()));
+        services.AddScoped<IChapterSpeechPlanRepository, ChapterSpeechPlanRepository>();
+        services.AddScoped<ISpeechPlanService, SpeechPlanService>();
         services.AddSingleton<IBookImportParser, PlainTextBookParser>();
         services.AddSingleton<IBookImportParser, EpubBookParser>();
         services.AddSingleton<IBookFileStorage, LocalBookFileStorage>();

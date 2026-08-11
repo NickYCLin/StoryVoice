@@ -10,6 +10,7 @@ internal sealed class ChapterConfiguration : IEntityTypeConfiguration<Chapter>
     {
         builder.ToTable("chapters");
         builder.HasKey(chapter => chapter.Id);
+        builder.HasAlternateKey(chapter => new { chapter.BookId, chapter.Id });
         builder.Property(chapter => chapter.Title).HasMaxLength(500).IsRequired();
         builder.Property(chapter => chapter.OriginalText).IsRequired();
         builder.HasIndex(chapter => new { chapter.BookId, chapter.ChapterNumber }).IsUnique();

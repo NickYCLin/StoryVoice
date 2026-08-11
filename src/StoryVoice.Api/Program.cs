@@ -203,6 +203,7 @@ app.MapNarrationEndpoints();
 app.MapLibraryStatusEndpoints();
 app.MapSeriesEndpoints();
 app.MapCollectionEndpoints();
+app.MapSpeechPlanEndpoints();
 app.Run();
 
 public partial class Program;
