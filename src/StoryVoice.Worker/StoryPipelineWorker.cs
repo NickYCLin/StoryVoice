@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using StoryVoice.Application.Books;
 using StoryVoice.Application.Narrations;
+using StoryVoice.Domain.Books;
 using StoryVoice.Domain.Narrations;
 using StoryVoice.Infrastructure.Narrations;
 using StoryVoice.Infrastructure.Persistence;
@@ -11,6 +12,7 @@ namespace StoryVoice.Worker;
 public sealed class StoryPipelineWorker(
     IServiceScopeFactory scopeFactory,
     INarrationProvider provider,
+    NarrationProviderDispatcher multiVoiceDispatcher,
     IOptions<NarrationOptions> options,
     ILogger<StoryPipelineWorker> logger) : BackgroundService
 {
@@ -155,6 +157,9 @@ public sealed class StoryPipelineWorker(
                     item.SourceHash,
                     item.Voice,
                     item.Rate,
+                    item.Mode,
+                    item.SeriesId,
+                    item.CastRevisionId,
                     item.CancellationRequested
                 })
                 .SingleOrDefaultAsync(stoppingToken);
@@ -203,20 +208,44 @@ public sealed class StoryPipelineWorker(
             var cancellationMonitor = MonitorCancellationAsync(claim, providerCancellation, stoppingToken);
             try
             {
-                await provider.SynthesizeAsync(
-                    source.Text,
-                    temporaryPath,
-                    job.Voice,
-                    job.Rate,
-                    async (progress, progressCancellationToken) =>
-                    {
-                        await ReportSynthesisProgressAsync(
-                            db,
-                            claim,
-                            progress,
-                            progressCancellationToken);
-                    },
-                    providerCancellation.Token);
+                Func<NarrationSynthesisProgress, CancellationToken, Task> reportProgress = async (progress, progressCancellationToken) =>
+                {
+                    await ReportSynthesisProgressAsync(db, claim, progress, progressCancellationToken);
+                };
+
+                if (job.Mode == NarrationMode.MultiCharacter)
+                {
+                    var castRevision = await LoadCastRevisionAsync(
+                        db,
+                        job.OwnerId,
+                        job.SeriesId!.Value,
+                        job.CastRevisionId!.Value,
+                        stoppingToken);
+                    var chapterPlans = await LoadChapterPlanSourcesAsync(
+                        db,
+                        job.OwnerId,
+                        job.SeriesId.Value,
+                        job.Id,
+                        content,
+                        stoppingToken);
+                    var turns = MultiCharacterTurnBuilder.BuildTurns(castRevision, chapterPlans);
+                    await multiVoiceDispatcher.SynthesizeAsync(
+                        castRevision.NarratorProvider,
+                        new MultiVoiceNarrationRequest(turns),
+                        temporaryPath,
+                        reportProgress,
+                        providerCancellation.Token);
+                }
+                else
+                {
+                    await provider.SynthesizeAsync(
+                        source.Text,
+                        temporaryPath,
+                        job.Voice,
+                        job.Rate,
+                        reportProgress,
+                        providerCancellation.Token);
+                }
             }
             finally
             {
@@ -311,20 +340,88 @@ public sealed class StoryPipelineWorker(
         catch (Exception exception)
         {
             logger.LogWarning(exception, "Narration job {JobId} failed", claim.JobId);
-            var errorCode = exception.Message is "narration_source_unavailable" or "narration_source_changed"
-                ? exception.Message
-                : "provider_failed";
+            var isPermanentErrorCode = exception.Message is "narration_source_unavailable"
+                or "narration_source_changed"
+                or MultiCharacterTurnBuilder.IntegrityMismatchReasonCode;
+            var errorCode = isPermanentErrorCode ? exception.Message : "provider_failed";
             await RecordFailureAsync(
                 claim,
                 errorCode,
                 CancellationToken.None,
-                permanent: errorCode is "narration_source_unavailable" or "narration_source_changed");
+                permanent: isPermanentErrorCode);
         }
         finally
         {
             DeleteIfExists(temporaryPath);
             DeleteIfExists(uncommittedAudioPath);
         }
+    }
+
+    private static async Task<NarrationCastRevision> LoadCastRevisionAsync(
+        StoryVoiceDbContext db,
+        Guid ownerId,
+        Guid seriesId,
+        Guid castRevisionId,
+        CancellationToken cancellationToken)
+    {
+        var castRevision = await db.NarrationCastRevisions
+            .AsNoTracking()
+            .AsSplitQuery()
+            .Include(revision => revision.Assignments)
+            .SingleOrDefaultAsync(
+                revision => revision.OwnerId == ownerId
+                    && revision.SeriesId == seriesId
+                    && revision.Id == castRevisionId,
+                cancellationToken);
+        return castRevision
+            ?? throw new InvalidOperationException(MultiCharacterTurnBuilder.IntegrityMismatchReasonCode);
+    }
+
+    private static async Task<IReadOnlyList<ChapterPlanSource>> LoadChapterPlanSourcesAsync(
+        StoryVoiceDbContext db,
+        Guid ownerId,
+        Guid seriesId,
+        Guid narrationJobId,
+        Book contentBook,
+        CancellationToken cancellationToken)
+    {
+        var links = await db.NarrationJobSpeechPlans
+            .AsNoTracking()
+            .Where(link => link.OwnerId == ownerId
+                && link.SeriesId == seriesId
+                && link.NarrationJobId == narrationJobId)
+            .OrderBy(link => link.ChapterSortOrder)
+            .ToListAsync(cancellationToken);
+        if (links.Count == 0)
+        {
+            throw new InvalidOperationException(MultiCharacterTurnBuilder.IntegrityMismatchReasonCode);
+        }
+
+        var revisionIds = links.Select(link => link.ConfirmedSpeechPlanRevisionId).ToArray();
+        var revisions = await db.ConfirmedSpeechPlanRevisions
+            .AsNoTracking()
+            .AsSplitQuery()
+            .Include(revision => revision.Segments)
+            .Where(revision => revision.OwnerId == ownerId
+                && revision.SeriesId == seriesId
+                && revisionIds.Contains(revision.Id))
+            .ToDictionaryAsync(revision => revision.Id, cancellationToken);
+        var chaptersById = contentBook.Chapters.ToDictionary(chapter => chapter.Id);
+
+        var chapterPlans = new List<ChapterPlanSource>(links.Count);
+        foreach (var link in links)
+        {
+            if (!revisions.TryGetValue(link.ConfirmedSpeechPlanRevisionId, out var revision)
+                || revision.BookId != contentBook.Id
+                || !chaptersById.TryGetValue(revision.ChapterId, out var chapter))
+            {
+                throw new InvalidOperationException(MultiCharacterTurnBuilder.IntegrityMismatchReasonCode);
+            }
+
+            chapterPlans.Add(new ChapterPlanSource(link.ChapterSortOrder, revision, chapter.Title, chapter.OriginalText));
+        }
+
+        return chapterPlans;
     }
 
     internal static int CalculateSynthesisProgress(int completedChunks, int totalChunks)
@@ -339,7 +436,7 @@ public sealed class StoryPipelineWorker(
     }
 
     internal static IQueryable<NarrationJob> SupportedJobs(IQueryable<NarrationJob> jobs) =>
-        jobs.Where(job => job.Mode == NarrationMode.SingleVoice);
+        jobs.Where(job => job.Mode == NarrationMode.SingleVoice || job.Mode == NarrationMode.MultiCharacter);
 
     private async Task ReportSynthesisProgressAsync(
         StoryVoiceDbContext db,

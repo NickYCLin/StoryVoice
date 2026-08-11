@@ -97,30 +97,77 @@ public sealed class ConfirmedSpeechPlanRevision
         return revision;
     }
 
+    /// <summary>
+    /// Recomputes the fingerprint from this revision's own (already immutable) segments and
+    /// compares it to the stored <see cref="Fingerprint"/>. A Worker calls this right before
+    /// synthesis so corruption or a bypassed-domain write can never silently reach audio output.
+    /// </summary>
+    public bool VerifyFingerprint() =>
+        string.Equals(Fingerprint, ComputeFingerprint(SourceHash, _segments), StringComparison.Ordinal);
+
     private static string ComputeFingerprint(
         string sourceHash,
-        IReadOnlyList<SpeechSegmentDraft> segments)
+        IReadOnlyList<SpeechSegmentDraft> segments) =>
+        ComputeFingerprint(
+            sourceHash,
+            segments.OrderBy(segment => segment.SortOrder).Select(segment => new FingerprintSegment(
+                segment.SortOrder,
+                segment.SourceKind.ToString(),
+                segment.StartOffset,
+                segment.Length,
+                segment.TextHash,
+                segment.Kind.ToString(),
+                segment.CharacterId,
+                segment.DecisionSource.ToString())));
+
+    private static string ComputeFingerprint(
+        string sourceHash,
+        IReadOnlyList<ConfirmedSpeechSegment> segments) =>
+        ComputeFingerprint(
+            sourceHash,
+            segments.OrderBy(segment => segment.SortOrder).Select(segment => new FingerprintSegment(
+                segment.SortOrder,
+                segment.SourceKind.ToString(),
+                segment.StartOffset,
+                segment.Length,
+                segment.TextHash,
+                segment.Kind.ToString(),
+                segment.CharacterId,
+                segment.DecisionSource.ToString())));
+
+    private static string ComputeFingerprint(string sourceHash, IEnumerable<FingerprintSegment> segments)
     {
+        var segmentList = segments.ToArray();
         using var canonical = new MemoryStream();
         WriteField(canonical, FingerprintSchemaVersion);
         WriteField(canonical, sourceHash);
-        WriteField(canonical, segments.Count.ToString(CultureInfo.InvariantCulture));
+        WriteField(canonical, segmentList.Length.ToString(CultureInfo.InvariantCulture));
 
-        foreach (var segment in segments.OrderBy(candidate => candidate.SortOrder))
+        foreach (var segment in segmentList)
         {
             WriteField(canonical, segment.SortOrder.ToString(CultureInfo.InvariantCulture));
-            WriteField(canonical, segment.SourceKind.ToString());
+            WriteField(canonical, segment.SourceKind);
             WriteField(canonical, segment.StartOffset.ToString(CultureInfo.InvariantCulture));
             WriteField(canonical, segment.Length.ToString(CultureInfo.InvariantCulture));
             WriteField(canonical, segment.TextHash);
-            WriteField(canonical, segment.Kind.ToString());
+            WriteField(canonical, segment.Kind);
             WriteField(canonical, segment.CharacterId?.ToString("N", CultureInfo.InvariantCulture) ?? string.Empty);
-            WriteField(canonical, segment.DecisionSource.ToString());
+            WriteField(canonical, segment.DecisionSource);
         }
 
         var hash = SHA256.HashData(canonical.GetBuffer().AsSpan(0, checked((int)canonical.Length)));
         return Convert.ToHexString(hash).ToLowerInvariant();
     }
+
+    private readonly record struct FingerprintSegment(
+        int SortOrder,
+        string SourceKind,
+        int StartOffset,
+        int Length,
+        string TextHash,
+        string Kind,
+        Guid? CharacterId,
+        string DecisionSource);
 
     private static void WriteField(Stream destination, string value)
     {

@@ -7,8 +7,12 @@ namespace StoryVoice.UnitTests;
 public sealed class StoryPipelineWorkerModeTests
 {
     [Fact]
-    public void Compatibility_worker_supports_only_single_voice_jobs()
+    public void Worker_supports_both_single_voice_and_multi_character_jobs()
     {
+        // Task 0 shipped a compatibility worker that only claimed SingleVoice jobs so a rolling
+        // deploy could never have an old worker claim a MultiCharacter row it didn't understand.
+        // Task 9 is the deliberate, forward-only widening past that boundary — this test asserts
+        // the new supported set, it does not preserve the old restriction.
         var singleVoice = CreateJob();
         var multiCharacter = CreateJob();
         typeof(NarrationJob)
@@ -19,13 +23,13 @@ public sealed class StoryPipelineWorkerModeTests
             .SupportedJobs(new[] { singleVoice, multiCharacter }.AsQueryable())
             .ToArray();
 
-        Assert.Single(supported);
-        Assert.Same(singleVoice, supported[0]);
-        Assert.Equal(NarrationMode.MultiCharacter, multiCharacter.Mode);
+        Assert.Equal(2, supported.Length);
+        Assert.Contains(singleVoice, supported);
+        Assert.Contains(multiCharacter, supported);
     }
 
     [Fact]
-    public void Every_worker_job_query_is_routed_through_the_supported_mode_filter()
+    public void Every_worker_narration_job_query_is_routed_through_the_supported_mode_filter()
     {
         var source = File.ReadAllLines(GetWorkerSourcePath());
         var jobAccesses = source
@@ -39,7 +43,7 @@ public sealed class StoryPipelineWorkerModeTests
         Assert.Contains(
             source,
             line => line.Contains(
-                "jobs.Where(job => job.Mode == NarrationMode.SingleVoice)",
+                "jobs.Where(job => job.Mode == NarrationMode.SingleVoice || job.Mode == NarrationMode.MultiCharacter)",
                 StringComparison.Ordinal));
     }
 
