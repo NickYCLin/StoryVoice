@@ -43,15 +43,22 @@ public sealed class NarrationModeMigrationTests
     }
 
     [Fact]
-    public void Compatibility_migration_is_newest_and_generates_reversible_postgresql_sql()
+    public void Compatibility_migration_precedes_phase_b_and_generates_reversible_postgresql_sql()
     {
         using var db = CreateContext();
         var migrations = db.Database.GetMigrations().ToArray();
+        var compatibilityIndex = Array.FindIndex(
+            migrations,
+            migration => migration.EndsWith("_AddNarrationModeCompatibility", StringComparison.Ordinal));
 
-        Assert.EndsWith("_AddNarrationModeCompatibility", migrations[^1], StringComparison.Ordinal);
+        Assert.True(compatibilityIndex > 0);
+        Assert.True(compatibilityIndex < migrations.Length - 1);
+        Assert.EndsWith("_AddSeriesCast", migrations[^1], StringComparison.Ordinal);
 
+        var previousMigration = migrations[compatibilityIndex - 1];
+        var compatibilityMigration = migrations[compatibilityIndex];
         var migrator = db.GetService<IMigrator>();
-        var up = migrator.GenerateScript(migrations[^2], migrations[^1]);
+        var up = migrator.GenerateScript(previousMigration, compatibilityMigration);
         Assert.Contains(
             "ADD \"Mode\" character varying(30) NOT NULL DEFAULT 'SingleVoice'",
             up,
@@ -69,7 +76,7 @@ public sealed class NarrationModeMigrationTests
             up,
             StringComparison.Ordinal);
 
-        var down = migrator.GenerateScript(migrations[^1], migrations[^2]);
+        var down = migrator.GenerateScript(compatibilityMigration, previousMigration);
         Assert.Contains("WHERE \"Mode\" IS DISTINCT FROM 'SingleVoice'", down, StringComparison.Ordinal);
         Assert.Contains("RAISE EXCEPTION 'Cannot roll back narration Mode while non-SingleVoice jobs exist.'", down, StringComparison.Ordinal);
         Assert.Contains("DROP CONSTRAINT \"CK_narration_jobs_mode\"", down, StringComparison.Ordinal);

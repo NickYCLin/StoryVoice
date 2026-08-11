@@ -6,6 +6,7 @@ using StoryVoice.Application.Books;
 using StoryVoice.Application.Insights;
 using StoryVoice.Application.Library;
 using StoryVoice.Application.Narrations;
+using StoryVoice.Application.Series;
 using StoryVoice.Infrastructure.BookImports;
 using StoryVoice.Infrastructure.Identity;
 using StoryVoice.Infrastructure.Narrations;
@@ -40,6 +41,7 @@ public static class DependencyInjection
         services.AddScoped<IBookInsightsService, BookInsightsService>();
         services.AddScoped<ILibraryStatusService, LibraryStatusService>();
         services.AddScoped<INarrationService, NarrationService>();
+        services.AddScoped<IStorySeriesRepository, StorySeriesRepository>();
         services.AddScoped<CompanionTokenService>();
         services.AddSingleton<IBookImportParser, PlainTextBookParser>();
         services.AddSingleton<IBookImportParser, EpubBookParser>();

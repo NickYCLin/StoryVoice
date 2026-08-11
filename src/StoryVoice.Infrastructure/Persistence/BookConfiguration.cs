@@ -34,6 +34,9 @@ internal sealed class BookConfiguration : IEntityTypeConfiguration<Book>
         builder.HasIndex(book => new { book.OwnerId, book.SourceProvider, book.ExternalSourceId })
             .IsUnique()
             .HasFilter("\"OwnerId\" IS NOT NULL AND \"SourceProvider\" IS NOT NULL AND \"ExternalSourceId\" IS NOT NULL");
+        builder.HasIndex(book => new { book.OwnerId, book.Id })
+            .HasDatabaseName("UX_books_owner_id")
+            .IsUnique();
         builder.HasOne<ApplicationUser>()
             .WithMany()
             .HasForeignKey(book => book.OwnerId)
