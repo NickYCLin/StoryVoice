@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
+import { apiUrl, responseProblem } from './api'
+
 type NarrationBook = {
   id: string
   contentBookId: string | null
@@ -28,14 +30,6 @@ type NarrationJob = {
 type Props = {
   book: NarrationBook
   csrfToken: string
-}
-
-const basePath = import.meta.env.BASE_URL.replace(/\/+$/, '')
-const apiUrl = (path: string) => `${basePath}${path.startsWith('/') ? path : `/${path}`}`
-
-async function responseProblem(response: Response, fallback: string) {
-  const body = await response.json().catch(() => null) as { detail?: string } | null
-  return body?.detail ?? fallback
 }
 
 const statusLabels: Record<NarrationJob['status'], string> = {
@@ -151,39 +145,39 @@ export function NarrationPanel({ book, csrfToken }: Props) {
   }
 
   return (
-    <section aria-label="AI 朗讀與有聲書" className="mt-5 rounded-[1.75rem] border border-amber-200 bg-amber-50/70 p-5 text-stone-800">
+    <section aria-label="AI 朗讀與有聲書" className="mt-5 rounded-2xl border border-amber-300/10 bg-amber-300/[.025] p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-800">合法正文神經語音</p>
-          <h3 className="mt-1 text-xl font-black text-stone-950">AI 朗讀與有聲書</h3>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-stone-700">
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-200/70">合法正文神經語音</p>
+          <h4 className="mt-1 font-serif text-lg text-stone-200">AI 朗讀與有聲書</h4>
+          <p className="mt-2 max-w-3xl text-xs leading-6 text-stone-500">
             StoryVoice 只處理你上傳或明確連結的合法 EPUB／TXT 正文。文字會送往 Microsoft Edge 神經語音服務，音訊完成後保存於你的私人 StoryVoice 帳號；這與博客來官方閱讀器的 TTS 標記是不同能力。
           </p>
         </div>
-        <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-amber-800 shadow-sm">
+        <span className="shrink-0 rounded-full border border-amber-300/20 bg-amber-300/10 px-3 py-1 text-xs text-amber-200">
           {eligible ? '正文已就緒' : '等待合法正文'}
         </span>
       </div>
 
       {!eligible && (
-        <p className="mt-4 rounded-2xl border border-amber-200 bg-white p-4 text-sm leading-6">
+        <p className="mt-4 rounded-xl border border-white/[.06] bg-black/10 p-4 text-xs leading-6 text-stone-500">
           目前只有書目資料；先上傳你合法持有、無 DRM 的 EPUB／TXT，再於上方明確連結正文。博客來官方 TTS 標記不等於 StoryVoice 音訊。
         </p>
       )}
 
       {eligible && (
-        <div className="mt-4 rounded-2xl border border-amber-200 bg-white p-4">
-          <label className="flex items-start gap-3 text-sm leading-6">
+        <div className="mt-4 rounded-xl border border-white/[.06] bg-black/10 p-4">
+          <label className="flex items-start gap-3 text-sm leading-6 text-stone-400">
             <input
               checked={attested}
-              className="mt-1 h-4 w-4 accent-amber-700"
+              className="mt-1 h-4 w-4 accent-amber-300"
               onChange={(event) => setAttested(event.target.checked)}
               type="checkbox"
             />
             <span>我確認自己有權將這份合法正文送交上述語音服務處理，且內容不含需要繞過 DRM 才能取得的資料。</span>
           </label>
           <button
-            className="mt-3 rounded-full bg-stone-950 px-5 py-2.5 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-45"
+            className="secondary-button mt-3 disabled:cursor-not-allowed disabled:opacity-45"
             disabled={!attested || loading || active}
             onClick={createNarration}
             type="button"
@@ -193,17 +187,17 @@ export function NarrationPanel({ book, csrfToken }: Props) {
         </div>
       )}
 
-      <div aria-live="polite" className="mt-3 text-sm font-semibold text-stone-700">{message}</div>
+      <div aria-live="polite" className="mt-3 min-h-5 text-xs text-stone-500">{message}</div>
 
       <div className="mt-4 space-y-3">
         {jobs.map((job) => (
-          <article className="rounded-2xl border border-stone-200 bg-white p-4" key={job.id}>
+          <article className="rounded-xl border border-white/[.06] bg-black/10 p-4" key={job.id}>
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <p className="font-black text-stone-950">{statusLabels[job.status]}</p>
+                <p className="font-semibold text-stone-200">{statusLabels[job.status]}</p>
                 <p className="mt-1 text-xs text-stone-500">{job.voice} · 語速 {job.rate} · 嘗試 {job.attempts}/3</p>
               </div>
-              <span className="rounded-full bg-stone-100 px-3 py-1 text-xs font-bold text-stone-700">{job.progressPercent}%</span>
+              <span className="rounded-full border border-white/[.08] px-3 py-1 text-xs text-stone-400">{job.progressPercent}%</span>
             </div>
             {(job.status === 'Queued' || job.status === 'Running') && (
               <div className="mt-3">
@@ -212,22 +206,22 @@ export function NarrationPanel({ book, csrfToken }: Props) {
                   aria-valuemax={100}
                   aria-valuemin={0}
                   aria-valuenow={job.progressPercent}
-                  className="h-2 overflow-hidden rounded-full bg-stone-200"
+                  className="h-2 overflow-hidden rounded-full bg-white/[.08]"
                   role="progressbar"
                 >
                   <div
-                    className="h-full rounded-full bg-amber-600 transition-[width] duration-300 motion-reduce:transition-none"
+                    className="h-full rounded-full bg-amber-300 transition-[width] duration-300 motion-reduce:transition-none"
                     style={{ width: `${job.progressPercent}%` }}
                   />
                 </div>
-                <p className="mt-1 text-xs font-semibold text-stone-600">
+                <p className="mt-1 text-xs text-stone-500">
                   {job.status === 'Queued' ? '等待執行' : '分塊語音合成中'}
                 </p>
               </div>
             )}
             {(job.status === 'Queued' || job.status === 'Running') && (
               <button
-                className="mt-3 rounded-full border border-stone-300 px-4 py-2 text-xs font-bold text-stone-700"
+                className="secondary-button mt-3 px-4 py-2 text-xs"
                 onClick={() => cancelNarration(job.id)}
                 type="button"
               >
@@ -240,12 +234,12 @@ export function NarrationPanel({ book, csrfToken }: Props) {
               </audio>
             )}
             {job.status === 'Failed' && (
-              <p className="mt-3 text-sm text-rose-700">語音服務未能完成這次工作（{job.errorCode ?? 'provider_failed'}）。重新確認授權後可再次建立。</p>
+              <p className="mt-3 text-sm text-rose-300">語音服務未能完成這次工作（{job.errorCode ?? 'provider_failed'}）。重新確認授權後可再次建立。</p>
             )}
           </article>
         ))}
         {!loading && jobs.length === 0 && eligible && (
-          <p className="text-sm text-stone-600">這本書尚未建立 StoryVoice 音訊。</p>
+          <p className="text-xs text-stone-600">這本書尚未建立 StoryVoice 音訊。</p>
         )}
       </div>
     </section>
