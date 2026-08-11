@@ -21,6 +21,7 @@ public sealed class NarrationJobTests
             attestedAt);
 
         Assert.Equal(NarrationJobStatus.Queued, job.Status);
+        Assert.Equal(NarrationMode.SingleVoice, job.Mode);
         Assert.Equal(attestedAt, job.RightsAttestedAt);
         Assert.Equal(0, job.Attempts);
 

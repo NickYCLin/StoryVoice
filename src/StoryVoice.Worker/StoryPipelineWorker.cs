@@ -54,7 +54,7 @@ public sealed class StoryPipelineWorker(
         var now = DateTimeOffset.UtcNow;
         if (now >= _nextRecoveryAt)
         {
-            await db.NarrationJobs
+            await SupportedJobs(db.NarrationJobs)
                 .Where(job => job.Status == NarrationJobStatus.Running
                     && job.LeaseExpiresAt != null
                     && job.LeaseExpiresAt <= now
@@ -69,7 +69,7 @@ public sealed class StoryPipelineWorker(
                     .SetProperty(job => job.UpdatedAt, now)
                     .SetProperty(job => job.ConcurrencyStamp, Guid.NewGuid()),
                     cancellationToken);
-            await db.NarrationJobs
+            await SupportedJobs(db.NarrationJobs)
                 .Where(job => job.Status == NarrationJobStatus.Running
                     && job.LeaseExpiresAt != null
                     && job.LeaseExpiresAt <= now
@@ -88,7 +88,7 @@ public sealed class StoryPipelineWorker(
             _nextRecoveryAt = now.AddSeconds(30);
         }
 
-        var candidateId = await db.NarrationJobs
+        var candidateId = await SupportedJobs(db.NarrationJobs)
             .AsNoTracking()
             .Where(job => !job.CancellationRequested
                 && job.Attempts < options.Value.MaxAttempts
@@ -109,7 +109,7 @@ public sealed class StoryPipelineWorker(
         var artifactToken = Guid.NewGuid().ToString("N");
         var leaseOwner = $"{_workerId}:{artifactToken}";
         var leaseExpiresAt = now.AddMinutes(options.Value.LeaseMinutes);
-        var affected = await db.NarrationJobs
+        var affected = await SupportedJobs(db.NarrationJobs)
             .Where(job => job.Id == candidateId
                 && !job.CancellationRequested
                 && job.Attempts < options.Value.MaxAttempts
@@ -142,7 +142,7 @@ public sealed class StoryPipelineWorker(
         {
             await using var scope = scopeFactory.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
-            var job = await db.NarrationJobs
+            var job = await SupportedJobs(db.NarrationJobs)
                 .AsNoTracking()
                 .Where(item => item.Id == claim.JobId
                     && item.Status == NarrationJobStatus.Running
@@ -243,7 +243,7 @@ public sealed class StoryPipelineWorker(
             int affected;
             try
             {
-                affected = await db.NarrationJobs
+                affected = await SupportedJobs(db.NarrationJobs)
                     .Where(item => item.Id == claim.JobId
                         && item.Status == NarrationJobStatus.Running
                         && item.LeaseOwner == claim.LeaseOwner
@@ -338,6 +338,9 @@ public sealed class StoryPipelineWorker(
         return Math.Clamp(mapped, 11, 95);
     }
 
+    internal static IQueryable<NarrationJob> SupportedJobs(IQueryable<NarrationJob> jobs) =>
+        jobs.Where(job => job.Mode == NarrationMode.SingleVoice);
+
     private async Task ReportSynthesisProgressAsync(
         StoryVoiceDbContext db,
         ClaimedJob claim,
@@ -350,7 +353,7 @@ public sealed class StoryPipelineWorker(
         var updatedAt = DateTimeOffset.UtcNow;
         try
         {
-            await db.NarrationJobs
+            await SupportedJobs(db.NarrationJobs)
                 .Where(item => item.Id == claim.JobId
                     && item.Status == NarrationJobStatus.Running
                     && item.LeaseOwner == claim.LeaseOwner
@@ -386,7 +389,7 @@ public sealed class StoryPipelineWorker(
             await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
             await using var scope = scopeFactory.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
-            var state = await db.NarrationJobs
+            var state = await SupportedJobs(db.NarrationJobs)
                 .AsNoTracking()
                 .Where(job => job.Id == claim.JobId)
                 .Select(job => new { job.Status, job.CancellationRequested, job.LeaseOwner })
@@ -403,7 +406,7 @@ public sealed class StoryPipelineWorker(
             var now = DateTimeOffset.UtcNow;
             if (now >= nextRenewalAt)
             {
-                var renewed = await db.NarrationJobs
+                var renewed = await SupportedJobs(db.NarrationJobs)
                     .Where(job => job.Id == claim.JobId
                         && job.Status == NarrationJobStatus.Running
                         && job.LeaseOwner == claim.LeaseOwner
@@ -433,7 +436,7 @@ public sealed class StoryPipelineWorker(
         {
             await using var scope = scopeFactory.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
-            return await db.NarrationJobs
+            return await SupportedJobs(db.NarrationJobs)
                 .AsNoTracking()
                 .AnyAsync(job => job.Id == jobId
                     && job.Status == NarrationJobStatus.Completed
@@ -459,7 +462,7 @@ public sealed class StoryPipelineWorker(
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
-        var state = await db.NarrationJobs
+        var state = await SupportedJobs(db.NarrationJobs)
             .AsNoTracking()
             .Where(job => job.Id == claim.JobId
                 && job.Status == NarrationJobStatus.Running
@@ -482,7 +485,7 @@ public sealed class StoryPipelineWorker(
         var nextAttemptAt = finalFailure
             ? (DateTimeOffset?)null
             : now.AddSeconds(Math.Min(30, Math.Pow(2, state.Attempts)));
-        var failureUpdated = await db.NarrationJobs
+        var failureUpdated = await SupportedJobs(db.NarrationJobs)
             .Where(job => job.Id == claim.JobId
                 && job.Status == NarrationJobStatus.Running
                 && job.LeaseOwner == claim.LeaseOwner
@@ -512,7 +515,7 @@ public sealed class StoryPipelineWorker(
         ClaimedJob claim,
         DateTimeOffset now,
         CancellationToken cancellationToken) =>
-        db.NarrationJobs
+        SupportedJobs(db.NarrationJobs)
             .Where(job => job.Id == claim.JobId
                 && job.Status == NarrationJobStatus.Running
                 && job.LeaseOwner == claim.LeaseOwner

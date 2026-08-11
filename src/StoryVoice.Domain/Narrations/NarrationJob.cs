@@ -27,6 +27,7 @@ public sealed class NarrationJob
         SourceHash = Require(sourceHash, nameof(sourceHash), 128);
         Voice = Require(voice, nameof(voice), 200);
         Rate = Require(rate, nameof(rate), 20);
+        Mode = NarrationMode.SingleVoice;
         RightsAttestedAt = rightsAttestedAt;
         Status = NarrationJobStatus.Queued;
         CreatedAt = DateTimeOffset.UtcNow;
@@ -42,6 +43,7 @@ public sealed class NarrationJob
     public string SourceHash { get; private set; } = string.Empty;
     public string Voice { get; private set; } = string.Empty;
     public string Rate { get; private set; } = string.Empty;
+    public NarrationMode Mode { get; private set; }
     public NarrationJobStatus Status { get; private set; }
     public int ProgressPercent { get; private set; }
     public int Attempts { get; private set; }

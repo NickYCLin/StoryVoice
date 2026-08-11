@@ -64,6 +64,7 @@ internal sealed class NarrationService(
         var configuration = options.Value;
         var existing = await dbContext.NarrationJobs.AsNoTracking().SingleOrDefaultAsync(
             job => job.OwnerId == currentUser.UserId
+                && job.Mode == NarrationMode.SingleVoice
                 && job.BookId == target.Id
                 && job.ContentBookId == content.Id
                 && job.SourceHash == source.SourceHash
@@ -94,6 +95,7 @@ internal sealed class NarrationService(
             dbContext.ChangeTracker.Clear();
             existing = await dbContext.NarrationJobs.AsNoTracking().SingleOrDefaultAsync(
                 candidate => candidate.OwnerId == currentUser.UserId
+                    && candidate.Mode == NarrationMode.SingleVoice
                     && candidate.BookId == target.Id
                     && candidate.ContentBookId == content.Id
                     && candidate.SourceHash == source.SourceHash
