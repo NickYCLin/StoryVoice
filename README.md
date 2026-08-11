@@ -21,6 +21,9 @@ Phase 1 Foundation 已建立：
 - 跨冊系列／固定角色／alias、不可變 cast revision 與整批原子啟用資料邊界
 - 章名、旁白與引號對話的 deterministic offset segmentation
 - owner-scoped 系列配音管理 API 與伺服器 voice allowlist
+- 書冊（獨立於角色配音系列之外的單純書本分類收藏）與冊次排序
+- 書冊唯讀分享：依 email 分享給其他已註冊使用者，可隨時撤銷
+- React Router 多頁面前端（書庫／書冊／分享給我的），取代原本的單頁式版面
 - Serilog, OpenAPI, liveness/readiness health checks
 - Docker Compose development stack
 - Unit and integration tests + GitHub Actions CI
@@ -111,14 +114,40 @@ curl -X POST \
   -F 'file=@./story.epub;type=application/epub+zip'
 ```
 
+### Book collections (書冊)
+
+Book collections group existing owner-scoped books together — independent from the
+narration-focused `StorySeries` above — and can be shared read-only by email:
+
+```text
+GET    /api/collections
+GET    /api/collections/{id}
+POST   /api/collections
+PUT    /api/collections/{id}
+DELETE /api/collections/{id}
+POST   /api/collections/{id}/books
+PUT    /api/collections/{id}/books/{bookId}
+DELETE /api/collections/{id}/books/{bookId}
+POST   /api/collections/{id}/shares
+DELETE /api/collections/{id}/shares/{shareId}
+GET    /api/collections/shared-with-me
+GET    /api/collections/shared-with-me/{id}
+GET    /api/collections/shared-with-me/{id}/books/{bookId}
+```
+
+Sharing is read-only and scoped to book titles and chapter text only — reading notes,
+extractive summaries, metadata corrections and narration jobs stay private to the owner.
+
 The TXT parser recognizes headings such as `第一章 月下相逢` and
 `Chapter 1: Moonlight`; files without headings become one chapter. EPUB imports
 metadata, TOC labels and spine reading order, strips executable/style markup,
 and stores the original upload under a generated server-side path. EPUB archive
 expansion is capped at 100 MiB and 5,000 entries.
 
-Open `http://localhost:3000/#library` to import EPUB/TXT files, switch between
-books, and expand the parsed chapter text in the read-only library view.
+Open `http://localhost:3000/library` to import EPUB/TXT files, switch between
+books, and expand the parsed chapter text in the read-only library view. Group
+books into a collection at `/collections`, and check collections other users
+shared with you at `/shared`.
 
 ### 博客來電子書櫃 Companion
 

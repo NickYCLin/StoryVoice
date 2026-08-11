@@ -19,6 +19,9 @@
 - 不可變 cast revision、staged rebuild batch 與全系列 active epoch 原子切換邊界。
 - 以原文 offset 切分章名、旁白與引號對話；所有片段可無遺漏、無重排地重組原文。
 - owner-scoped 系列配音 API：系列建立與查詢、冊次加入、角色與 alias 管理、固定聲線更新、伺服器 voice allowlist。
+- 書冊（`BookCollection`）：與角色配音系列(`StorySeries`)各自獨立的單純書本分類收藏，可調整成員書籍排序與冊次標籤。
+- 書冊唯讀分享：owner 可依 email 把書冊分享給其他已註冊帳號，被分享者只能唯讀瀏覽書名與章節正文，看不到閱讀筆記、摘要或朗讀音訊；owner 可隨時撤銷。
+- 前端已改為 React Router 多頁面架構（`/library`、`/collections`、`/shared` 等），不再是單一長頁面；`NarrationPanel` 已統一為深色主題。
 
 ## 多角色系列配音進度
 
