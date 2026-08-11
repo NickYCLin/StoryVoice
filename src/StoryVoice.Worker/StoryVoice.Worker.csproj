@@ -14,5 +14,6 @@
   </ItemGroup>
   <ItemGroup>
     <Content Include="edge_tts_provider.py" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="edge_tts_multi_voice_provider.py" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
