@@ -12,6 +12,10 @@ coverage/
 **/dist/
 *.tsbuildinfo
 
+# Python
+**/__pycache__/
+*.py[cod]
+
 # Editors / OS
 .idea/
 .vscode/
