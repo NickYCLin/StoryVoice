@@ -72,6 +72,78 @@ public sealed class StorySeriesTests
     }
 
     [Fact]
+    public void Explicit_character_update_changes_cast_and_canonical_key_atomically()
+    {
+        var series = CreateSeries(Guid.NewGuid(), "系列");
+        var character = series.AddCharacter(
+            "Alice",
+            SeriesCharacterRole.Supporting,
+            "edge",
+            "zh-TW-HsiaoChenNeural",
+            "+0%",
+            "+0Hz",
+            "+0%",
+            null);
+        series.AddAlias(character.Id, "隊長");
+
+        series.UpdateCharacter(
+            character.Id,
+            "Alice Prime",
+            SeriesCharacterRole.Main,
+            "edge",
+            "zh-TW-HsiaoYuNeural",
+            "-5%",
+            "+2Hz",
+            "-3%",
+            "使用者確認的固定角色聲線");
+
+        Assert.Equal("Alice Prime", character.CanonicalName);
+        Assert.Equal("ALICE PRIME", character.NormalizedName);
+        Assert.Equal(SeriesCharacterRole.Main, character.Role);
+        Assert.Equal("zh-TW-HsiaoYuNeural", character.Voice);
+        Assert.Equal("-5%", character.Rate);
+        Assert.Equal("+2Hz", character.Pitch);
+        Assert.Equal("-3%", character.Volume);
+        Assert.Equal("使用者確認的固定角色聲線", character.Notes);
+        var canonicalKey = Assert.Single(
+            series.IdentityKeys,
+            key => key.Kind == SeriesCharacterIdentityKeyKind.Canonical);
+        Assert.Equal("Alice Prime", canonicalKey.Value);
+        Assert.Equal("ALICE PRIME", canonicalKey.NormalizedValue);
+
+        var beforeInvalidUpdate = (
+            character.CanonicalName,
+            character.Role,
+            character.Voice,
+            character.Rate,
+            character.Pitch,
+            character.Volume,
+            character.Notes,
+            character.ConcurrencyStamp,
+            series.ConcurrencyStamp);
+        Assert.Throws<InvalidOperationException>(() => series.UpdateCharacter(
+            character.Id,
+            "隊長",
+            SeriesCharacterRole.Minor,
+            "edge",
+            "zh-TW-YunJheNeural",
+            "+0%",
+            "+0Hz",
+            "+0%",
+            null));
+        Assert.Equal(beforeInvalidUpdate, (
+            character.CanonicalName,
+            character.Role,
+            character.Voice,
+            character.Rate,
+            character.Pitch,
+            character.Volume,
+            character.Notes,
+            character.ConcurrencyStamp,
+            series.ConcurrencyStamp));
+    }
+
+    [Fact]
     public void Nfkc_compatible_fullwidth_and_halfwidth_identity_keys_collide_without_mutation()
     {
         var series = CreateSeries(Guid.NewGuid(), "系列");

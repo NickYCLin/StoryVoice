@@ -201,6 +201,7 @@ app.MapBookEndpoints();
 app.MapBookInsightEndpoints();
 app.MapNarrationEndpoints();
 app.MapLibraryStatusEndpoints();
+app.MapSeriesEndpoints();
 app.Run();
 
 public partial class Program;

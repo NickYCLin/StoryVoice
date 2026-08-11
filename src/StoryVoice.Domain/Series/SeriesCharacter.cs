@@ -124,6 +124,68 @@ public sealed class SeriesCharacter
         ConcurrencyStamp = Guid.NewGuid();
     }
 
+    internal void Update(
+        string canonicalName,
+        SeriesCharacterRole role,
+        string voiceProvider,
+        string voice,
+        string rate,
+        string pitch,
+        string volume,
+        string? notes,
+        DateTimeOffset now)
+    {
+        if (!Enum.IsDefined(role))
+        {
+            throw new ArgumentOutOfRangeException(nameof(role), "角色類型無效。");
+        }
+
+        var normalizedName = SeriesIdentityNormalizer.NormalizeDisplayValue(
+            canonicalName,
+            nameof(canonicalName),
+            SeriesFieldLimits.CharacterName);
+        var normalizedKey = SeriesIdentityNormalizer.NormalizeKey(
+            normalizedName,
+            nameof(canonicalName),
+            SeriesFieldLimits.CharacterName);
+        var normalizedProvider = SeriesValueValidator.NormalizePrintable(
+            voiceProvider,
+            SeriesFieldLimits.Provider,
+            nameof(voiceProvider));
+        var normalizedVoice = SeriesValueValidator.NormalizePrintable(
+            voice,
+            SeriesFieldLimits.Voice,
+            nameof(voice));
+        var normalizedRate = SeriesValueValidator.NormalizePrintable(
+            rate,
+            SeriesFieldLimits.SynthesisParameter,
+            nameof(rate));
+        var normalizedPitch = SeriesValueValidator.NormalizePrintable(
+            pitch,
+            SeriesFieldLimits.SynthesisParameter,
+            nameof(pitch));
+        var normalizedVolume = SeriesValueValidator.NormalizePrintable(
+            volume,
+            SeriesFieldLimits.SynthesisParameter,
+            nameof(volume));
+        var normalizedNotes = SeriesValueValidator.NormalizeOptionalPrintable(
+            notes,
+            SeriesFieldLimits.Notes,
+            nameof(notes));
+
+        CanonicalName = normalizedName;
+        NormalizedName = normalizedKey;
+        Role = role;
+        VoiceProvider = normalizedProvider;
+        Voice = normalizedVoice;
+        Rate = normalizedRate;
+        Pitch = normalizedPitch;
+        Volume = normalizedVolume;
+        Notes = normalizedNotes;
+        UpdatedAt = now;
+        ConcurrencyStamp = Guid.NewGuid();
+    }
+
     private static void EnsureId(Guid value, string parameterName)
     {
         if (value == Guid.Empty)

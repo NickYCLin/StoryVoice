@@ -254,6 +254,44 @@ public sealed class StorySeries
         Touch(now);
     }
 
+    public void UpdateCharacter(
+        Guid characterId,
+        string canonicalName,
+        SeriesCharacterRole role,
+        string voiceProvider,
+        string voice,
+        string rate,
+        string pitch,
+        string volume,
+        string? notes)
+    {
+        EnsureMutationAggregateComplete();
+        EnsureId(characterId, nameof(characterId));
+        var character = _characters.SingleOrDefault(candidate => candidate.Id == characterId)
+            ?? throw new InvalidOperationException("角色不屬於這個系列。");
+        var canonicalKey = _identityKeys.SingleOrDefault(key => key.Id == character.CanonicalIdentityKeyId)
+            ?? throw new InvalidOperationException("角色缺少 canonical identity key。");
+        EnsureCanonicalRelationship(character, canonicalKey);
+        EnsureIdentityKeyAvailable(
+            canonicalName,
+            SeriesFieldLimits.CharacterName,
+            canonicalKey.Id);
+
+        var now = DateTimeOffset.UtcNow;
+        character.Update(
+            canonicalName,
+            role,
+            voiceProvider,
+            voice,
+            rate,
+            pitch,
+            volume,
+            notes,
+            now);
+        canonicalKey.RenameCanonical(character.CanonicalName);
+        Touch(now);
+    }
+
     internal void SwitchActiveCastRevision(
         Guid? expectedCurrentRevisionId,
         Guid nextRevisionId,

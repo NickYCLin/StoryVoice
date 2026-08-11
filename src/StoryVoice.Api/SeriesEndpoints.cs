@@ -1,0 +1,107 @@
+using StoryVoice.Application.Series;
+
+namespace StoryVoice.Api;
+
+public static class SeriesEndpoints
+{
+    public static IEndpointRouteBuilder MapSeriesEndpoints(this IEndpointRouteBuilder endpoints)
+    {
+        var group = endpoints.MapGroup("/api/series")
+            .WithTags("Series")
+            .RequireAuthorization(StoryVoicePolicies.UserSession);
+
+        group.MapGet("/", async (
+            ISeriesService service,
+            CancellationToken cancellationToken) =>
+            Results.Ok(await service.ListAsync(cancellationToken)))
+            .WithName("ListStorySeries");
+
+        group.MapGet("/voice-options", (ISeriesService service) =>
+            Results.Ok(service.ListVoiceOptions()))
+            .WithName("ListSeriesVoiceOptions");
+
+        group.MapGet("/{seriesId:guid}", async (
+            Guid seriesId,
+            ISeriesService service,
+            CancellationToken cancellationToken) =>
+        {
+            var series = await service.GetAsync(seriesId, cancellationToken);
+            return series is null ? Results.NotFound() : Results.Ok(series);
+        })
+        .WithName("GetStorySeries");
+
+        group.MapPost("/", async (
+            CreateStorySeriesRequest request,
+            HttpContext httpContext,
+            ISeriesService service,
+            CancellationToken cancellationToken) =>
+        {
+            var series = await service.CreateAsync(request, cancellationToken);
+            return Results.Created(
+                $"{httpContext.Request.PathBase}/api/series/{series.Id}",
+                series);
+        })
+        .AddEndpointFilter<AntiforgeryEndpointFilter>()
+        .WithName("CreateStorySeries");
+
+        group.MapPost("/{seriesId:guid}/books", async (
+            Guid seriesId,
+            AddSeriesBookRequest request,
+            ISeriesService service,
+            CancellationToken cancellationToken) =>
+        {
+            var series = await service.AddBookAsync(seriesId, request, cancellationToken);
+            return series is null ? Results.NotFound() : Results.Ok(series);
+        })
+        .AddEndpointFilter<AntiforgeryEndpointFilter>()
+        .WithName("AddStorySeriesBook");
+
+        group.MapPost("/{seriesId:guid}/characters", async (
+            Guid seriesId,
+            AddSeriesCharacterRequest request,
+            ISeriesService service,
+            CancellationToken cancellationToken) =>
+        {
+            var series = await service.AddCharacterAsync(seriesId, request, cancellationToken);
+            return series is null ? Results.NotFound() : Results.Ok(series);
+        })
+        .AddEndpointFilter<AntiforgeryEndpointFilter>()
+        .WithName("AddStorySeriesCharacter");
+
+        group.MapPut("/{seriesId:guid}/characters/{characterId:guid}", async (
+            Guid seriesId,
+            Guid characterId,
+            UpdateSeriesCharacterRequest request,
+            ISeriesService service,
+            CancellationToken cancellationToken) =>
+        {
+            var series = await service.UpdateCharacterAsync(
+                seriesId,
+                characterId,
+                request,
+                cancellationToken);
+            return series is null ? Results.NotFound() : Results.Ok(series);
+        })
+        .AddEndpointFilter<AntiforgeryEndpointFilter>()
+        .WithName("UpdateStorySeriesCharacter");
+
+        group.MapPost("/{seriesId:guid}/characters/{characterId:guid}/aliases", async (
+            Guid seriesId,
+            Guid characterId,
+            AddSeriesCharacterAliasRequest request,
+            ISeriesService service,
+            CancellationToken cancellationToken) =>
+        {
+            var series = await service.AddAliasAsync(
+                seriesId,
+                characterId,
+                request,
+                cancellationToken);
+            return series is null ? Results.NotFound() : Results.Ok(series);
+        })
+        .AddEndpointFilter<AntiforgeryEndpointFilter>()
+        .WithName("AddStorySeriesCharacterAlias");
+
+        return endpoints;
+    }
+}

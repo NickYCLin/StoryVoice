@@ -36,12 +36,35 @@ public static class DependencyInjection
             .Validate(options => options.ProviderTimeoutMinutes >= 1, "Narration provider timeout must be positive.")
             .Validate(options => options.LeaseMinutes > options.ProviderTimeoutMinutes, "Narration lease must exceed provider timeout.")
             .ValidateOnStart();
+        services.AddOptions<SeriesVoiceCatalogOptions>()
+            .Bind(configuration.GetSection(SeriesVoiceCatalogOptions.SectionName))
+            .PostConfigure(options =>
+            {
+                if (options.Voices.Count == 0)
+                {
+                    options.Voices = SeriesVoiceCatalogOptions.CreateDefaultVoices();
+                }
+            })
+            .Validate(
+                options => options.Voices.Count > 0
+                    && options.Voices.All(voice =>
+                        !string.IsNullOrWhiteSpace(voice.Provider)
+                        && !string.IsNullOrWhiteSpace(voice.Voice)
+                        && !string.IsNullOrWhiteSpace(voice.DisplayName)
+                        && !string.IsNullOrWhiteSpace(voice.Locale))
+                    && options.Voices
+                        .Select(voice => $"{voice.Provider.Trim().ToUpperInvariant()}\n{voice.Voice.Trim()}")
+                        .Distinct(StringComparer.Ordinal)
+                        .Count() == options.Voices.Count,
+                "Series voice catalog entries must be complete and unique.")
+            .ValidateOnStart();
         services.AddScoped<IBookRepository, BookRepository>();
         services.AddScoped<IBookMetadataCorrectionService, BookMetadataCorrectionService>();
         services.AddScoped<IBookInsightsService, BookInsightsService>();
         services.AddScoped<ILibraryStatusService, LibraryStatusService>();
         services.AddScoped<INarrationService, NarrationService>();
         services.AddScoped<IStorySeriesRepository, StorySeriesRepository>();
+        services.AddScoped<ISeriesService, SeriesService>();
         services.AddScoped<PostgreSqlCastEpochActivationPublisher>();
         services.AddScoped<CompanionTokenService>();
         services.AddSingleton<IBookImportParser, PlainTextBookParser>();
