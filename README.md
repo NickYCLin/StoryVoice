@@ -18,11 +18,16 @@ Phase 1 Foundation 已建立：
 - 使用者明確連結合法 EPUB／TXT 正文、擷取式摘要與手動閱讀筆記
 - 單一神經語音 MVP：持久化工作、租約與重試、取消、私有 MP3 與 owner-scoped Range 串流
 - 全書庫處理狀態矩陣：分開標示官方 TTS、合法正文、摘要、筆記與 StoryVoice 音訊
+- 跨冊系列／固定角色／alias、不可變 cast revision 與整批原子啟用資料邊界
+- 章名、旁白與引號對話的 deterministic offset segmentation
+- owner-scoped 系列配音管理 API 與伺服器 voice allowlist
 - Serilog, OpenAPI, liveness/readiness health checks
 - Docker Compose development stack
 - Unit and integration tests + GitHub Actions CI
 
-AI 與 TTS 尚未假裝完成；它們會依 [`DEVELOPMENT_PLAN.md`](DEVELOPMENT_PLAN.md) 分階段落地。EPUB / TXT 匯入已可實際使用。
+AI 與多角色 TTS 尚未假裝完成；它們會依 [`DEVELOPMENT_PLAN.md`](DEVELOPMENT_PLAN.md)
+分階段落地。EPUB / TXT 匯入與單聲線朗讀已可使用；逐項完成度與下一個實作入口見
+[`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md)。
 
 ## Quick start
 
