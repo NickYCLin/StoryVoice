@@ -19,6 +19,15 @@ internal sealed class SeriesBookConfiguration : IEntityTypeConfiguration<SeriesB
         });
         builder.HasKey(book => book.Id);
         builder.Property(book => book.Id).ValueGeneratedNever();
+        builder.HasAlternateKey(book => new
+        {
+            book.OwnerId,
+            book.SeriesId,
+            book.Id,
+            book.BookId,
+            book.MembershipRevision
+        })
+            .HasName("AK_series_books_rebuild_scope");
         builder.Property(book => book.VolumeLabel)
             .HasMaxLength(SeriesFieldLimits.VolumeLabel)
             .IsRequired();

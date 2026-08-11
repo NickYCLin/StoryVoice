@@ -51,9 +51,16 @@ public sealed class NarrationModeMigrationTests
             migrations,
             migration => migration.EndsWith("_AddNarrationModeCompatibility", StringComparison.Ordinal));
 
+        var seriesCastIndex = Array.FindIndex(
+            migrations,
+            migration => migration.EndsWith("_AddSeriesCast", StringComparison.Ordinal));
+        var castRebuildIndex = Array.FindIndex(
+            migrations,
+            migration => migration.EndsWith("_AddCastRebuildPersistence", StringComparison.Ordinal));
+
         Assert.True(compatibilityIndex > 0);
-        Assert.True(compatibilityIndex < migrations.Length - 1);
-        Assert.EndsWith("_AddSeriesCast", migrations[^1], StringComparison.Ordinal);
+        Assert.True(seriesCastIndex > compatibilityIndex);
+        Assert.True(castRebuildIndex > seriesCastIndex);
 
         var previousMigration = migrations[compatibilityIndex - 1];
         var compatibilityMigration = migrations[compatibilityIndex];

@@ -72,12 +72,19 @@ public sealed class SeriesPersistenceModelTests
     }
 
     [Fact]
-    public void Add_series_cast_is_newest_has_no_pending_model_changes_and_generates_idempotent_sql()
+    public void Add_series_cast_precedes_cast_rebuild_persistence_and_model_has_no_pending_changes()
     {
         using var db = CreateContext();
         var migrations = db.Database.GetMigrations().ToArray();
+        var seriesCastIndex = Array.FindIndex(
+            migrations,
+            migration => migration.EndsWith("_AddSeriesCast", StringComparison.Ordinal));
+        var castRebuildIndex = Array.FindIndex(
+            migrations,
+            migration => migration.EndsWith("_AddCastRebuildPersistence", StringComparison.Ordinal));
 
-        Assert.EndsWith("_AddSeriesCast", migrations[^1], StringComparison.Ordinal);
+        Assert.True(seriesCastIndex >= 0);
+        Assert.True(castRebuildIndex > seriesCastIndex);
         Assert.False(db.Database.HasPendingModelChanges());
 
         var script = db.GetService<IMigrator>().GenerateScript(

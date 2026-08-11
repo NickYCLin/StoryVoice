@@ -2,8 +2,12 @@ namespace StoryVoice.Domain.Narrations;
 
 public sealed class NarrationJob
 {
+    internal const string MultiCharacterVoiceCompatibilityMarker = "speech-plan";
+    internal const string MultiCharacterRateCompatibilityMarker = "per-segment";
+
     private NarrationJob()
     {
+        Visibility = NarrationArtifactVisibility.Published;
     }
 
     private NarrationJob(
@@ -28,12 +32,48 @@ public sealed class NarrationJob
         Voice = Require(voice, nameof(voice), 200);
         Rate = Require(rate, nameof(rate), 20);
         Mode = NarrationMode.SingleVoice;
+        Visibility = NarrationArtifactVisibility.Published;
         RightsAttestedAt = rightsAttestedAt;
         Status = NarrationJobStatus.Queued;
         CreatedAt = DateTimeOffset.UtcNow;
         UpdatedAt = CreatedAt;
         NextAttemptAt = CreatedAt;
         ConcurrencyStamp = Guid.NewGuid();
+    }
+
+    private NarrationJob(
+        Guid ownerId,
+        Guid bookId,
+        Guid contentBookId,
+        Guid seriesId,
+        Guid castRevisionId,
+        Guid speechPlanRevisionId,
+        Guid rebuildBatchId,
+        Guid rebuildMemberId,
+        string sourceHash,
+        DateTimeOffset rightsAttestedAt)
+        : this(
+            ownerId,
+            bookId,
+            contentBookId,
+            sourceHash,
+            MultiCharacterVoiceCompatibilityMarker,
+            MultiCharacterRateCompatibilityMarker,
+            rightsAttestedAt)
+    {
+        EnsureId(seriesId, nameof(seriesId));
+        EnsureId(castRevisionId, nameof(castRevisionId));
+        EnsureId(speechPlanRevisionId, nameof(speechPlanRevisionId));
+        EnsureId(rebuildBatchId, nameof(rebuildBatchId));
+        EnsureId(rebuildMemberId, nameof(rebuildMemberId));
+
+        Mode = NarrationMode.MultiCharacter;
+        Visibility = NarrationArtifactVisibility.Staged;
+        SeriesId = seriesId;
+        CastRevisionId = castRevisionId;
+        SpeechPlanRevisionId = speechPlanRevisionId;
+        RebuildBatchId = rebuildBatchId;
+        RebuildMemberId = rebuildMemberId;
     }
 
     public Guid Id { get; private set; }
@@ -44,6 +84,12 @@ public sealed class NarrationJob
     public string Voice { get; private set; } = string.Empty;
     public string Rate { get; private set; } = string.Empty;
     public NarrationMode Mode { get; private set; }
+    public NarrationArtifactVisibility Visibility { get; private set; }
+    public Guid? SeriesId { get; }
+    public Guid? CastRevisionId { get; }
+    public Guid? SpeechPlanRevisionId { get; }
+    public Guid? RebuildBatchId { get; }
+    public Guid? RebuildMemberId { get; }
     public NarrationJobStatus Status { get; private set; }
     public int ProgressPercent { get; private set; }
     public int Attempts { get; private set; }
@@ -59,6 +105,10 @@ public sealed class NarrationJob
     public DateTimeOffset UpdatedAt { get; private set; }
     public DateTimeOffset? CompletedAt { get; private set; }
     public Guid ConcurrencyStamp { get; private set; }
+    public bool IsAvailableForRegularPlayback =>
+        Visibility == NarrationArtifactVisibility.Published
+        && Status == NarrationJobStatus.Completed
+        && HasSafeAudioMetadata(AudioRelativePath, AudioBytes);
 
     public static NarrationJob Create(
         Guid ownerId,
@@ -69,6 +119,62 @@ public sealed class NarrationJob
         string rate,
         DateTimeOffset rightsAttestedAt) =>
         new(ownerId, bookId, contentBookId, sourceHash, voice, rate, rightsAttestedAt);
+
+    internal static NarrationJob CreateMultiCharacterStaged(
+        Guid ownerId,
+        Guid bookId,
+        Guid contentBookId,
+        Guid seriesId,
+        Guid castRevisionId,
+        Guid speechPlanRevisionId,
+        Guid rebuildBatchId,
+        Guid rebuildMemberId,
+        string sourceHash,
+        DateTimeOffset rightsAttestedAt) =>
+        new(
+            ownerId,
+            bookId,
+            contentBookId,
+            seriesId,
+            castRevisionId,
+            speechPlanRevisionId,
+            rebuildBatchId,
+            rebuildMemberId,
+            sourceHash,
+            rightsAttestedAt);
+
+    internal void Publish(DateTimeOffset now)
+    {
+        if (Mode != NarrationMode.MultiCharacter
+            || Visibility != NarrationArtifactVisibility.Staged
+            || Status != NarrationJobStatus.Completed
+            || !HasSafeAudioMetadata(AudioRelativePath, AudioBytes))
+        {
+            throw new InvalidOperationException("只有已完成且具備音訊中繼資料的多角色 staged 成品可以發布。");
+        }
+
+        EnsureTransitionTime(now);
+
+        Visibility = NarrationArtifactVisibility.Published;
+        UpdatedAt = now;
+        ConcurrencyStamp = Guid.NewGuid();
+    }
+
+    internal void MarkHistorical(DateTimeOffset now)
+    {
+        if (Visibility != NarrationArtifactVisibility.Published
+            || Status != NarrationJobStatus.Completed
+            || !HasSafeAudioMetadata(AudioRelativePath, AudioBytes))
+        {
+            throw new InvalidOperationException("只有已發布且具備音訊中繼資料的完成成品可以轉為歷史版本。");
+        }
+
+        EnsureTransitionTime(now);
+
+        Visibility = NarrationArtifactVisibility.Historical;
+        UpdatedAt = now;
+        ConcurrencyStamp = Guid.NewGuid();
+    }
 
     public void Claim(
         string leaseOwner,
@@ -154,8 +260,7 @@ public sealed class NarrationJob
 
         var normalizedPath = Require(audioRelativePath, nameof(audioRelativePath), 1_000)
             .Replace('\\', '/');
-        if (Path.IsPathRooted(normalizedPath)
-            || normalizedPath.Split('/').Any(segment => segment is ".." or "."))
+        if (!IsSafeRelativeAudioPath(normalizedPath))
         {
             throw new ArgumentException("音訊路徑必須是安全的相對路徑。", nameof(audioRelativePath));
         }
@@ -225,6 +330,11 @@ public sealed class NarrationJob
 
     public void Requeue(DateTimeOffset? rightsAttestedAt = null)
     {
+        if (Visibility == NarrationArtifactVisibility.Historical)
+        {
+            throw new InvalidOperationException("歷史朗讀成品不可重新排隊。");
+        }
+
         if (Status is not (NarrationJobStatus.Failed or NarrationJobStatus.Cancelled))
         {
             return;
@@ -244,6 +354,43 @@ public sealed class NarrationJob
         NextAttemptAt = DateTimeOffset.UtcNow;
         UpdatedAt = NextAttemptAt.Value;
         ConcurrencyStamp = Guid.NewGuid();
+    }
+
+    private void EnsureTransitionTime(DateTimeOffset now)
+    {
+        if (now < UpdatedAt)
+        {
+            throw new ArgumentOutOfRangeException(nameof(now), "轉換時間不可早於目前更新時間。");
+        }
+    }
+
+    private static bool HasSafeAudioMetadata(string? audioRelativePath, long? audioBytes)
+    {
+        return audioBytes is >= 1 && IsSafeRelativeAudioPath(audioRelativePath);
+    }
+
+    private static bool IsSafeRelativeAudioPath(string? audioRelativePath)
+    {
+        if (string.IsNullOrWhiteSpace(audioRelativePath)
+            || audioRelativePath.Length > 1_000)
+        {
+            return false;
+        }
+
+        var normalizedPath = audioRelativePath.Replace('\\', '/');
+        return !Path.IsPathRooted(normalizedPath)
+            && !(normalizedPath.Length >= 2
+                && char.IsAsciiLetter(normalizedPath[0])
+                && normalizedPath[1] == ':')
+            && !normalizedPath.Split('/').Any(segment => segment is ".." or ".");
+    }
+
+    private static void EnsureId(Guid value, string parameterName)
+    {
+        if (value == Guid.Empty)
+        {
+            throw new ArgumentException("識別碼不可為空白。", parameterName);
+        }
     }
 
     private static string Require(string? value, string parameterName, int maxLength)

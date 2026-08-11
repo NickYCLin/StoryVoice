@@ -12,6 +12,7 @@ namespace StoryVoice.IntegrationTests;
 public sealed class NarrationModePostgreSqlMigrationTests
 {
     private const string PreviousMigration = "20260808162001_AddNarrationJobs";
+    private const string CompatibilityMigration = "20260810234952_AddNarrationModeCompatibility";
 
     [Fact]
     public async Task Phase_a_migration_upgrades_legacy_rows_enforces_contract_and_blocks_unsafe_down()
@@ -47,7 +48,7 @@ public sealed class NarrationModePostgreSqlMigrationTests
         var now = DateTimeOffset.UtcNow;
         await InsertLegacyJobAsync(db, legacyJobId, ownerId, book.Id, now, cancellationToken);
 
-        await migrator.MigrateAsync(cancellationToken: cancellationToken);
+        await migrator.MigrateAsync(CompatibilityMigration, cancellationToken);
 
         Assert.Equal(
             "SingleVoice",
@@ -106,7 +107,7 @@ public sealed class NarrationModePostgreSqlMigrationTests
         Assert.False(await ModeColumnExistsAsync(postgres.GetConnectionString(), cancellationToken));
         Assert.Equal(2, await CountJobsAsync(postgres.GetConnectionString(), cancellationToken));
 
-        await migrator.MigrateAsync(cancellationToken: cancellationToken);
+        await migrator.MigrateAsync(CompatibilityMigration, cancellationToken);
         Assert.True(await ModeColumnExistsAsync(postgres.GetConnectionString(), cancellationToken));
         Assert.Equal(
             2,
