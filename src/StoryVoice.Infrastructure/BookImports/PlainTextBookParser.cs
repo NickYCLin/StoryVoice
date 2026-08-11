@@ -60,7 +60,7 @@ public sealed partial class PlainTextBookParser : IBookImportParser
             var match = ChapterHeading().Match(line);
             if (!match.Success)
             {
-                body.AppendLine(line.TrimEnd());
+                body.Append(line.TrimEnd()).Append((char)10);
                 continue;
             }
 

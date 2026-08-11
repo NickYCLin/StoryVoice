@@ -188,7 +188,8 @@ public sealed class CastRebuildPersistenceModelTests
         Assert.False(db.Database.HasPendingModelChanges());
 
         var migrator = db.GetService<IMigrator>();
-        var up = migrator.GenerateScript(previous, current);
+        var up = migrator.GenerateScript(previous, current)
+            .Replace("\r\n", "\n", StringComparison.Ordinal);
         Assert.Contains("ADD \"Visibility\" character varying(30) NOT NULL DEFAULT 'Published'", up, StringComparison.Ordinal);
         Assert.Contains("CREATE TABLE narration_cast_revisions", up, StringComparison.Ordinal);
         Assert.Contains("CREATE TABLE narration_cast_assignments", up, StringComparison.Ordinal);
