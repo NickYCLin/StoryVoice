@@ -109,6 +109,9 @@ public sealed class NarrationJob
         Visibility == NarrationArtifactVisibility.Published
         && Status == NarrationJobStatus.Completed
         && HasSafeAudioMetadata(AudioRelativePath, AudioBytes);
+    internal bool HasSafeCompletedAudio =>
+        Status == NarrationJobStatus.Completed
+        && HasSafeAudioMetadata(AudioRelativePath, AudioBytes);
 
     public static NarrationJob Create(
         Guid ownerId,

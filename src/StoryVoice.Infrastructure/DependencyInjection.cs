@@ -42,6 +42,7 @@ public static class DependencyInjection
         services.AddScoped<ILibraryStatusService, LibraryStatusService>();
         services.AddScoped<INarrationService, NarrationService>();
         services.AddScoped<IStorySeriesRepository, StorySeriesRepository>();
+        services.AddScoped<PostgreSqlCastEpochActivationPublisher>();
         services.AddScoped<CompanionTokenService>();
         services.AddSingleton<IBookImportParser, PlainTextBookParser>();
         services.AddSingleton<IBookImportParser, EpubBookParser>();

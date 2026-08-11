@@ -35,5 +35,8 @@ internal sealed class SeriesBookConfiguration : IEntityTypeConfiguration<SeriesB
             .HasDatabaseName("UX_series_books_owner_book")
             .IsUnique();
         builder.HasIndex(book => new { book.OwnerId, book.SeriesId, book.SortOrder }).IsUnique();
+        builder.HasIndex(book => book.ActiveNarrationJobId)
+            .HasDatabaseName("IX_series_books_active_job")
+            .HasFilter("\"ActiveNarrationJobId\" IS NOT NULL");
     }
 }

@@ -59,6 +59,29 @@ public sealed class SeriesBook
         int membershipRevision) =>
         new(ownerId, seriesId, bookId, volumeLabel, sortOrder, membershipRevision);
 
+    internal void SwitchActiveNarrationJob(Guid? expectedCurrentJobId, Guid nextJobId)
+    {
+        if (expectedCurrentJobId == Guid.Empty)
+        {
+            throw new ArgumentException(
+                "可為空值的朗讀工作識別碼在有值時不可為空白 Guid。",
+                nameof(expectedCurrentJobId));
+        }
+
+        EnsureId(nextJobId, nameof(nextJobId));
+        if (ActiveNarrationJobId != expectedCurrentJobId)
+        {
+            throw new InvalidOperationException("目前朗讀工作指標已經變更。");
+        }
+
+        if (ActiveNarrationJobId == nextJobId)
+        {
+            throw new InvalidOperationException("下一個朗讀工作必須與目前工作不同。");
+        }
+
+        ActiveNarrationJobId = nextJobId;
+    }
+
     private static void EnsureId(Guid value, string parameterName)
     {
         if (value == Guid.Empty)

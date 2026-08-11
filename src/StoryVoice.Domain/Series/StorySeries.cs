@@ -254,6 +254,39 @@ public sealed class StorySeries
         Touch(now);
     }
 
+    internal void SwitchActiveCastRevision(
+        Guid? expectedCurrentRevisionId,
+        Guid nextRevisionId,
+        DateTimeOffset now)
+    {
+        if (expectedCurrentRevisionId == Guid.Empty)
+        {
+            throw new ArgumentException(
+                "可為空值的角色表修訂識別碼在有值時不可為空白 Guid。",
+                nameof(expectedCurrentRevisionId));
+        }
+
+        EnsureId(nextRevisionId, nameof(nextRevisionId));
+        if (ActiveCastRevisionId != expectedCurrentRevisionId)
+        {
+            throw new InvalidOperationException("目前角色表修訂指標已經變更。");
+        }
+
+        if (ActiveCastRevisionId == nextRevisionId)
+        {
+            throw new InvalidOperationException("下一個角色表修訂必須與目前修訂不同。");
+        }
+
+        if (now < CreatedAt || now < UpdatedAt)
+        {
+            throw new ArgumentOutOfRangeException(nameof(now), "切換時間不可早於建立時間或目前更新時間。");
+        }
+
+        ActiveCastRevisionId = nextRevisionId;
+        UpdatedAt = now;
+        ConcurrencyStamp = Guid.NewGuid();
+    }
+
     private SeriesCharacter EnsureAttachedCharacter(SeriesCharacter? character)
     {
         ArgumentNullException.ThrowIfNull(character);

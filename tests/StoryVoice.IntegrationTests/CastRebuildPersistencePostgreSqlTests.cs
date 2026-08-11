@@ -44,7 +44,7 @@ public sealed class CastRebuildPersistencePostgreSqlTests
             now,
             cancellationToken);
 
-        await migrator.MigrateAsync(cancellationToken: cancellationToken);
+        await migrator.MigrateAsync(CurrentMigration, cancellationToken);
 
         db.ChangeTracker.Clear();
         var upgraded = await db.NarrationJobs.AsNoTracking()
@@ -661,7 +661,7 @@ public sealed class CastRebuildPersistencePostgreSqlTests
 
         await using (var reupgrade = CreateContext(graph.ConnectionString))
         {
-            await reupgrade.Database.MigrateAsync(cancellationToken);
+            await reupgrade.GetService<IMigrator>().MigrateAsync(CurrentMigration, cancellationToken);
             var retained = await reupgrade.NarrationJobs.AsNoTracking()
                 .SingleAsync(candidate => candidate.Id == legacyJobId, cancellationToken);
             Assert.Equal(NarrationArtifactVisibility.Published, retained.Visibility);
@@ -822,7 +822,7 @@ public sealed class CastRebuildPersistencePostgreSqlTests
         }
 
         await using var db = CreateContext(connectionString);
-        await db.Database.MigrateAsync(cancellationToken);
+        await db.GetService<IMigrator>().MigrateAsync(CurrentMigration, cancellationToken);
         db.Users.Add(CreateUser(ownerId, prefix));
         db.Books.AddRange(firstBook, secondBook);
         await db.SaveChangesAsync(cancellationToken);

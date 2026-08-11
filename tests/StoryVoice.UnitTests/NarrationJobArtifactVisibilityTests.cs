@@ -262,6 +262,45 @@ public sealed class NarrationJobArtifactVisibilityTests
     }
 
     [Fact]
+    public void Internal_safe_completed_audio_predicate_ignores_visibility_and_rejects_unsafe_metadata()
+    {
+        var stagedCompleted = CompleteMultiCharacterJob();
+        Assert.True(GetSafeCompletedAudio(stagedCompleted));
+
+        var publishedCompleted = CompleteMultiCharacterJob();
+        InvokeInternal(publishedCompleted, "Publish", publishedCompleted.UpdatedAt);
+        Assert.True(GetSafeCompletedAudio(publishedCompleted));
+
+        var invalidMetadata = new (string? Path, long? Bytes)[]
+        {
+            (null, 42),
+            (string.Empty, 42),
+            ("   ", 42),
+            ("../outside.mp3", 42),
+            ("folder/./audio.mp3", 42),
+            ("/absolute/audio.mp3", 42),
+            (@"C:\outside.mp3", 42),
+            ("C:/outside.mp3", 42),
+            ("safe/audio.mp3", null),
+            ("safe/audio.mp3", 0)
+        };
+
+        foreach (var metadata in invalidMetadata)
+        {
+            var job = CompleteMultiCharacterJob();
+            SetProperty(job, nameof(NarrationJob.AudioRelativePath), metadata.Path);
+            SetProperty(job, nameof(NarrationJob.AudioBytes), metadata.Bytes);
+            Assert.False(GetSafeCompletedAudio(job));
+        }
+
+        var running = MultiCharacterInput.Create().CreateJob();
+        Claim(running);
+        SetProperty(running, nameof(NarrationJob.AudioRelativePath), "safe/audio.mp3");
+        SetProperty(running, nameof(NarrationJob.AudioBytes), 42L);
+        Assert.False(GetSafeCompletedAudio(running));
+    }
+
+    [Fact]
     public void Regular_playback_rejects_completed_rows_with_missing_unsafe_or_non_positive_audio_metadata()
     {
         var invalidMetadata = new (string? Path, long? Bytes)[]
@@ -683,6 +722,17 @@ public sealed class NarrationJobArtifactVisibilityTests
         var setter = property.GetSetMethod(nonPublic: true);
         Assert.NotNull(setter);
         setter.Invoke(job, [value]);
+    }
+
+    private static bool GetSafeCompletedAudio(NarrationJob job)
+    {
+        var property = typeof(NarrationJob).GetProperty(
+            "HasSafeCompletedAudio",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(property);
+        Assert.NotNull(property.GetMethod);
+        Assert.True(property.GetMethod.IsAssembly);
+        return Assert.IsType<bool>(property.GetValue(job));
     }
 
     private static void AssertRejectedAtomically<TException>(NarrationJob job, Action transition)

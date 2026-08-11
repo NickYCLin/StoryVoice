@@ -77,6 +77,9 @@ internal sealed class SeriesCastRebuildMemberConfiguration : IEntityTypeConfigur
         })
             .HasDatabaseName("UX_rebuild_members_book")
             .IsUnique();
+        builder.HasIndex(member => member.PreviousActiveNarrationJobId)
+            .HasDatabaseName("IX_rebuild_members_previous_job")
+            .HasFilter("\"PreviousActiveNarrationJobId\" IS NOT NULL");
 
         builder.HasOne<SeriesBook>()
             .WithMany()

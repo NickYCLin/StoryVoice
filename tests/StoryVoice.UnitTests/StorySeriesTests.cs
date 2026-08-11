@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Runtime.ExceptionServices;
 using StoryVoice.Domain.Books;
 using StoryVoice.Domain.Series;
 
@@ -546,6 +547,84 @@ public sealed class StorySeriesTests
         Assert.Throws<ArgumentException>(() => series.AddBook(book, "", 1));
     }
 
+    [Fact]
+    public void Active_cast_pointer_switch_is_internal_atomic_and_refreshes_series_state()
+    {
+        var series = CreateSeries(Guid.NewGuid(), "Atomic cast series");
+        var firstRevisionId = Guid.NewGuid();
+        var secondRevisionId = Guid.NewGuid();
+        var initialStamp = series.ConcurrencyStamp;
+        var activatedAt = series.UpdatedAt;
+
+        InvokeInternal(
+            series,
+            "SwitchActiveCastRevision",
+            [null, firstRevisionId, activatedAt]);
+
+        Assert.Equal(firstRevisionId, series.ActiveCastRevisionId);
+        Assert.Equal(activatedAt, series.UpdatedAt);
+        Assert.NotEqual(initialStamp, series.ConcurrencyStamp);
+
+        AssertSeriesPointerRejectedAtomically<InvalidOperationException>(
+            series,
+            () => InvokeInternal(
+                series,
+                "SwitchActiveCastRevision",
+                [null, secondRevisionId, activatedAt]));
+        AssertSeriesPointerRejectedAtomically<InvalidOperationException>(
+            series,
+            () => InvokeInternal(
+                series,
+                "SwitchActiveCastRevision",
+                [firstRevisionId, firstRevisionId, activatedAt]));
+        AssertSeriesPointerRejectedAtomically<ArgumentException>(
+            series,
+            () => InvokeInternal(
+                series,
+                "SwitchActiveCastRevision",
+                [Guid.Empty, secondRevisionId, activatedAt]));
+        AssertSeriesPointerRejectedAtomically<ArgumentException>(
+            series,
+            () => InvokeInternal(
+                series,
+                "SwitchActiveCastRevision",
+                [firstRevisionId, Guid.Empty, activatedAt]));
+        AssertSeriesPointerRejectedAtomically<ArgumentOutOfRangeException>(
+            series,
+            () => InvokeInternal(
+                series,
+                "SwitchActiveCastRevision",
+                [firstRevisionId, secondRevisionId, series.UpdatedAt.AddTicks(-1)]));
+    }
+
+    [Fact]
+    public void Active_job_pointer_switch_is_internal_and_rejects_invalid_inputs_without_mutation()
+    {
+        var ownerId = Guid.NewGuid();
+        var series = CreateSeries(ownerId, "Atomic book pointer series");
+        var book = Book.Create(ownerId, "Synthetic book", "Synthetic author", "en", "synthetic.txt");
+        var membership = series.AddBook(book, "Volume one", 1);
+        var firstJobId = Guid.NewGuid();
+        var secondJobId = Guid.NewGuid();
+
+        AssertSeriesBookPointerRejectedAtomically<ArgumentException>(
+            membership,
+            () => InvokeInternal(membership, "SwitchActiveNarrationJob", [Guid.Empty, firstJobId]));
+        AssertSeriesBookPointerRejectedAtomically<ArgumentException>(
+            membership,
+            () => InvokeInternal(membership, "SwitchActiveNarrationJob", [null, Guid.Empty]));
+
+        InvokeInternal(membership, "SwitchActiveNarrationJob", [null, firstJobId]);
+        Assert.Equal(firstJobId, membership.ActiveNarrationJobId);
+
+        AssertSeriesBookPointerRejectedAtomically<InvalidOperationException>(
+            membership,
+            () => InvokeInternal(membership, "SwitchActiveNarrationJob", [null, secondJobId]));
+        AssertSeriesBookPointerRejectedAtomically<InvalidOperationException>(
+            membership,
+            () => InvokeInternal(membership, "SwitchActiveNarrationJob", [firstJobId, firstJobId]));
+    }
+
     private static StorySeries CreateSeries(Guid ownerId, string name) =>
         StorySeries.Create(
             ownerId,
@@ -570,6 +649,44 @@ public sealed class StorySeriesTests
         }
 
         return detachedCharacter;
+    }
+
+    private static void InvokeInternal(object target, string methodName, object?[] arguments)
+    {
+        var method = target.GetType().GetMethod(
+            methodName,
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        Assert.True(method.IsAssembly, $"{methodName} must remain narrowly internal.");
+        try
+        {
+            method.Invoke(target, arguments);
+        }
+        catch (TargetInvocationException exception) when (exception.InnerException is not null)
+        {
+            ExceptionDispatchInfo.Capture(exception.InnerException).Throw();
+            throw;
+        }
+    }
+
+    private static void AssertSeriesPointerRejectedAtomically<TException>(
+        StorySeries series,
+        Action action)
+        where TException : Exception
+    {
+        var before = (series.ActiveCastRevisionId, series.UpdatedAt, series.ConcurrencyStamp);
+        Assert.Throws<TException>(action);
+        Assert.Equal(before, (series.ActiveCastRevisionId, series.UpdatedAt, series.ConcurrencyStamp));
+    }
+
+    private static void AssertSeriesBookPointerRejectedAtomically<TException>(
+        SeriesBook seriesBook,
+        Action action)
+        where TException : Exception
+    {
+        var before = seriesBook.ActiveNarrationJobId;
+        Assert.Throws<TException>(action);
+        Assert.Equal(before, seriesBook.ActiveNarrationJobId);
     }
 
     private static void AssertFailedBookAdditionDoesNotChangeAggregate(
