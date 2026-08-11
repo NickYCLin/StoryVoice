@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using StoryVoice.Domain.Books;
+using StoryVoice.Domain.Collections;
 using StoryVoice.Domain.Insights;
 using StoryVoice.Domain.Narrations;
 using StoryVoice.Domain.Series;
@@ -40,6 +41,12 @@ public sealed class StoryVoiceDbContext(DbContextOptions<StoryVoiceDbContext> op
         Set<SeriesCharacterIdentityKey>();
 
     public DbSet<CompanionAccessToken> CompanionAccessTokens => Set<CompanionAccessToken>();
+
+    public DbSet<BookCollection> BookCollections => Set<BookCollection>();
+
+    public DbSet<BookCollectionBook> BookCollectionBooks => Set<BookCollectionBook>();
+
+    public DbSet<CollectionShare> CollectionShares => Set<CollectionShare>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
