@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 const matrix = await readFile(new URL('../src/LibraryStatusMatrix.tsx', import.meta.url), 'utf8')
-const app = await readFile(new URL('../src/App.tsx', import.meta.url), 'utf8')
+const app = await readFile(new URL('../src/pages/LibraryPage.tsx', import.meta.url), 'utf8')
 
 test('library status matrix separates source capabilities from StoryVoice processing', () => {
   assert.match(matrix, /\/api\/library\/status-matrix\//)

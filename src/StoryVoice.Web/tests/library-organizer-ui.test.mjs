@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
-const app = await readFile(new URL('../src/App.tsx', import.meta.url), 'utf8')
+const app = await readFile(new URL('../src/pages/LibraryPage.tsx', import.meta.url), 'utf8')
 
 test('library organizer exposes accessible search, source, layout, TTS, tag, and sort controls', () => {
   for (const marker of [
@@ -18,8 +18,8 @@ test('library organizer exposes accessible search, source, layout, TTS, tag, and
 
 test('library renders filtered books and moves selection away from hidden results', () => {
   assert.match(app, /visibleBooks\.map\(\(book\)/)
-  assert.match(app, /!visibleBooks\.some\(\(book\) => book\.id === selectedBookId\)/)
-  assert.match(app, /setSelectedBookId\(visibleBooks\[0\]\.id\)/)
+  assert.match(app, /!visibleBooks\.some\(\(book\) => book\.id === routeBookId\)/)
+  assert.match(app, /navigate\(`\/library\/\$\{visibleBooks\[0\]\.id\}`, \{ replace: true \}\)/)
 })
 
 test('device tags are explicitly local-only and persisted without a server request', () => {
@@ -29,10 +29,10 @@ test('device tags are explicitly local-only and persisted without a server reque
   assert.doesNotMatch(app, /fetch\([^)]*deviceTagsStorageKey/)
 })
 
-test('logout clears private catalog and upload state before another account can sign in', () => {
-  const logoutBody = app.match(/async function handleLogout\(\) \{([\s\S]*?)\n  \}/)?.[1] ?? ''
-  assert.ok(logoutBody.includes('setCatalogFilters({ ...defaultCatalogFilters })'))
-  assert.ok(logoutBody.includes("setDeviceTagDraft('')"))
-  assert.ok(logoutBody.includes("setUploadMessage('')"))
-  assert.ok(logoutBody.includes("setCompanionTokenMessage('')"))
+test('library state is local to the page, not centrally reset by a logout handler', () => {
+  // 登出集中在 AppLayout／auth.ts：整個私人殼層在 anonymous 狀態下會被 <AuthScreen>
+  // 取代並卸載，LibraryPage 不需要（也沒有）自己的 handleLogout 手動清空狀態。
+  assert.doesNotMatch(app, /handleLogout/)
+  assert.match(app, /useState<LibraryCatalogFilters>\(defaultCatalogFilters\)/)
+  assert.match(app, /useState\(''\)/)
 })

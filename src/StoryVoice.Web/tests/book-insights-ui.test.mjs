@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
-const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
+const app = readFileSync(new URL('../src/BookInsightsPanel.tsx', import.meta.url), 'utf8')
 
 test('linked metadata requires an explicit authorized EPUB or TXT association', () => {
   assert.ok(app.includes('連結你合法持有的正文'))

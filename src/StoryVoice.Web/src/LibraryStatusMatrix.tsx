@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
+import { apiUrl } from './api'
+
 type LibraryBookStatus = {
   bookId: string
   title: string
@@ -18,9 +20,6 @@ type LibraryBookStatus = {
 type Props = {
   refreshKey: string
 }
-
-const basePath = import.meta.env.BASE_URL.replace(/\/+$/, '')
-const apiUrl = (path: string) => `${basePath}${path.startsWith('/') ? path : `/${path}`}`
 
 const narrationLabel = (status: LibraryBookStatus) => {
   if (!status.storyVoiceNarrationStatus) return '尚未建立 StoryVoice 音訊'
