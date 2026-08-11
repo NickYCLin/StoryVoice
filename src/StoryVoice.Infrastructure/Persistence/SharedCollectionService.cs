@@ -100,7 +100,7 @@ internal sealed class SharedCollectionService(
                 {
                     var info = bookInfo.GetValueOrDefault(book.BookId);
                     return new SharedCollectionBookResponse(
-                        book.Id,
+                        book.BookId,
                         info?.Title ?? "未知書籍",
                         info?.Author ?? string.Empty,
                         info?.CoverImageUrl,
