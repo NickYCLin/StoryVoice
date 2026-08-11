@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using StoryVoice.Application.BookImports;
 using StoryVoice.Application.Books;
+using StoryVoice.Application.Collections;
 using StoryVoice.Application.Insights;
 using StoryVoice.Application.Library;
 using StoryVoice.Application.Narrations;
@@ -65,6 +66,9 @@ public static class DependencyInjection
         services.AddScoped<INarrationService, NarrationService>();
         services.AddScoped<IStorySeriesRepository, StorySeriesRepository>();
         services.AddScoped<ISeriesService, SeriesService>();
+        services.AddScoped<IBookCollectionRepository, BookCollectionRepository>();
+        services.AddScoped<ICollectionService, CollectionService>();
+        services.AddScoped<ISharedCollectionService, SharedCollectionService>();
         services.AddScoped<PostgreSqlCastEpochActivationPublisher>();
         services.AddScoped<CompanionTokenService>();
         services.AddSingleton<IBookImportParser, PlainTextBookParser>();
