@@ -87,6 +87,7 @@ public sealed class StoryPipelineWorker(
                     .SetProperty(job => job.UpdatedAt, now)
                     .SetProperty(job => job.ConcurrencyStamp, Guid.NewGuid()),
                     cancellationToken);
+            await SynchronizeTerminalStagedBatchesAsync(db, cancellationToken);
             _nextRecoveryAt = now.AddSeconds(30);
         }
 
@@ -300,6 +301,7 @@ public sealed class StoryPipelineWorker(
                 if (outcome.AcceptCompletion)
                 {
                     uncommittedAudioPath = null;
+                    await SynchronizeStagedBatchAsync(claim.JobId, CancellationToken.None);
                     logger.LogWarning(
                         completionException,
                         "Narration job {JobId} completion was committed despite an ambiguous database response",
@@ -324,6 +326,7 @@ public sealed class StoryPipelineWorker(
             }
 
             uncommittedAudioPath = null;
+            await SynchronizeStagedBatchAsync(claim.JobId, CancellationToken.None);
             logger.LogInformation(
                 "Narration job {JobId} completed with {AudioBytes} bytes",
                 claim.JobId,
@@ -575,6 +578,7 @@ public sealed class StoryPipelineWorker(
         if (state.CancellationRequested)
         {
             await FinalizeCancellationAsync(db, claim, now, cancellationToken);
+            await SynchronizeStagedBatchAsync(claim.JobId, CancellationToken.None);
             return;
         }
 
@@ -604,6 +608,45 @@ public sealed class StoryPipelineWorker(
             // Cancellation can commit after the state read above. Finalize it immediately
             // rather than waiting for the lease-recovery sweep.
             await FinalizeCancellationAsync(db, claim, DateTimeOffset.UtcNow, cancellationToken);
+        }
+
+        await SynchronizeStagedBatchAsync(claim.JobId, CancellationToken.None);
+    }
+
+    private async Task SynchronizeTerminalStagedBatchesAsync(
+        StoryVoiceDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var jobIds = await SupportedJobs(db.NarrationJobs)
+            .AsNoTracking()
+            .Where(job => job.Mode == NarrationMode.MultiCharacter
+                && job.Visibility == NarrationArtifactVisibility.Staged
+                && job.RebuildBatchId != null
+                && (job.Status == NarrationJobStatus.Completed
+                    || job.Status == NarrationJobStatus.Failed
+                    || job.Status == NarrationJobStatus.Cancelled))
+            .Select(job => job.Id)
+            .ToArrayAsync(cancellationToken);
+        foreach (var jobId in jobIds)
+        {
+            await SynchronizeStagedBatchAsync(jobId, cancellationToken);
+        }
+    }
+
+    private async Task SynchronizeStagedBatchAsync(Guid jobId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var scope = scopeFactory.CreateAsyncScope();
+            var progress = scope.ServiceProvider.GetRequiredService<IStagedNarrationBatchProgressService>();
+            await progress.SynchronizeAsync(jobId, cancellationToken);
+        }
+        catch (Exception exception) when (cancellationToken.IsCancellationRequested is false)
+        {
+            logger.LogError(
+                exception,
+                "Unable to synchronize staged narration job {JobId} with its rebuild batch",
+                jobId);
         }
     }
 

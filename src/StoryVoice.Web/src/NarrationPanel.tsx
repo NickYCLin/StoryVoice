@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 
 import { apiUrl, responseProblem } from './api'
 
@@ -54,7 +55,6 @@ function mergeFreshJobs(current: NarrationJob[], incomingJobs: NarrationJob[], b
 
 export function NarrationPanel({ book, csrfToken }: Props) {
   const [jobs, setJobs] = useState<NarrationJob[]>([])
-  const [attested, setAttested] = useState(false)
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
   const eligible = book.authorizedTextAvailable || book.contentBookId !== null
@@ -105,26 +105,6 @@ export function NarrationPanel({ book, csrfToken }: Props) {
     }
   }, [active, loadJobs])
 
-  async function createNarration() {
-    setLoading(true)
-    setMessage('正在建立神經語音工作…')
-    try {
-      const response = await fetch(apiUrl(`/api/books/${book.id}/narrations/`), {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken },
-        body: JSON.stringify({ rightsAttested: attested }),
-      })
-      if (!response.ok) throw new Error(await responseProblem(response, '朗讀工作建立失敗。'))
-      const job = await response.json() as NarrationJob
-      setJobs((current) => [job, ...current.filter((item) => item.id !== job.id)])
-      setMessage('已排入語音產製；頁面會自動更新進度。')
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : '朗讀工作建立失敗。')
-    } finally {
-      setLoading(false)
-    }
-  }
 
   async function cancelNarration(jobId: string) {
     setMessage('正在取消朗讀工作…')
@@ -167,23 +147,10 @@ export function NarrationPanel({ book, csrfToken }: Props) {
 
       {eligible && (
         <div className="mt-4 rounded-xl border border-white/[.06] bg-black/10 p-4">
-          <label className="flex items-start gap-3 text-sm leading-6 text-stone-400">
-            <input
-              checked={attested}
-              className="mt-1 h-4 w-4 accent-amber-300"
-              onChange={(event) => setAttested(event.target.checked)}
-              type="checkbox"
-            />
-            <span>我確認自己有權將這份合法正文送交上述語音服務處理，且內容不含需要繞過 DRM 才能取得的資料。</span>
-          </label>
-          <button
-            className="secondary-button mt-3 disabled:cursor-not-allowed disabled:opacity-45"
-            disabled={!attested || loading || active}
-            onClick={createNarration}
-            type="button"
-          >
-            {active ? '語音產製中' : '建立 AI 朗讀'}
-          </button>
+          <p className="text-sm leading-6 text-stone-400">
+            新的合法正文一律透過多角色系列配音建立：固定旁白與角色聲線、逐章審核、全系列 staged rebuild，再由你人工啟用。既有單人音訊仍可在下方讀取、播放與取消。
+          </p>
+          <Link className="secondary-button mt-3 inline-flex" to="/series">前往多角色系列配音</Link>
         </div>
       )}
 

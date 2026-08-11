@@ -6,11 +6,12 @@ const panel = readFileSync(new URL('../src/NarrationPanel.tsx', import.meta.url)
 const libraryPage = readFileSync(new URL('../src/pages/LibraryPage.tsx', import.meta.url), 'utf8')
 const bookInsightsPanel = readFileSync(new URL('../src/BookInsightsPanel.tsx', import.meta.url), 'utf8')
 
-test('AI narration requires explicit rights attestation and eligible authorized text', () => {
-  assert.ok(panel.includes('rightsAttested: attested'))
+test('new narration routes eligible authorized text through the multi-character series workflow', () => {
   assert.ok(panel.includes('book.authorizedTextAvailable || book.contentBookId !== null'))
-  assert.ok(panel.includes('需要繞過 DRM'))
-  assert.ok(panel.includes('disabled={!attested || loading || active}'))
+  assert.ok(panel.includes('多角色系列配音'))
+  assert.ok(panel.includes('固定旁白與角色聲線、逐章審核、全系列 staged rebuild'))
+  assert.ok(panel.includes('to="/series"'))
+  assert.ok(!panel.includes('function createNarration'))
 })
 
 test('narration discloses external neural provider and distinguishes official TTS metadata', () => {

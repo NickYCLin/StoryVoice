@@ -8,6 +8,7 @@ using StoryVoice.Application.Insights;
 using StoryVoice.Application.Library;
 using StoryVoice.Application.Narrations;
 using StoryVoice.Domain.Books;
+using StoryVoice.Domain.Narrations;
 using StoryVoice.Infrastructure.Persistence;
 
 namespace StoryVoice.IntegrationTests;
@@ -27,11 +28,7 @@ public sealed class LibraryStatusApiTests(ApiFactory factory) : IClassFixture<Ap
             new CreateReadingNoteRequest("使用者自己的狀態矩陣筆記。", null),
             cancellationToken);
         note.EnsureSuccessStatusCode();
-        using var narration = await client.PostWithCsrfAsync(
-            $"/api/books/{uploaded.Id}/narrations/",
-            new CreateNarrationRequest(true),
-            cancellationToken);
-        narration.EnsureSuccessStatusCode();
+        var narration = await SeedQueuedPublishedAsync(uploaded.Id, uploaded.Id, cancellationToken);
 
         using var syntheticResponse = await client.PostWithCsrfAsync(
             "/api/books/",
@@ -100,12 +97,7 @@ public sealed class LibraryStatusApiTests(ApiFactory factory) : IClassFixture<Ap
             new SetBookContentLinkRequest(firstContent.Id),
             cancellationToken);
         Assert.True(firstLink.IsSuccessStatusCode, await firstLink.Content.ReadAsStringAsync(cancellationToken));
-        using var firstCreate = await client.PostWithCsrfAsync(
-            $"/api/books/{targetId}/narrations/",
-            new CreateNarrationRequest(true),
-            cancellationToken);
-        var olderJob = await firstCreate.Content.ReadFromJsonAsync<NarrationJobResponse>(cancellationToken);
-        Assert.NotNull(olderJob);
+        var olderJob = await SeedQueuedPublishedAsync(targetId, firstContent.Id, cancellationToken);
         using var firstCancel = await client.PostWithCsrfAsync(
             $"/api/narrations/{olderJob.Id}/cancel",
             new { },
@@ -118,11 +110,7 @@ public sealed class LibraryStatusApiTests(ApiFactory factory) : IClassFixture<Ap
             new SetBookContentLinkRequest(secondContent.Id),
             cancellationToken);
         secondLink.EnsureSuccessStatusCode();
-        using var newerCreate = await client.PostWithCsrfAsync(
-            $"/api/books/{targetId}/narrations/",
-            new CreateNarrationRequest(true),
-            cancellationToken);
-        newerCreate.EnsureSuccessStatusCode();
+        await SeedQueuedPublishedAsync(targetId, secondContent.Id, cancellationToken);
 
         using var relink = await PutWithCsrfAsync(
             client,
@@ -130,13 +118,13 @@ public sealed class LibraryStatusApiTests(ApiFactory factory) : IClassFixture<Ap
             new SetBookContentLinkRequest(firstContent.Id),
             cancellationToken);
         relink.EnsureSuccessStatusCode();
-        using var requeue = await client.PostWithCsrfAsync(
-            $"/api/books/{targetId}/narrations/",
-            new CreateNarrationRequest(true),
-            cancellationToken);
-        var requeued = await requeue.Content.ReadFromJsonAsync<NarrationJobResponse>(cancellationToken);
-        Assert.NotNull(requeued);
-        Assert.Equal(olderJob.Id, requeued.Id);
+        await using (var requeueScope = factory.Services.CreateAsyncScope())
+        {
+            var requeueDb = requeueScope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+            var requeued = await requeueDb.NarrationJobs.SingleAsync(item => item.Id == olderJob.Id, cancellationToken);
+            requeued.Requeue(DateTimeOffset.UtcNow);
+            await requeueDb.SaveChangesAsync(cancellationToken);
+        }
 
         var currentMatrix = await client.GetFromJsonAsync<LibraryBookStatusResponse[]>(
             "/api/library/status-matrix/",
@@ -177,12 +165,7 @@ public sealed class LibraryStatusApiTests(ApiFactory factory) : IClassFixture<Ap
         using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
         var currentBook = await ImportTextAsync(client, cancellationToken);
         var hiddenOnlyBook = await ImportTextAsync(client, cancellationToken);
-        using var publishedCreate = await client.PostWithCsrfAsync(
-            $"/api/books/{currentBook.Id}/narrations/",
-            new CreateNarrationRequest(true),
-            cancellationToken);
-        var published = await publishedCreate.Content.ReadFromJsonAsync<NarrationJobResponse>(cancellationToken);
-        Assert.NotNull(published);
+        var published = await SeedQueuedPublishedAsync(currentBook.Id, currentBook.Id, cancellationToken);
 
         await using (var scope = factory.Services.CreateAsyncScope())
         {
@@ -230,6 +213,23 @@ public sealed class LibraryStatusApiTests(ApiFactory factory) : IClassFixture<Ap
 
         Assert.NotNull(matrix);
         Assert.Empty(matrix);
+    }
+
+    private async Task<NarrationJob> SeedQueuedPublishedAsync(
+        Guid bookId,
+        Guid contentBookId,
+        CancellationToken cancellationToken)
+    {
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+        var ownerId = await db.Books
+            .Where(book => book.Id == bookId)
+            .Select(book => book.OwnerId!.Value)
+            .SingleAsync(cancellationToken);
+        var job = NarrationArtifactTestData.QueuedPublished(ownerId, bookId, contentBookId);
+        db.NarrationJobs.Add(job);
+        await db.SaveChangesAsync(cancellationToken);
+        return job;
     }
 
     private static async Task<BookDetailsResponse> ImportTextAsync(

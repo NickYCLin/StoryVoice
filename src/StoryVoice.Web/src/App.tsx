@@ -7,6 +7,7 @@ import { LandingPage } from './pages/LandingPage'
 import { LibraryPage } from './pages/LibraryPage'
 import { SharedCollectionPage } from './pages/SharedCollectionPage'
 import { SharedWithMePage } from './pages/SharedWithMePage'
+import { SeriesCastPanel } from './SeriesCastPanel'
 
 function App() {
   return (
@@ -18,6 +19,7 @@ function App() {
         <Route element={<CollectionsPage />} path="collections" />
         <Route element={<CollectionDetailPage />} path="collections/:collectionId" />
         <Route element={<SharedWithMePage />} path="shared" />
+        <Route element={<SeriesCastPanel />} path="/series" />
         <Route element={<SharedCollectionPage />} path="shared/:collectionId" />
       </Route>
     </Routes>

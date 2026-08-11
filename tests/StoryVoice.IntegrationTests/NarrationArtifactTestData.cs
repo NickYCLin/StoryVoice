@@ -43,6 +43,19 @@ internal static class NarrationArtifactTestData
             ]) ?? throw new InvalidOperationException("The staged narration factory returned null."));
     }
 
+    public static NarrationJob QueuedPublished(Guid ownerId, Guid bookId, Guid contentBookId)
+    {
+        var now = DateTimeOffset.UtcNow;
+        return NarrationJob.Create(
+            ownerId,
+            bookId,
+            contentBookId,
+            $"published-{Guid.NewGuid():N}",
+            "published-test-voice",
+            "published-test-rate",
+            now);
+    }
+
     public static NarrationJob CompletedHistorical(Guid ownerId, Guid bookId, Guid contentBookId)
     {
         var now = DateTimeOffset.UtcNow;

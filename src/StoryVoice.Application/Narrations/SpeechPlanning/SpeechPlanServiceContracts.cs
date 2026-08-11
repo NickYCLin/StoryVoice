@@ -20,6 +20,7 @@ public sealed record ChapterSpeechPlanDraftResponse(
     Guid ChapterId,
     int PlanVersion,
     string Status,
+    Guid? ConfirmedRevisionId,
     IReadOnlyList<SpeechPlanSegmentResponse> Segments,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);

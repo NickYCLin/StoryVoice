@@ -11,3 +11,15 @@ public sealed class NarrationTextUnavailableException()
 {
     public const string StableCode = "narration_text_unavailable";
 }
+
+public sealed class SingleVoiceNarrationRetiredException()
+    : InvalidOperationException("新的朗讀工作必須從多角色系列流程建立；既有單聲線音訊僅保留為歷史版本。")
+{
+    public const string StableCode = "single_voice_narration_retired";
+}
+
+public sealed class NarrationAdmissionDisabledException()
+    : InvalidOperationException("目前暫停建立新的朗讀工作，既有朗讀工作不受影響。")
+{
+    public const string StableCode = "narration_admission_disabled";
+}

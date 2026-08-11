@@ -241,6 +241,37 @@ public sealed class SeriesCastRebuildBatch
         _updatedAt = now;
     }
 
+    /// <summary>
+    /// Reconciles a persisted terminal member snapshot after a worker retry or concurrent completion.
+    /// It deliberately accepts members that are already terminal so a lost final batch transition
+    /// can be repaired without mutating the members again.
+    /// </summary>
+    public bool ReconcileTerminalMemberState(DateTimeOffset now)
+    {
+        if (_status != SeriesCastRebuildBatchStatus.Building)
+        {
+            return false;
+        }
+
+        if (_members.Any(candidate => candidate.Status == SeriesCastRebuildMemberStatus.Failed))
+        {
+            EnsureTransitionTime(now);
+            _status = SeriesCastRebuildBatchStatus.Failed;
+            _updatedAt = now;
+            return true;
+        }
+
+        if (_members.All(candidate => candidate.Status == SeriesCastRebuildMemberStatus.Ready))
+        {
+            EnsureTransitionTime(now);
+            _status = SeriesCastRebuildBatchStatus.ReadyToActivate;
+            _updatedAt = now;
+            return true;
+        }
+
+        return false;
+    }
+
     internal void MarkActivated(DateTimeOffset now)
     {
         if (_status != SeriesCastRebuildBatchStatus.ReadyToActivate)

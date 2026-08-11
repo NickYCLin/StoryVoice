@@ -34,94 +34,11 @@ internal sealed class NarrationService(
         return jobs.Select(ToResponse).ToArray();
     }
 
-    public async Task<NarrationJobResponse?> CreateAsync(
+    public Task<NarrationJobResponse?> CreateAsync(
         Guid bookId,
         CreateNarrationRequest request,
-        CancellationToken cancellationToken)
-    {
-        if (!request.RightsAttested)
-        {
-            throw new NarrationRightsRequiredException();
-        }
-
-        var target = await OwnedBooks()
-            .Include(book => book.Chapters)
-            .SingleOrDefaultAsync(book => book.Id == bookId, cancellationToken);
-        if (target is null)
-        {
-            return null;
-        }
-
-        var content = target.ContentBookId is Guid contentBookId
-            ? await OwnedBooks().Include(book => book.Chapters)
-                .SingleOrDefaultAsync(book => book.Id == contentBookId, cancellationToken)
-            : target;
-        if (!AuthorizedTextPolicy.IsProcessable(content))
-        {
-            throw new NarrationTextUnavailableException();
-        }
-
-        var source = NarrationSource.Create(content!.Chapters.Select(chapter =>
-            new NarrationChapterSource(chapter.Id, chapter.SortOrder, chapter.Title, chapter.OriginalText)));
-        var configuration = options.Value;
-        var existing = await dbContext.NarrationJobs.AsNoTracking().SingleOrDefaultAsync(
-            job => job.OwnerId == currentUser.UserId
-                && job.Mode == NarrationMode.SingleVoice
-                && job.BookId == target.Id
-                && job.ContentBookId == content.Id
-                && job.SourceHash == source.SourceHash
-                && job.Voice == configuration.Voice
-                && job.Rate == configuration.Rate,
-            cancellationToken);
-        if (existing is not null)
-        {
-            if (existing.Visibility != NarrationArtifactVisibility.Published)
-            {
-                return null;
-            }
-
-            return await RequeueIfTerminalAsync(existing.Id, cancellationToken);
-        }
-
-        var job = NarrationJob.Create(
-            currentUser.UserId,
-            target.Id,
-            content.Id,
-            source.SourceHash,
-            configuration.Voice,
-            configuration.Rate,
-            DateTimeOffset.UtcNow);
-        dbContext.NarrationJobs.Add(job);
-        try
-        {
-            await dbContext.SaveChangesAsync(cancellationToken);
-            return ToResponse(job);
-        }
-        catch (DbUpdateException)
-        {
-            dbContext.ChangeTracker.Clear();
-            existing = await dbContext.NarrationJobs.AsNoTracking().SingleOrDefaultAsync(
-                candidate => candidate.OwnerId == currentUser.UserId
-                    && candidate.Mode == NarrationMode.SingleVoice
-                    && candidate.BookId == target.Id
-                    && candidate.ContentBookId == content.Id
-                    && candidate.SourceHash == source.SourceHash
-                    && candidate.Voice == configuration.Voice
-                    && candidate.Rate == configuration.Rate,
-                cancellationToken);
-            if (existing is null)
-            {
-                throw;
-            }
-
-            if (existing.Visibility != NarrationArtifactVisibility.Published)
-            {
-                return null;
-            }
-
-            return await RequeueIfTerminalAsync(existing.Id, cancellationToken);
-        }
-    }
+        CancellationToken cancellationToken) =>
+        Task.FromException<NarrationJobResponse?>(new SingleVoiceNarrationRetiredException());
 
     public async Task<NarrationJobResponse?> GetAsync(Guid jobId, CancellationToken cancellationToken)
     {

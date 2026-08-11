@@ -17,11 +17,22 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
         Environment.SetEnvironmentVariable("DOTNET_HOSTBUILDER__RELOADCONFIGONCHANGE", "false");
     }
 
+    private readonly bool _narrationAdmissionEnabled;
     private readonly string _databaseName = $"storyvoice-tests-{Guid.NewGuid()}";
     private readonly string _storageRoot = Path.Combine(
         Path.GetTempPath(),
         "storyvoice-integration-tests",
         Guid.NewGuid().ToString("N"));
+
+    public ApiFactory()
+        : this(narrationAdmissionEnabled: true)
+    {
+    }
+
+    internal ApiFactory(bool narrationAdmissionEnabled)
+    {
+        _narrationAdmissionEnabled = narrationAdmissionEnabled;
+    }
 
     public string StorageRoot => _storageRoot;
 
@@ -30,6 +41,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
         builder.UseEnvironment("Testing");
         builder.UseSetting("BookStorage:RootPath", _storageRoot);
         builder.UseSetting("Narration:AudioRootPath", Path.Combine(_storageRoot, "audio"));
+        builder.UseSetting("Narration:AdmissionEnabled", _narrationAdmissionEnabled ? "true" : "false");
         builder.ConfigureServices(services =>
         {
             services.RemoveAll<DbContextOptions<StoryVoiceDbContext>>();

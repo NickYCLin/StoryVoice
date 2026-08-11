@@ -102,17 +102,17 @@ internal sealed class SpeechPlanService(
             var draft = ChapterSpeechPlanDraft.Create(ownerId, seriesId, bookId, chapterId, plan.SourceHash, segments);
             await repository.AddAsync(draft, cancellationToken);
             await SaveChangesAsync(cancellationToken);
-            return ToResponse(draft, knownCharacters);
+            return await ToResponseAsync(draft, knownCharacters, cancellationToken);
         }
 
         if (existingDraft.SourceHash == plan.SourceHash && existingDraft.Status != ChapterSpeechPlanDraftStatus.Stale)
         {
-            return ToResponse(existingDraft, knownCharacters);
+            return await ToResponseAsync(existingDraft, knownCharacters, cancellationToken);
         }
 
         existingDraft.RegenerateFromSegmentation(plan.SourceHash, segments);
         await SaveChangesAsync(cancellationToken);
-        return ToResponse(existingDraft, knownCharacters);
+        return await ToResponseAsync(existingDraft, knownCharacters, cancellationToken);
     }
 
     public async Task<ChapterSpeechPlanDraftResponse?> GetDraftAsync(
@@ -129,7 +129,7 @@ internal sealed class SpeechPlanService(
         }
 
         var knownCharacters = await LoadKnownCharactersAsync(ownerId, seriesId, cancellationToken);
-        return ToResponse(draft, knownCharacters);
+        return await ToResponseAsync(draft, knownCharacters, cancellationToken);
     }
 
     public async Task<ChapterSpeechPlanDraftResponse?> ConfirmSegmentAsync(
@@ -149,7 +149,7 @@ internal sealed class SpeechPlanService(
         draft.ConfirmSegment(segmentId, request.CharacterId);
         await SaveChangesAsync(cancellationToken);
         var knownCharacters = await LoadKnownCharactersAsync(ownerId, seriesId, cancellationToken);
-        return ToResponse(draft, knownCharacters);
+        return await ToResponseAsync(draft, knownCharacters, cancellationToken);
     }
 
     public async Task<ChapterSpeechPlanDraftResponse?> RejectSegmentAsync(
@@ -168,7 +168,7 @@ internal sealed class SpeechPlanService(
         draft.RejectSegment(segmentId);
         await SaveChangesAsync(cancellationToken);
         var knownCharacters = await LoadKnownCharactersAsync(ownerId, seriesId, cancellationToken);
-        return ToResponse(draft, knownCharacters);
+        return await ToResponseAsync(draft, knownCharacters, cancellationToken);
     }
 
     public async Task<ConfirmedSpeechPlanRevisionResponse?> ConfirmPlanAsync(
@@ -291,9 +291,29 @@ internal sealed class SpeechPlanService(
             .ToArray();
     }
 
+    private async Task<ChapterSpeechPlanDraftResponse> ToResponseAsync(
+        ChapterSpeechPlanDraft draft,
+        IReadOnlyList<KnownCharacterIdentity> knownCharacters,
+        CancellationToken cancellationToken)
+    {
+        var confirmedRevisionId = await dbContext.ConfirmedSpeechPlanRevisions
+            .AsNoTracking()
+            .Where(revision => revision.OwnerId == draft.OwnerId
+                && revision.SeriesId == draft.SeriesId
+                && revision.BookId == draft.BookId
+                && revision.ChapterId == draft.ChapterId
+                && revision.SourceHash == draft.SourceHash)
+            .OrderByDescending(revision => revision.RevisionNumber)
+            .Select(revision => (Guid?)revision.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return ToResponse(draft, knownCharacters, confirmedRevisionId);
+    }
+
     private static ChapterSpeechPlanDraftResponse ToResponse(
         ChapterSpeechPlanDraft draft,
-        IReadOnlyList<KnownCharacterIdentity> knownCharacters)
+        IReadOnlyList<KnownCharacterIdentity> knownCharacters,
+        Guid? confirmedRevisionId)
     {
         var namesById = knownCharacters.ToDictionary(character => character.CharacterId, character => character.NormalizedCanonicalName);
         return new ChapterSpeechPlanDraftResponse(
@@ -303,6 +323,7 @@ internal sealed class SpeechPlanService(
             draft.ChapterId,
             draft.PlanVersion,
             draft.Status.ToString(),
+            confirmedRevisionId,
             draft.Segments
                 .OrderBy(segment => segment.SortOrder)
                 .Select(segment => new SpeechPlanSegmentResponse(

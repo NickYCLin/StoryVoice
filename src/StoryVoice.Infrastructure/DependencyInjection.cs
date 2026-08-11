@@ -38,6 +38,17 @@ public static class DependencyInjection
             .Validate(options => options.ProviderTimeoutMinutes >= 1, "Narration provider timeout must be positive.")
             .Validate(options => options.LeaseMinutes > options.ProviderTimeoutMinutes, "Narration lease must exceed provider timeout.")
             .ValidateOnStart();
+        services.AddOptions<NarrationAdmissionOptions>()
+            .Bind(configuration.GetSection(NarrationAdmissionOptions.SectionName))
+            .ValidateOnStart();
+        services.AddOptions<MultiCharacterNarrationOptions>()
+            .Bind(configuration.GetSection(MultiCharacterNarrationOptions.SectionName))
+            .Validate(options => !string.IsNullOrWhiteSpace(options.ProviderVersion)
+                && !string.IsNullOrWhiteSpace(options.CompositionVersion)
+                && !string.IsNullOrWhiteSpace(options.FfmpegProfile)
+                && options.ChapterPauseMs is >= 0 and <= 5_000,
+                "Multi-character narration composition settings are invalid.")
+            .ValidateOnStart();
         services.AddOptions<SeriesVoiceCatalogOptions>()
             .Bind(configuration.GetSection(SeriesVoiceCatalogOptions.SectionName))
             .PostConfigure(options =>
@@ -65,6 +76,8 @@ public static class DependencyInjection
         services.AddScoped<IBookInsightsService, BookInsightsService>();
         services.AddScoped<ILibraryStatusService, LibraryStatusService>();
         services.AddScoped<INarrationService, NarrationService>();
+        services.AddScoped<ISeriesNarrationService, SeriesNarrationService>();
+        services.AddScoped<IStagedNarrationBatchProgressService, StagedNarrationBatchProgressService>();
         services.AddScoped<IStorySeriesRepository, StorySeriesRepository>();
         services.AddScoped<ISeriesService, SeriesService>();
         services.AddScoped<IBookCollectionRepository, BookCollectionRepository>();

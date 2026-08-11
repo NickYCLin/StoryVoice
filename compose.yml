@@ -39,6 +39,7 @@ services:
       ConnectionStrings__Redis: redis:6379,abortConnect=false
       BookStorage__RootPath: /data/books
       Narration__AudioRootPath: /data/audio
+      Narration__AdmissionEnabled: ${NARRATION_ADMISSION_ENABLED:-false}
       Auth__DataProtectionKeysPath: /var/lib/storyvoice/data-protection-keys
     volumes:
       - book-storage:/data/books

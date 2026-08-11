@@ -21,6 +21,8 @@ public sealed class ApiExceptionHandler(
             UnsupportedBookFormatException => StatusCodes.Status415UnsupportedMediaType,
             BookTextUnavailableException => StatusCodes.Status409Conflict,
             NarrationTextUnavailableException => StatusCodes.Status409Conflict,
+            SingleVoiceNarrationRetiredException => StatusCodes.Status409Conflict,
+            NarrationAdmissionDisabledException => StatusCodes.Status409Conflict,
             NarrationRightsRequiredException => StatusCodes.Status400BadRequest,
             AntiforgeryValidationException => StatusCodes.Status400BadRequest,
             ArgumentException or InvalidOperationException => StatusCodes.Status400BadRequest,
@@ -53,6 +55,14 @@ public sealed class ApiExceptionHandler(
         else if (exception is NarrationTextUnavailableException)
         {
             problemDetails.Extensions["code"] = NarrationTextUnavailableException.StableCode;
+        }
+        else if (exception is SingleVoiceNarrationRetiredException)
+        {
+            problemDetails.Extensions["code"] = SingleVoiceNarrationRetiredException.StableCode;
+        }
+        else if (exception is NarrationAdmissionDisabledException)
+        {
+            problemDetails.Extensions["code"] = NarrationAdmissionDisabledException.StableCode;
         }
         else if (exception is NarrationRightsRequiredException)
         {

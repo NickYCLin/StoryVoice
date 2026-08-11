@@ -15,68 +15,32 @@ namespace StoryVoice.IntegrationTests;
 public sealed class NarrationApiTests(ApiFactory factory) : IClassFixture<ApiFactory>
 {
     [Fact]
-    public async Task Rights_attestation_and_strict_uploaded_text_provenance_are_required()
+    public async Task Legacy_single_voice_creation_is_retired_before_request_validation()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
         var uploaded = await ImportTextAsync(client, cancellationToken);
 
-        using var noAttestation = await client.PostWithCsrfAsync(
+        using var response = await client.PostWithCsrfAsync(
             $"/api/books/{uploaded.Id}/narrations/",
             new CreateNarrationRequest(false),
             cancellationToken);
-        using var noAttestationProblem = JsonDocument.Parse(
-            await noAttestation.Content.ReadAsStreamAsync(cancellationToken));
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStreamAsync(cancellationToken));
 
-        using var syntheticCreate = await client.PostWithCsrfAsync(
-            "/api/books/",
-            new CreateBookRequest(
-                "合成書",
-                "測試作者",
-                "zh-TW",
-                "synthetic.txt",
-                [new CreateChapterRequest(1, "第一章", "未經檔案上傳的文字。")]),
-            cancellationToken);
-        var synthetic = await syntheticCreate.Content.ReadFromJsonAsync<BookDetailsResponse>(cancellationToken);
-        Assert.NotNull(synthetic);
-        using var noProvenance = await client.PostWithCsrfAsync(
-            $"/api/books/{synthetic.Id}/narrations/",
-            new CreateNarrationRequest(true),
-            cancellationToken);
-        using var noProvenanceProblem = JsonDocument.Parse(
-            await noProvenance.Content.ReadAsStreamAsync(cancellationToken));
-
-        Assert.Equal(HttpStatusCode.BadRequest, noAttestation.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         Assert.Equal(
-            NarrationRightsRequiredException.StableCode,
-            noAttestationProblem.RootElement.GetProperty("code").GetString());
-        Assert.Equal(HttpStatusCode.Conflict, noProvenance.StatusCode);
-        Assert.Equal(
-            NarrationTextUnavailableException.StableCode,
-            noProvenanceProblem.RootElement.GetProperty("code").GetString());
+            SingleVoiceNarrationRetiredException.StableCode,
+            problem.RootElement.GetProperty("code").GetString());
     }
 
     [Fact]
-    public async Task Narration_is_idempotent_owner_scoped_cancellable_and_range_streamed()
+    public async Task Published_legacy_artifacts_are_owner_scoped_cancellable_and_range_streamed()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         using var owner = await factory.CreateAuthenticatedClientAsync(cancellationToken);
         using var other = await factory.CreateAuthenticatedClientAsync(cancellationToken);
         var book = await ImportTextAsync(owner, cancellationToken);
-
-        using var firstCreate = await owner.PostWithCsrfAsync(
-            $"/api/books/{book.Id}/narrations/",
-            new CreateNarrationRequest(true),
-            cancellationToken);
-        var first = await firstCreate.Content.ReadFromJsonAsync<NarrationJobResponse>(cancellationToken);
-        Assert.NotNull(first);
-        using var secondCreate = await owner.PostWithCsrfAsync(
-            $"/api/books/{book.Id}/narrations/",
-            new CreateNarrationRequest(true),
-            cancellationToken);
-        var second = await secondCreate.Content.ReadFromJsonAsync<NarrationJobResponse>(cancellationToken);
-        Assert.NotNull(second);
-        Assert.Equal(first.Id, second.Id);
+        var first = await SeedQueuedPublishedAsync(book.Id, cancellationToken);
 
         using (var scope = factory.Services.CreateScope())
         {
@@ -103,12 +67,7 @@ public sealed class NarrationApiTests(ApiFactory factory) : IClassFixture<ApiFac
         Assert.Equal([1, 2, 3, 4], rangeBytes);
 
         var secondBook = await ImportTextAsync(owner, cancellationToken);
-        using var queuedCreate = await owner.PostWithCsrfAsync(
-            $"/api/books/{secondBook.Id}/narrations/",
-            new CreateNarrationRequest(true),
-            cancellationToken);
-        var queued = await queuedCreate.Content.ReadFromJsonAsync<NarrationJobResponse>(cancellationToken);
-        Assert.NotNull(queued);
+        var queued = await SeedQueuedPublishedAsync(secondBook.Id, cancellationToken);
         using var cancel = await owner.PostWithCsrfAsync(
             $"/api/narrations/{queued.Id}/cancel",
             new { },
@@ -124,12 +83,7 @@ public sealed class NarrationApiTests(ApiFactory factory) : IClassFixture<ApiFac
         var cancellationToken = TestContext.Current.CancellationToken;
         using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
         var book = await ImportTextAsync(client, cancellationToken);
-        using var publishedCreate = await client.PostWithCsrfAsync(
-            $"/api/books/{book.Id}/narrations/",
-            new CreateNarrationRequest(true),
-            cancellationToken);
-        var published = await publishedCreate.Content.ReadFromJsonAsync<NarrationJobResponse>(cancellationToken);
-        Assert.NotNull(published);
+        var published = await SeedQueuedPublishedAsync(book.Id, cancellationToken);
 
         NarrationJob staged;
         NarrationJob queuedStaged;
@@ -191,34 +145,23 @@ public sealed class NarrationApiTests(ApiFactory factory) : IClassFixture<ApiFac
     }
 
     [Fact]
-    public async Task Create_hides_a_historical_single_voice_idempotency_match()
+    public async Task Legacy_creation_never_revives_a_historical_single_voice_artifact()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
         var book = await ImportTextAsync(client, cancellationToken);
-        using var firstCreate = await client.PostWithCsrfAsync(
-            $"/api/books/{book.Id}/narrations/",
-            new CreateNarrationRequest(true),
-            cancellationToken);
-        var original = await firstCreate.Content.ReadFromJsonAsync<NarrationJobResponse>(cancellationToken);
-        Assert.NotNull(original);
-
-        await using (var scope = factory.Services.CreateAsyncScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
-            var job = await db.NarrationJobs.SingleAsync(item => item.Id == original.Id, cancellationToken);
-            job.Claim("historical-idempotency-test", DateTimeOffset.UtcNow.AddMinutes(5));
-            job.Complete(Path.Combine(job.OwnerId.ToString("N"), $"{job.Id:N}.mp3"), 4);
-            NarrationArtifactTestData.MarkHistorical(job);
-            await db.SaveChangesAsync(cancellationToken);
-        }
+        var original = await SeedCompletedHistoricalAsync(book.Id, cancellationToken);
 
         using var repeatedCreate = await client.PostWithCsrfAsync(
             $"/api/books/{book.Id}/narrations/",
             new CreateNarrationRequest(true),
             cancellationToken);
 
-        Assert.Equal(HttpStatusCode.NotFound, repeatedCreate.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, repeatedCreate.StatusCode);
+        using var problem = JsonDocument.Parse(await repeatedCreate.Content.ReadAsStreamAsync(cancellationToken));
+        Assert.Equal(
+            SingleVoiceNarrationRetiredException.StableCode,
+            problem.RootElement.GetProperty("code").GetString());
         await using var verifyScope = factory.Services.CreateAsyncScope();
         var verifyDb = verifyScope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
         var persisted = await verifyDb.NarrationJobs.AsNoTracking()
@@ -233,12 +176,7 @@ public sealed class NarrationApiTests(ApiFactory factory) : IClassFixture<ApiFac
         var cancellationToken = TestContext.Current.CancellationToken;
         using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
         var firstBook = await ImportTextAsync(client, cancellationToken);
-        using var firstCreate = await client.PostWithCsrfAsync(
-            $"/api/books/{firstBook.Id}/narrations/",
-            new CreateNarrationRequest(true),
-            cancellationToken);
-        var firstJob = await firstCreate.Content.ReadFromJsonAsync<NarrationJobResponse>(cancellationToken);
-        Assert.NotNull(firstJob);
+        var firstJob = await SeedQueuedPublishedAsync(firstBook.Id, cancellationToken);
 
         await using (var setupScope = factory.Services.CreateAsyncScope())
         {
@@ -265,12 +203,7 @@ public sealed class NarrationApiTests(ApiFactory factory) : IClassFixture<ApiFac
         }
 
         var secondBook = await ImportTextAsync(client, cancellationToken);
-        using var secondCreate = await client.PostWithCsrfAsync(
-            $"/api/books/{secondBook.Id}/narrations/",
-            new CreateNarrationRequest(true),
-            cancellationToken);
-        var secondJob = await secondCreate.Content.ReadFromJsonAsync<NarrationJobResponse>(cancellationToken);
-        Assert.NotNull(secondJob);
+        var secondJob = await SeedQueuedPublishedAsync(secondBook.Id, cancellationToken);
         await using (var setupScope = factory.Services.CreateAsyncScope())
         {
             var setupDb = setupScope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
@@ -294,6 +227,30 @@ public sealed class NarrationApiTests(ApiFactory factory) : IClassFixture<ApiFac
             await Assert.ThrowsAsync<DbUpdateConcurrencyException>(
                 () => staleDb.SaveChangesAsync(cancellationToken));
         }
+    }
+
+    private async Task<NarrationJob> SeedQueuedPublishedAsync(Guid bookId, CancellationToken cancellationToken) =>
+        await SeedNarrationAsync(bookId, bookId, NarrationArtifactTestData.QueuedPublished, cancellationToken);
+
+    private async Task<NarrationJob> SeedCompletedHistoricalAsync(Guid bookId, CancellationToken cancellationToken) =>
+        await SeedNarrationAsync(bookId, bookId, NarrationArtifactTestData.CompletedHistorical, cancellationToken);
+
+    private async Task<NarrationJob> SeedNarrationAsync(
+        Guid bookId,
+        Guid contentBookId,
+        Func<Guid, Guid, Guid, NarrationJob> create,
+        CancellationToken cancellationToken)
+    {
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+        var ownerId = await db.Books
+            .Where(book => book.Id == bookId)
+            .Select(book => book.OwnerId!.Value)
+            .SingleAsync(cancellationToken);
+        var job = create(ownerId, bookId, contentBookId);
+        db.NarrationJobs.Add(job);
+        await db.SaveChangesAsync(cancellationToken);
+        return job;
     }
 
     private static async Task<BookDetailsResponse> ImportTextAsync(

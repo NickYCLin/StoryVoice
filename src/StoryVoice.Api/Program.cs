@@ -202,6 +202,7 @@ app.MapBookInsightEndpoints();
 app.MapNarrationEndpoints();
 app.MapLibraryStatusEndpoints();
 app.MapSeriesEndpoints();
+app.MapSeriesNarrationEndpoints();
 app.MapCollectionEndpoints();
 app.MapSpeechPlanEndpoints();
 app.Run();
