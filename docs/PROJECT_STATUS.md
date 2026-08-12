@@ -1,6 +1,6 @@
 # StoryVoice 開發進度
 
-最後更新：2026-08-12
+最後更新：2026-08-12（角色管理頁面補齊啟用狀態／試講／任務紀錄）
 
 本文件記錄已由程式碼與測試證實的能力，以及接下來可直接實作的項目。
 產品方向與長期資料模型仍以
@@ -66,6 +66,21 @@
 條目）底下，不再綁死在單一系列的 `SeriesCharacter`；`SeriesCharacter` 有一個可選的
 `CharacterProfileId` 連結欄位，FK 設 `RESTRICT`——系列還在使用中的角色庫角色不能
 直接刪除，要先從系列移除。
+
+角色管理頁面另外還有：
+- **啟用／停用狀態**：`CharacterProfile.IsActive`，停用只是介面上標記淡出，不影響
+  已經連結的系列配音（停用不會把角色從系列裡移除，也不會讓現有朗讀失敗）。
+- **角色 ID 顯示與複製**、建立時間／最後更新時間。
+- **摘要卡片**：基礎聲線狀態、情境聲線數量（已就緒／5）、樣本語料時數（所有克隆
+  聲線參考音檔的 ffprobe 時長加總，API 容器已補上 ffmpeg）、最近進行中的任務。
+- **試講**：針對任一已就緒（`Ready`）的聲線，輸入一小段文字（上限 200 字）即時合成
+  播放；重用既有的 3wa 合成 client 同步跑一次 submit/poll/result/artifact，不進
+  Worker 的 job 佇列、不落地存檔，純粹是 UI 預覽用途。
+- **任務紀錄**：以這個角色所有 `CharacterVoiceProfile`（含歷史 Pending／Failed 紀錄）
+  依最後更新時間列出的簡易表格；沒有另外做一套持久化的非同步任務追蹤系統，也
+  沒有 3wa 端回傳的即時進度百分比（3wa 文件雖提到 status 回應可能帶 `progress`
+  欄位，但目前程式碼沒有解析、儲存它）。
+- **重設按鈕**：把基本資料表單復原成上次儲存的值，捨棄尚未儲存的編輯。
 
 實作串接的是 3wa Cluster API（`cluster_api.php?mode=voice_generate`）的 VoxCPM2
 引擎，分成兩條獨立的非同步流程：`profile_prepare/status/confirm`（Application 層，

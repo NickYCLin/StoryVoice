@@ -76,3 +76,27 @@ test('App 與主導覽都能開啟角色管理頁面', () => {
   assert.match(app, /CharacterLibraryPage/)
   assert.match(appLayout, /to="\/characters"/)
 })
+
+test('聲線卡片顯示字數與時長，並提供即時播放試講', () => {
+  assert.match(voiceProfilesPanel, /referenceAudioDurationSeconds/)
+  assert.match(voiceProfilesPanel, /字數/)
+  assert.match(voiceProfilesPanel, /formatDuration/)
+  assert.match(voiceProfilesPanel, /\/preview/)
+  assert.match(voiceProfilesPanel, /playPreview/)
+  assert.match(voiceProfilesPanel, /new Audio\(url\)/)
+})
+
+test('角色管理頁面提供啟用狀態切換、摘要卡片、重設按鈕、試講與任務紀錄分頁', () => {
+  assert.match(characterLibraryPage, /isActive/)
+  assert.match(characterLibraryPage, /'activate'/)
+  assert.match(characterLibraryPage, /'deactivate'/)
+  assert.match(characterLibraryPage, /基礎聲線狀態/)
+  assert.match(characterLibraryPage, /情境聲線數量/)
+  assert.match(characterLibraryPage, /樣本語料時數/)
+  assert.match(characterLibraryPage, /最近任務狀態/)
+  assert.match(characterLibraryPage, /resetForm/)
+  assert.match(characterLibraryPage, /'preview'/)
+  assert.match(characterLibraryPage, /'tasks'/)
+  assert.match(characterLibraryPage, /copyId/)
+  assert.match(characterLibraryPage, /AI 輔助生成尚未提供/)
+})

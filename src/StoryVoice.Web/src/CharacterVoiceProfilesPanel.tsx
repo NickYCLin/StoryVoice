@@ -13,20 +13,31 @@ type VoiceProfile = {
   transcript: string | null
   transcriptConfirmed: boolean
   status: 'Pending' | 'AwaitingTranscriptConfirmation' | 'Ready' | 'Failed'
+  referenceAudioDurationSeconds: number | null
   createdAt: string
   updatedAt: string
 }
 
-type Slot = { sceneCode: string | null; label: string }
+type Slot = { sceneCode: string | null; label: string; description: string }
 
 const SLOTS: Slot[] = [
-  { sceneCode: null, label: '基礎聲線' },
-  { sceneCode: 'neutral', label: '平常' },
-  { sceneCode: 'nervous', label: '緊張' },
-  { sceneCode: 'happy', label: '開心' },
-  { sceneCode: 'angry', label: '生氣' },
-  { sceneCode: 'sad', label: '難過' },
+  { sceneCode: null, label: '基礎聲線', description: '沒有更精確情境時的預設聲音' },
+  { sceneCode: 'neutral', label: '平常', description: '日常對話狀態' },
+  { sceneCode: 'nervous', label: '緊張', description: '感到緊張或不安時' },
+  { sceneCode: 'happy', label: '開心', description: '開心、興奮時' },
+  { sceneCode: 'angry', label: '生氣', description: '生氣、提高音量時' },
+  { sceneCode: 'sad', label: '難過', description: '難過、低落時' },
 ]
+
+const DEFAULT_PREVIEW_TEXT = '你好，這是我的聲音示範。'
+
+function formatDuration(seconds: number | null) {
+  if (seconds === null) return '—'
+  const totalSeconds = Math.round(seconds)
+  const minutes = Math.floor(totalSeconds / 60)
+  const remainder = totalSeconds % 60
+  return `${minutes}:${remainder.toString().padStart(2, '0')}`
+}
 
 const CONSENT_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'self_recorded', label: '本人親自錄製' },
@@ -72,6 +83,7 @@ export function CharacterVoiceProfilesPanel({ characterProfileId, characterName,
   const [promptText, setPromptText] = useState<Record<string, string>>({})
   const [consentType, setConsentType] = useState<Record<string, string>>({})
   const [transcriptDraft, setTranscriptDraft] = useState<Record<string, string>>({})
+  const [previewingId, setPreviewingId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -190,6 +202,29 @@ export function CharacterVoiceProfilesPanel({ characterProfileId, characterName,
     }
   }
 
+  async function playPreview(profile: VoiceProfile, text: string) {
+    setPreviewingId(profile.id)
+    try {
+      const response = await fetch(apiUrl(`${basePath(characterProfileId)}/${profile.id}/preview`), {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken },
+        body: JSON.stringify({ text }),
+      })
+      if (!response.ok) throw new Error(await responseProblem(response, '試講失敗'))
+      const blob = await response.blob()
+      const url = URL.createObjectURL(blob)
+      const audio = new Audio(url)
+      audio.addEventListener('ended', () => URL.revokeObjectURL(url))
+      await audio.play()
+      setMessage('正在播放試講，聲音直接來自這組聲線的即時合成。')
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '試講失敗。')
+    } finally {
+      setPreviewingId(null)
+    }
+  }
+
   async function remove(profile: VoiceProfile) {
     setBusySlot(profile.id)
     try {
@@ -226,6 +261,7 @@ export function CharacterVoiceProfilesPanel({ characterProfileId, characterName,
                   </span>
                 )}
               </div>
+              <p className="mt-0.5 text-[11px] text-stone-400">{slot.description}</p>
 
               {!profile && (
                 <div className="mt-2">
@@ -311,7 +347,24 @@ export function CharacterVoiceProfilesPanel({ characterProfileId, characterName,
 
               {profile && (
                 <div className="mt-2 space-y-2 text-xs text-stone-600">
-                  <p>{profile.mode === 'Design' ? '文字設計' : '錄音克隆'}</p>
+                  <p>
+                    {profile.mode === 'Design' ? '文字設計' : '錄音克隆'}
+                    {' · 字數 '}
+                    {(profile.transcript ?? profile.voicePromptText ?? '').length}
+                    {' · 時長 '}
+                    {formatDuration(profile.referenceAudioDurationSeconds)}
+                  </p>
+
+                  {profile.status === 'Ready' && (
+                    <button
+                      className="secondary-button w-full px-3 py-2 text-xs disabled:cursor-wait disabled:opacity-60"
+                      disabled={previewingId === profile.id}
+                      onClick={() => void playPreview(profile, DEFAULT_PREVIEW_TEXT)}
+                      type="button"
+                    >
+                      {previewingId === profile.id ? '合成中…' : '▶ 播放試講'}
+                    </button>
+                  )}
 
                   {profile.status === 'Pending' && (
                     <button
