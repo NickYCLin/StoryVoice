@@ -139,6 +139,20 @@ public sealed class MultiCharacterTurnBuilderTests
     }
 
     [Fact]
+    public void A_punctuation_only_dialogue_line_never_becomes_its_own_turn()
+    {
+        var castRevision = BuildCastRevision(narratorVoice: "narrator-voice", aliceVoice: "alice-voice");
+        // A trailing-off ellipsis quoted as its own dialogue turn has no letters or digits at
+        // all — edge-tts returns "no audio was received" for text like this, so it must never
+        // reach the synthesis provider as its own turn.
+        var chapter = BuildConfirmedChapter(0, "序章", "「你回來了？」艾莉絲說。「......」", AliceId);
+
+        var turns = MultiCharacterTurnBuilder.BuildTurns(castRevision, [chapter]);
+
+        Assert.All(turns, turn => Assert.Contains(turn.Text, char.IsLetterOrDigit));
+    }
+
+    [Fact]
     public void A_blank_line_paragraph_break_never_becomes_its_own_turn()
     {
         var castRevision = BuildCastRevision(narratorVoice: "narrator-voice", aliceVoice: "alice-voice");

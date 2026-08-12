@@ -83,12 +83,15 @@ public static class MultiCharacterTurnBuilder
                     throw new SpeechPlanIntegrityException(IntegrityMismatchReasonCode);
                 }
 
-                if (string.IsNullOrWhiteSpace(text))
+                if (string.IsNullOrWhiteSpace(text) || !text.Any(char.IsLetterOrDigit))
                 {
-                    // A paragraph-break artifact from segmentation (e.g. a lone blank line) —
-                    // nothing audible to say, and the synthesis provider rejects blank turns.
-                    // Skipping it doesn't touch isFirstSegmentOfChapter, so the next real segment
-                    // still gets the chapter-boundary pause it would have gotten anyway.
+                    // Either a paragraph-break artifact from segmentation (e.g. a lone blank
+                    // line), or a segment made entirely of punctuation (e.g. a trailing-off
+                    // ellipsis quoted as its own dialogue turn, "「......」"). Neither has any
+                    // speakable content, and the synthesis provider errors out (or edge-tts
+                    // itself returns "no audio was received") when asked to voice it. Skipping
+                    // doesn't touch isFirstSegmentOfChapter, so the next real segment still gets
+                    // the chapter-boundary pause it would have gotten anyway.
                     continue;
                 }
 
