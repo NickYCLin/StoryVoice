@@ -47,9 +47,18 @@ public sealed class SeriesApiTests(ApiFactory factory) : IClassFixture<ApiFactor
             cancellationToken);
         Assert.Equal(HttpStatusCode.OK, voiceResponse.StatusCode);
         Assert.NotNull(voices);
-        Assert.Contains(voices, voice => voice.Voice == "zh-TW-HsiaoChenNeural");
-        Assert.Contains(voices, voice => voice.Voice == "zh-TW-YunJheNeural");
-        Assert.Contains(voices, voice => voice.Voice == "zh-TW-HsiaoYuNeural");
+        var expectedVoices = new[]
+        {
+            "zh-TW-HsiaoChenNeural",
+            "zh-TW-YunJheNeural",
+            "zh-TW-HsiaoYuNeural",
+            "zh-CN-YunxiNeural",
+            "zh-CN-YunjianNeural",
+            "zh-CN-XiaoxiaoNeural",
+            "zh-CN-XiaoyiNeural"
+        };
+        Assert.All(expectedVoices, expectedVoice =>
+            Assert.Contains(voices, voice => voice.Voice == expectedVoice));
 
         using var ownerBListResponse = await ownerBClient.GetAsync("/api/series", cancellationToken);
         var ownerBList = await ownerBListResponse.Content.ReadFromJsonAsync<StorySeriesSummaryResponse[]>(

@@ -53,13 +53,15 @@ class EdgeTtsMultiVoiceProviderTests(unittest.IsolatedAsyncioTestCase):
         saved = []
 
         class FakeCommunicate:
-            def __init__(self, text, voice, rate):
+            def __init__(self, text, voice, rate, pitch, volume):
                 self.text = text
                 self.voice = voice
                 self.rate = rate
+                self.pitch = pitch
+                self.volume = volume
 
             async def save(self, path):
-                saved.append((self.text, self.voice, self.rate))
+                saved.append((self.text, self.voice, self.rate, self.pitch, self.volume))
                 Path(path).write_bytes(b"chunk")
 
         reports = []
@@ -68,8 +70,8 @@ class EdgeTtsMultiVoiceProviderTests(unittest.IsolatedAsyncioTestCase):
             output = Path(directory) / "book.mp3"
             await provider.synthesize_multi_voice(
                 [
-                    {"text": "風穿過長廊。", "voice": "narrator-voice", "rate": "-5%", "pauseBeforeMs": 0},
-                    {"text": "「你終於來了。」", "voice": "alice-voice", "rate": "+0%", "pauseBeforeMs": 200},
+                    {"text": "風穿過長廊。", "voice": "narrator-voice", "rate": "-5%", "pitch": "-2Hz", "volume": "-3%", "pauseBeforeMs": 0},
+                    {"text": "「你終於來了。」", "voice": "alice-voice", "rate": "+0%", "pitch": "+4Hz", "volume": "+2%", "pauseBeforeMs": 200},
                 ],
                 str(output),
                 communicator_factory=FakeCommunicate,
@@ -79,14 +81,17 @@ class EdgeTtsMultiVoiceProviderTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertTrue(output.exists())
             self.assertEqual(
-                [("風穿過長廊。", "narrator-voice", "-5%"), ("「你終於來了。」", "alice-voice", "+0%")],
+                [
+                    ("風穿過長廊。", "narrator-voice", "-5%", "-2Hz", "-3%"),
+                    ("「你終於來了。」", "alice-voice", "+0%", "+4Hz", "+2%"),
+                ],
                 saved,
             )
             self.assertEqual([(1, 2), (2, 2)], reports)
 
     async def test_generates_silence_only_when_pause_before_is_positive(self):
         class FakeCommunicate:
-            def __init__(self, text, voice, rate):
+            def __init__(self, text, voice, rate, pitch, volume):
                 pass
 
             async def save(self, path):
@@ -113,7 +118,7 @@ class EdgeTtsMultiVoiceProviderTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_concatenates_parts_in_order_via_ffmpeg_concat_demuxer_and_validates_with_ffprobe(self):
         class FakeCommunicate:
-            def __init__(self, text, voice, rate):
+            def __init__(self, text, voice, rate, pitch, volume):
                 pass
 
             async def save(self, path):
@@ -159,7 +164,7 @@ class EdgeTtsMultiVoiceProviderTests(unittest.IsolatedAsyncioTestCase):
         attempts = {}
 
         class FlakyCommunicate:
-            def __init__(self, text, voice, rate):
+            def __init__(self, text, voice, rate, pitch, volume):
                 self.text = text
 
             async def save(self, path):
@@ -187,7 +192,7 @@ class EdgeTtsMultiVoiceProviderTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_does_not_publish_when_ffprobe_reports_no_duration(self):
         class FakeCommunicate:
-            def __init__(self, text, voice, rate):
+            def __init__(self, text, voice, rate, pitch, volume):
                 pass
 
             async def save(self, path):
@@ -224,7 +229,7 @@ class EdgeTtsMultiVoiceProviderRealFfmpegTests(unittest.IsolatedAsyncioTestCase)
 
     async def test_real_ffmpeg_concatenates_narrator_and_character_turns_into_valid_audio(self):
         class RealAudioCommunicate:
-            def __init__(self, text, voice, rate):
+            def __init__(self, text, voice, rate, pitch, volume):
                 self.text = text
 
             async def save(self, path):

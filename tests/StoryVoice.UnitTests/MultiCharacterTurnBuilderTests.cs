@@ -22,7 +22,11 @@ public sealed class MultiCharacterTurnBuilderTests
 
         Assert.True(turns.Count >= 2);
         Assert.Equal("narrator-voice", turns[0].Voice);
-        Assert.Contains(turns, turn => turn.Voice == "alice-voice");
+        Assert.Equal("-2Hz", turns[0].Pitch);
+        Assert.Equal("-3%", turns[0].Volume);
+        var characterTurn = Assert.Single(turns, turn => turn.Voice == "alice-voice");
+        Assert.Equal("+4Hz", characterTurn.Pitch);
+        Assert.Equal("+2%", characterTurn.Volume);
     }
 
     [Fact]
@@ -142,8 +146,8 @@ public sealed class MultiCharacterTurnBuilderTests
             "1",
             aliceVoice,
             "+0%",
-            "+0Hz",
-            "+0%");
+            "+4Hz",
+            "+2%");
         return NarrationCastRevision.Create(
             revisionId,
             OwnerId,
@@ -153,8 +157,8 @@ public sealed class MultiCharacterTurnBuilderTests
             narratorProviderVersion: "1",
             narratorVoice: narratorVoice,
             narratorRate: "-5%",
-            narratorPitch: "+0Hz",
-            narratorVolume: "+0%",
+            narratorPitch: "-2Hz",
+            narratorVolume: "-3%",
             defaultSpeakerPauseMs: defaultSpeakerPauseMs,
             chapterPauseMs: chapterPauseMs,
             compositionVersion: "v1",

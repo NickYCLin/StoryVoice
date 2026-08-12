@@ -166,12 +166,14 @@ async def synthesize_multi_voice(
 
             voice = str(turn["voice"])
             rate = str(turn.get("rate", "+0%"))
+            pitch = str(turn.get("pitch", "+0Hz"))
+            volume = str(turn.get("volume", "+0%"))
             for chunk_index, chunk in enumerate(chunks):
                 part = work / f"{turn_index:04d}-{chunk_index:04d}.mp3"
                 for attempt in range(1, max_attempts + 1):
                     part.unlink(missing_ok=True)
                     try:
-                        communicate = factory(chunk, voice, rate=rate)
+                        communicate = factory(chunk, voice, rate=rate, pitch=pitch, volume=volume)
                         await communicate.save(str(part))
                         if not part.exists() or part.stat().st_size < 1:
                             raise RuntimeError("edge-tts returned empty audio")

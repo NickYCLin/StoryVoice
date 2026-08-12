@@ -10,6 +10,8 @@ public sealed record NarrationTurn(
     string Text,
     string Voice,
     string Rate,
+    string Pitch,
+    string Volume,
     int PauseBeforeMs);
 
 public sealed record MultiVoiceNarrationRequest(IReadOnlyList<NarrationTurn> Turns);

@@ -28,7 +28,7 @@ public sealed class SpeechPlanIntegrityException(string reasonCode) : InvalidOpe
 /// <summary>
 /// Compiles the immutable, job-locked confirmed speech plans for every chapter in a
 /// multi-character narration job into an ordered <see cref="NarrationTurn"/> sequence: resolves
-/// each segment's voice from the job's cast revision, merges adjacent same-voice turns within a
+/// each segment's full synthesis profile from the job's cast revision, merges adjacent equal-profile turns within a
 /// chapter (never across a chapter boundary), and inserts bounded pauses at speaker and chapter
 /// changes. Re-verifies plan/segment integrity against the actual chapter text before it will
 /// produce any turns at all.
@@ -53,6 +53,8 @@ public static class MultiCharacterTurnBuilder
         var turns = new List<NarrationTurn>();
         string? previousVoice = null;
         string? previousRate = null;
+        string? previousPitch = null;
+        string? previousVolume = null;
 
         foreach (var chapterPlan in orderedChapters)
         {
@@ -81,8 +83,11 @@ public static class MultiCharacterTurnBuilder
                     throw new SpeechPlanIntegrityException(IntegrityMismatchReasonCode);
                 }
 
-                var (voice, rate) = ResolveVoice(castRevision, segment);
-                var sameVoiceAsPrevious = voice == previousVoice && rate == previousRate;
+                var (voice, rate, pitch, volume) = ResolveVoice(castRevision, segment);
+                var sameVoiceAsPrevious = voice == previousVoice
+                    && rate == previousRate
+                    && pitch == previousPitch
+                    && volume == previousVolume;
                 var canMerge = turns.Count > 0
                     && !isFirstSegmentOfChapter
                     && sameVoiceAsPrevious
@@ -99,11 +104,13 @@ public static class MultiCharacterTurnBuilder
                         : isFirstSegmentOfChapter
                             ? castRevision.ChapterPauseMs
                             : sameVoiceAsPrevious ? 0 : castRevision.DefaultSpeakerPauseMs;
-                    turns.Add(new NarrationTurn(text, voice, rate, pauseBeforeMs));
+                    turns.Add(new NarrationTurn(text, voice, rate, pitch, volume, pauseBeforeMs));
                 }
 
                 previousVoice = voice;
                 previousRate = rate;
+                previousPitch = pitch;
+                previousVolume = volume;
                 isFirstSegmentOfChapter = false;
             }
         }
@@ -111,7 +118,7 @@ public static class MultiCharacterTurnBuilder
         return turns;
     }
 
-    private static (string Voice, string Rate) ResolveVoice(
+    private static (string Voice, string Rate, string Pitch, string Volume) ResolveVoice(
         NarrationCastRevision castRevision,
         ConfirmedSpeechSegment segment)
     {
@@ -121,14 +128,18 @@ public static class MultiCharacterTurnBuilder
                 .SingleOrDefault(candidate => candidate.CharacterId == characterId);
             if (assignment is not null)
             {
-                return (assignment.Voice, assignment.Rate);
+                return (assignment.Voice, assignment.Rate, assignment.Pitch, assignment.Volume);
             }
         }
 
         // Narrator segments, and any dialogue segment a human explicitly confirmed as narrator
         // fallback (or whose assigned character was somehow removed from the cast revision),
         // safely default to the narrator's own fixed voice rather than guessing.
-        return (castRevision.NarratorVoice, castRevision.NarratorRate);
+        return (
+            castRevision.NarratorVoice,
+            castRevision.NarratorRate,
+            castRevision.NarratorPitch,
+            castRevision.NarratorVolume);
     }
 
     private static string HashSlice(string text)

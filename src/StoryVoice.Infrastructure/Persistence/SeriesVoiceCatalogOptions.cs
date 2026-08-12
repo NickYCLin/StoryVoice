@@ -25,6 +25,34 @@ public sealed class SeriesVoiceCatalogOptions
         new()
         {
             Provider = "edge",
+            Voice = "zh-CN-YunxiNeural",
+            DisplayName = "雲希（男聲）",
+            Locale = "zh-CN"
+        },
+        new()
+        {
+            Provider = "edge",
+            Voice = "zh-CN-YunjianNeural",
+            DisplayName = "雲健（男聲）",
+            Locale = "zh-CN"
+        },
+        new()
+        {
+            Provider = "edge",
+            Voice = "zh-CN-XiaoxiaoNeural",
+            DisplayName = "曉曉（女聲）",
+            Locale = "zh-CN"
+        },
+        new()
+        {
+            Provider = "edge",
+            Voice = "zh-CN-XiaoyiNeural",
+            DisplayName = "曉伊（女聲）",
+            Locale = "zh-CN"
+        },
+        new()
+        {
+            Provider = "edge",
             Voice = "zh-TW-HsiaoYuNeural",
             DisplayName = "曉雨（女聲）",
             Locale = "zh-TW"

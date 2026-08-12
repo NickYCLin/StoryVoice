@@ -27,7 +27,7 @@ public sealed class EdgeTtsMultiVoiceNarrationProviderTests
     public async Task SynthesizeAsync_rejects_a_turn_with_blank_text()
     {
         var provider = new EdgeTtsMultiVoiceNarrationProvider(NullLogger<EdgeTtsMultiVoiceNarrationProvider>.Instance);
-        var request = new MultiVoiceNarrationRequest([new NarrationTurn("   ", "voice", "+0%", 0)]);
+        var request = new MultiVoiceNarrationRequest([new NarrationTurn("   ", "voice", "+0%", "+0Hz", "+0%", 0)]);
 
         await Assert.ThrowsAsync<ArgumentException>(
             () => provider.SynthesizeAsync(request, "unused.mp3", null, CancellationToken.None));
@@ -37,7 +37,7 @@ public sealed class EdgeTtsMultiVoiceNarrationProviderTests
     public async Task SynthesizeAsync_rejects_a_turn_with_no_voice()
     {
         var provider = new EdgeTtsMultiVoiceNarrationProvider(NullLogger<EdgeTtsMultiVoiceNarrationProvider>.Instance);
-        var request = new MultiVoiceNarrationRequest([new NarrationTurn("你好", "", "+0%", 0)]);
+        var request = new MultiVoiceNarrationRequest([new NarrationTurn("你好", "", "+0%", "+0Hz", "+0%", 0)]);
 
         await Assert.ThrowsAsync<ArgumentException>(
             () => provider.SynthesizeAsync(request, "unused.mp3", null, CancellationToken.None));
@@ -79,7 +79,7 @@ public sealed class NarrationProviderDispatcherTests
     {
         var provider = new FakeMultiVoiceProvider("edge");
         var dispatcher = new NarrationProviderDispatcher(new NarrationProviderRegistry([provider]));
-        var request = new MultiVoiceNarrationRequest([new NarrationTurn("你好", "voice", "+0%", 0)]);
+        var request = new MultiVoiceNarrationRequest([new NarrationTurn("你好", "voice", "+0%", "+0Hz", "+0%", 0)]);
 
         await dispatcher.SynthesizeAsync("edge", request, "output.mp3", null, CancellationToken.None);
 
