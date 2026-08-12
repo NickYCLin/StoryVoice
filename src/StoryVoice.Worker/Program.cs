@@ -12,6 +12,7 @@ builder.Services.AddSerilog((services, loggerConfiguration) => loggerConfigurati
 builder.Services.AddStoryVoiceInfrastructure(builder.Configuration);
 builder.Services.AddSingleton<INarrationProvider, EdgeTtsNarrationProvider>();
 builder.Services.AddSingleton<IMultiVoiceNarrationProvider, EdgeTtsMultiVoiceNarrationProvider>();
+builder.Services.AddSingleton<IMultiVoiceNarrationProvider, ThreeWaVoxCpm2NarrationProvider>();
 builder.Services.AddSingleton<INarrationProviderRegistry, NarrationProviderRegistry>();
 builder.Services.AddSingleton<NarrationProviderDispatcher>();
 builder.Services.AddHostedService<StoryPipelineWorker>();

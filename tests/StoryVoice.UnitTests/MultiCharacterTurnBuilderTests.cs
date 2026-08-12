@@ -174,11 +174,69 @@ public sealed class MultiCharacterTurnBuilderTests
             () => MultiCharacterTurnBuilder.BuildTurns(castRevision, []));
     }
 
+    [Fact]
+    public void An_angry_line_for_a_custom_provider_character_resolves_to_its_angry_scene_profile()
+    {
+        var castRevision = BuildCastRevision(
+            narratorVoice: "narrator-voice",
+            aliceVoice: "alice-voice",
+            aliceProvider: "3wa-voxcpm2");
+        var chapter = BuildConfirmedChapter(0, "序章", "「你給我閉嘴！！」艾莉絲吼道。", AliceId);
+        var voiceProfiles = new[]
+        {
+            BuildReadyProfile(CharacterVoiceProfileKind.Base, sceneCode: null, taskId: "base-task"),
+            BuildReadyProfile(CharacterVoiceProfileKind.Scene, CharacterVoiceSceneCodes.Angry, taskId: "angry-task"),
+        };
+
+        var turns = MultiCharacterTurnBuilder.BuildTurns(castRevision, [chapter], voiceProfiles);
+
+        var aliceTurn = Assert.Single(turns, turn => turn.Voice.StartsWith("clone:", StringComparison.Ordinal));
+        Assert.Equal("clone:angry-task", aliceTurn.Voice);
+        // Emotion is already baked into which cloned voice was picked, so the fixed cast
+        // rate/pitch/volume must pass through unchanged rather than getting an emotion delta.
+        Assert.Equal("+0%", aliceTurn.Rate);
+        Assert.Equal("+4Hz", aliceTurn.Pitch);
+    }
+
+    [Fact]
+    public void A_neutral_line_for_a_custom_provider_character_without_a_matching_scene_falls_back_to_its_base_profile()
+    {
+        var castRevision = BuildCastRevision(
+            narratorVoice: "narrator-voice",
+            aliceVoice: "alice-voice",
+            aliceProvider: "3wa-voxcpm2");
+        var chapter = BuildConfirmedChapter(0, "序章", "「你回來了？」艾莉絲說。", AliceId);
+        var voiceProfiles = new[]
+        {
+            BuildReadyProfile(CharacterVoiceProfileKind.Base, sceneCode: null, taskId: "base-task"),
+        };
+
+        var turns = MultiCharacterTurnBuilder.BuildTurns(castRevision, [chapter], voiceProfiles);
+
+        var aliceTurn = Assert.Single(turns, turn => turn.Voice.StartsWith("clone:", StringComparison.Ordinal));
+        Assert.Equal("clone:base-task", aliceTurn.Voice);
+    }
+
+    [Fact]
+    public void A_custom_provider_character_with_no_ready_profile_at_all_safely_falls_back_to_the_narrator_voice()
+    {
+        var castRevision = BuildCastRevision(
+            narratorVoice: "narrator-voice",
+            aliceVoice: "alice-voice",
+            aliceProvider: "3wa-voxcpm2");
+        var chapter = BuildConfirmedChapter(0, "序章", "「你回來了？」艾莉絲說。", AliceId);
+
+        var turns = MultiCharacterTurnBuilder.BuildTurns(castRevision, [chapter]);
+
+        Assert.All(turns, turn => Assert.Equal("narrator-voice", turn.Voice));
+    }
+
     private static NarrationCastRevision BuildCastRevision(
         string narratorVoice,
         string aliceVoice,
         int defaultSpeakerPauseMs = 200,
-        int chapterPauseMs = 800)
+        int chapterPauseMs = 800,
+        string aliceProvider = "edge")
     {
         var revisionId = Guid.NewGuid();
         var assignment = NarrationCastAssignment.Create(
@@ -188,7 +246,7 @@ public sealed class MultiCharacterTurnBuilderTests
             revisionId,
             AliceId,
             "艾莉絲",
-            "edge",
+            aliceProvider,
             "1",
             aliceVoice,
             "+0%",
@@ -258,6 +316,26 @@ public sealed class MultiCharacterTurnBuilderTests
         var draft = ChapterSpeechPlanDraft.Create(OwnerId, SeriesId, BookId, chapterId, plan.SourceHash, segments);
         var revision = draft.Confirm(1, DateTimeOffset.UtcNow);
         return new ChapterPlanSource(chapterSortOrder, revision, title, body);
+    }
+
+    private static CharacterVoiceProfile BuildReadyProfile(CharacterVoiceProfileKind kind, string? sceneCode, string taskId)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var profile = CharacterVoiceProfile.CreateClone(
+            Guid.NewGuid(),
+            OwnerId,
+            SeriesId,
+            AliceId,
+            kind,
+            sceneCode,
+            CharacterVoiceConsentTypes.SelfRecorded,
+            referenceAudioRelativePath: "2026/08/reference.wav",
+            referenceAudioSha256: new string('a', 64),
+            rightsConfirmedByUserId: OwnerId,
+            now);
+        profile.AttachDraftTranscript(taskId, "draft transcript", now);
+        profile.ConfirmTranscript("confirmed transcript", now);
+        return profile;
     }
 
     private static string HashSlice(string text) =>

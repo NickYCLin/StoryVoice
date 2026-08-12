@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using StoryVoice.Domain.Narrations;
 
 namespace StoryVoice.Worker;
 
@@ -67,6 +68,19 @@ public static class DialogueEmotionClassifier
             DialogueEmotion.Angry => ("+10%", "-5Hz", "+10%"),
             DialogueEmotion.Sad => ("-10%", "-10Hz", "-8%"),
             _ => ("+0%", "+0Hz", "+0%"),
+        };
+
+    /// <summary>The <see cref="CharacterVoiceSceneCodes"/> a cloned/designed situational voice
+    /// would be filed under for this emotion — the shared vocabulary a custom-provider character's
+    /// scene profile lookup uses instead of the plain rate/pitch/volume deltas in <see cref="ToDeltas"/>.</summary>
+    public static string ToSceneCode(DialogueEmotion emotion) =>
+        emotion switch
+        {
+            DialogueEmotion.Nervous => CharacterVoiceSceneCodes.Nervous,
+            DialogueEmotion.Happy => CharacterVoiceSceneCodes.Happy,
+            DialogueEmotion.Angry => CharacterVoiceSceneCodes.Angry,
+            DialogueEmotion.Sad => CharacterVoiceSceneCodes.Sad,
+            _ => CharacterVoiceSceneCodes.Neutral,
         };
 
     private static bool ExclaimsHard(string dialogueText) =>

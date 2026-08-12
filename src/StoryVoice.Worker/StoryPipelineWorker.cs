@@ -229,7 +229,12 @@ public sealed class StoryPipelineWorker(
                         job.Id,
                         content,
                         stoppingToken);
-                    var turns = MultiCharacterTurnBuilder.BuildTurns(castRevision, chapterPlans);
+                    var voiceProfiles = await LoadCharacterVoiceProfilesAsync(
+                        db,
+                        job.OwnerId,
+                        job.SeriesId.Value,
+                        stoppingToken);
+                    var turns = MultiCharacterTurnBuilder.BuildTurns(castRevision, chapterPlans, voiceProfiles);
                     await multiVoiceDispatcher.SynthesizeAsync(
                         castRevision.NarratorProvider,
                         new MultiVoiceNarrationRequest(turns),
@@ -379,6 +384,16 @@ public sealed class StoryPipelineWorker(
         return castRevision
             ?? throw new InvalidOperationException(MultiCharacterTurnBuilder.IntegrityMismatchReasonCode);
     }
+
+    private static async Task<IReadOnlyList<CharacterVoiceProfile>> LoadCharacterVoiceProfilesAsync(
+        StoryVoiceDbContext db,
+        Guid ownerId,
+        Guid seriesId,
+        CancellationToken cancellationToken) =>
+        await db.CharacterVoiceProfiles
+            .AsNoTracking()
+            .Where(profile => profile.OwnerId == ownerId && profile.SeriesId == seriesId)
+            .ToListAsync(cancellationToken);
 
     private static async Task<IReadOnlyList<ChapterPlanSource>> LoadChapterPlanSourcesAsync(
         StoryVoiceDbContext db,

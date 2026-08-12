@@ -40,7 +40,8 @@ public static class MultiCharacterTurnBuilder
 
     public static IReadOnlyList<NarrationTurn> BuildTurns(
         NarrationCastRevision castRevision,
-        IReadOnlyList<ChapterPlanSource> chapterPlans)
+        IReadOnlyList<ChapterPlanSource> chapterPlans,
+        IReadOnlyList<CharacterVoiceProfile>? voiceProfiles = null)
     {
         ArgumentNullException.ThrowIfNull(castRevision);
         ArgumentNullException.ThrowIfNull(chapterPlans);
@@ -49,6 +50,7 @@ public static class MultiCharacterTurnBuilder
             throw new SpeechPlanIntegrityException(IntegrityMismatchReasonCode);
         }
 
+        var profilesByCharacter = BuildProfileLookup(voiceProfiles);
         var orderedChapters = chapterPlans.OrderBy(plan => plan.ChapterSortOrder).ToArray();
         var turns = new List<NarrationTurn>();
         string? previousVoice = null;
@@ -97,7 +99,12 @@ public static class MultiCharacterTurnBuilder
 
                 var contextStart = Math.Max(0, segment.StartOffset - 40);
                 var precedingContext = sourceText[contextStart..segment.StartOffset];
-                var (voice, rate, pitch, volume) = ResolveVoice(castRevision, segment, text, precedingContext);
+                var (voice, rate, pitch, volume) = ResolveVoice(
+                    castRevision,
+                    segment,
+                    text,
+                    precedingContext,
+                    profilesByCharacter);
                 var sameVoiceAsPrevious = voice == previousVoice
                     && rate == previousRate
                     && pitch == previousPitch
@@ -132,11 +139,18 @@ public static class MultiCharacterTurnBuilder
         return turns;
     }
 
+    /// <summary>The <see cref="NarrationCastAssignment.VoiceProvider"/> value that means "resolve
+    /// this character's voice through <see cref="CharacterVoiceProfile"/> lookups instead of the
+    /// fixed Edge-style rate/pitch/volume delta model" — the same string
+    /// <c>ThreeWaVoxCpm2NarrationProvider.ProviderName</c> registers under.</summary>
+    private const string CustomVoiceProviderName = "3wa-voxcpm2";
+
     private static (string Voice, string Rate, string Pitch, string Volume) ResolveVoice(
         NarrationCastRevision castRevision,
         ConfirmedSpeechSegment segment,
         string segmentText,
-        string precedingContext)
+        string precedingContext,
+        IReadOnlyDictionary<Guid, CharacterVoiceProfileBundle> profilesByCharacter)
     {
         if (segment.Kind == SpeechSegmentTurnKind.Dialogue && segment.CharacterId is Guid characterId)
         {
@@ -145,23 +159,107 @@ public static class MultiCharacterTurnBuilder
             if (assignment is not null)
             {
                 var emotion = DialogueEmotionClassifier.Classify(segmentText, precedingContext);
-                var (rateDelta, pitchDelta, volumeDelta) = DialogueEmotionClassifier.ToDeltas(emotion);
-                return (
-                    assignment.Voice,
-                    SynthesisParameterMath.CombinePercent(assignment.Rate, rateDelta),
-                    SynthesisParameterMath.CombineHz(assignment.Pitch, pitchDelta),
-                    SynthesisParameterMath.CombinePercent(assignment.Volume, volumeDelta));
+                var isCustomVoiceProvider = string.Equals(
+                    assignment.VoiceProvider,
+                    CustomVoiceProviderName,
+                    StringComparison.OrdinalIgnoreCase);
+
+                if (isCustomVoiceProvider)
+                {
+                    if (profilesByCharacter.TryGetValue(characterId, out var bundle))
+                    {
+                        var sceneCode = DialogueEmotionClassifier.ToSceneCode(emotion);
+                        var profile = bundle.Scenes.GetValueOrDefault(sceneCode) ?? bundle.Base;
+                        if (profile is not null)
+                        {
+                            // The emotion is already baked into which cloned/designed voice was
+                            // picked, so — unlike the Edge path below — the fixed cast rate/
+                            // pitch/volume pass through unchanged rather than getting a delta.
+                            return (
+                                EncodeVoiceReference(profile),
+                                assignment.Rate,
+                                assignment.Pitch,
+                                assignment.Volume);
+                        }
+                    }
+
+                    // A custom-provider character with no Ready profile yet has no usable Voice
+                    // value at all (unlike Edge, assignment.Voice isn't a real voice id for this
+                    // provider) — falls all the way through to the narrator fallback below
+                    // instead of the Edge-style delta branch.
+                }
+                else
+                {
+                    var (rateDelta, pitchDelta, volumeDelta) = DialogueEmotionClassifier.ToDeltas(emotion);
+                    return (
+                        assignment.Voice,
+                        SynthesisParameterMath.CombinePercent(assignment.Rate, rateDelta),
+                        SynthesisParameterMath.CombineHz(assignment.Pitch, pitchDelta),
+                        SynthesisParameterMath.CombinePercent(assignment.Volume, volumeDelta));
+                }
             }
         }
 
         // Narrator segments, and any dialogue segment a human explicitly confirmed as narrator
-        // fallback (or whose assigned character was somehow removed from the cast revision),
-        // safely default to the narrator's own fixed voice rather than guessing.
+        // fallback (or whose assigned character was somehow removed from the cast revision, or
+        // whose custom-provider profile isn't Ready yet), safely default to the narrator's own
+        // fixed voice rather than guessing.
         return (
             castRevision.NarratorVoice,
             castRevision.NarratorRate,
             castRevision.NarratorPitch,
             castRevision.NarratorVolume);
+    }
+
+    /// <summary>Packs a Ready <see cref="CharacterVoiceProfile"/> into the single opaque string
+    /// <see cref="NarrationTurn.Voice"/> carries, so <c>ThreeWaVoxCpm2NarrationProvider</c> can
+    /// tell a Clone-mode profile (replay via its 3wa task id) from a Design-mode one (replay via
+    /// its prompt text, which never went through profile_prepare) without a second lookup.</summary>
+    private static string EncodeVoiceReference(CharacterVoiceProfile profile) =>
+        profile.Mode == CharacterVoiceProfileMode.Clone
+            ? $"clone:{profile.VoiceProfileTaskId}"
+            : $"design:{profile.VoicePromptText}";
+
+    private static Dictionary<Guid, CharacterVoiceProfileBundle> BuildProfileLookup(
+        IReadOnlyList<CharacterVoiceProfile>? voiceProfiles)
+    {
+        var result = new Dictionary<Guid, CharacterVoiceProfileBundle>();
+        if (voiceProfiles is null)
+        {
+            return result;
+        }
+
+        foreach (var profile in voiceProfiles)
+        {
+            if (profile.Status != CharacterVoiceProfileStatus.Ready)
+            {
+                continue;
+            }
+
+            if (!result.TryGetValue(profile.CharacterId, out var bundle))
+            {
+                bundle = new CharacterVoiceProfileBundle();
+                result[profile.CharacterId] = bundle;
+            }
+
+            if (profile.Kind == CharacterVoiceProfileKind.Base)
+            {
+                bundle.Base = profile;
+            }
+            else if (profile.SceneCode is not null)
+            {
+                bundle.Scenes[profile.SceneCode] = profile;
+            }
+        }
+
+        return result;
+    }
+
+    private sealed class CharacterVoiceProfileBundle
+    {
+        public CharacterVoiceProfile? Base { get; set; }
+
+        public Dictionary<string, CharacterVoiceProfile> Scenes { get; } = new(StringComparer.Ordinal);
     }
 
     private static string HashSlice(string text)

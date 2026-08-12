@@ -108,6 +108,11 @@ public static class DependencyInjection
             var hubOptions = provider.GetRequiredService<IOptions<ThreeWaAiHubOptions>>().Value;
             client.BaseAddress = new Uri(hubOptions.BaseUrl);
         });
+        services.AddHttpClient<IThreeWaSynthesisClient, ThreeWaSynthesisClient>((provider, client) =>
+        {
+            var hubOptions = provider.GetRequiredService<IOptions<ThreeWaAiHubOptions>>().Value;
+            client.BaseAddress = new Uri(hubOptions.BaseUrl);
+        });
         return services;
     }
 }

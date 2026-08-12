@@ -38,11 +38,15 @@ services:
       ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=storyvoice;Username=storyvoice;Password=${POSTGRES_PASSWORD:-storyvoice_local}
       ConnectionStrings__Redis: redis:6379,abortConnect=false
       BookStorage__RootPath: /data/books
+      CharacterVoiceStorage__RootPath: /data/character-voices
+      ThreeWaAiHub__BaseUrl: ${THREEWA_BASE_URL:-https://3wa.tw/3waAIHub/}
+      ThreeWaAiHub__ApiToken: ${THREEWA_API_TOKEN:-}
       Narration__AudioRootPath: /data/audio
       Narration__AdmissionEnabled: ${NARRATION_ADMISSION_ENABLED:-false}
       Auth__DataProtectionKeysPath: /var/lib/storyvoice/data-protection-keys
     volumes:
       - book-storage:/data/books
+      - character-voice-storage:/data/character-voices
       - audio-storage:/data/audio:ro
       - data-protection-keys:/var/lib/storyvoice/data-protection-keys
     ports:
@@ -68,6 +72,8 @@ services:
       DOTNET_ENVIRONMENT: Production
       ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=storyvoice;Username=storyvoice;Password=${POSTGRES_PASSWORD:-storyvoice_local}
       BookStorage__RootPath: /data/books
+      ThreeWaAiHub__BaseUrl: ${THREEWA_BASE_URL:-https://3wa.tw/3waAIHub/}
+      ThreeWaAiHub__ApiToken: ${THREEWA_API_TOKEN:-}
       Narration__AudioRootPath: /data/audio
       Narration__Voice: zh-TW-YunJheNeural
       Narration__Rate: -5%
@@ -107,5 +113,6 @@ volumes:
   postgres-data:
   redis-data:
   book-storage:
+  character-voice-storage:
   audio-storage:
   data-protection-keys:
