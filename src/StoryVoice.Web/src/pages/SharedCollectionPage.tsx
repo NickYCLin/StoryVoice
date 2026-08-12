@@ -37,7 +37,7 @@ function SharedBookChapters({ collectionId, bookId }: { collectionId: string; bo
             <span className="min-w-0 flex-1 truncate font-serif text-lg text-stone-200">{chapter.title}</span>
             <span className="text-stone-600 transition group-open:rotate-45">＋</span>
           </summary>
-          <div className="max-h-80 overflow-y-auto whitespace-pre-wrap border-t border-white/[.06] px-4 py-5 text-sm leading-7 text-stone-400">{chapter.originalText}</div>
+          <div className="reading-text">{chapter.originalText}</div>
         </details>
       ))}
     </div>

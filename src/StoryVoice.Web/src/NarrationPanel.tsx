@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { Link } from 'react-router-dom'
 
 import { apiUrl, responseProblem } from './api'
@@ -39,6 +39,18 @@ const statusLabels: Record<NarrationJob['status'], string> = {
   Completed: '語音已完成',
   Failed: '產製失敗',
   Cancelled: '已取消',
+}
+
+const WAVE_HEIGHTS = [.4, .7, .35, .9, .55, .8, .3, .65, .95, .45, .75, .5, .85, .38, .6, .7]
+
+function VoiceWave() {
+  return (
+    <div aria-hidden="true" className="voice-wave !h-8">
+      {WAVE_HEIGHTS.map((height, index) => (
+        <span key={index} style={{ '--wave': `${height * 100}%`, '--delay': `${(index % 5) * .15}s` } as CSSProperties} />
+      ))}
+    </div>
+  )
 }
 
 function mergeFreshJobs(current: NarrationJob[], incomingJobs: NarrationJob[], bookId: string) {
@@ -166,6 +178,7 @@ export function NarrationPanel({ book, csrfToken }: Props) {
               </div>
               <span className="rounded-full border border-white/[.08] px-3 py-1 text-xs text-stone-400">{job.progressPercent}%</span>
             </div>
+            {job.status === 'Running' && <VoiceWave />}
             {(job.status === 'Queued' || job.status === 'Running') && (
               <div className="mt-3">
                 <div
