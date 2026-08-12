@@ -70,15 +70,18 @@ public sealed class EdgeTtsMultiVoiceNarrationProvider(ILogger<EdgeTtsMultiVoice
                 await process.StandardInput.WriteAsync(manifestJson.AsMemory(), cancellationToken);
                 process.StandardInput.Close();
                 await process.WaitForExitAsync(cancellationToken);
-                var diagnosticLength = await stderrTask;
+                var diagnostics = await stderrTask;
                 _ = await stdoutTask;
 
                 if (process.ExitCode != 0)
                 {
+                    // The provider's error messages only ever reference turn/chunk indices and
+                    // tool exit codes (see edge_tts_multi_voice_provider.py) — never the
+                    // synthesized text itself — so the tail is safe to log for diagnosis.
                     logger.LogWarning(
-                        "Multi-voice Edge TTS provider exited with code {ExitCode}; diagnostic length {DiagnosticLength}",
+                        "Multi-voice Edge TTS provider exited with code {ExitCode}; diagnostic tail: {DiagnosticTail}",
                         process.ExitCode,
-                        diagnosticLength);
+                        diagnostics.Tail);
                     throw new InvalidOperationException("多角色神經語音 provider 執行失敗。");
                 }
             }
@@ -101,22 +104,31 @@ public sealed class EdgeTtsMultiVoiceNarrationProvider(ILogger<EdgeTtsMultiVoice
         }
     }
 
-    private static async Task<int> ReadDiagnosticsAsync(
+    private const int DiagnosticTailLines = 30;
+
+    private static async Task<(int Length, string Tail)> ReadDiagnosticsAsync(
         StreamReader reader,
         Func<NarrationSynthesisProgress, CancellationToken, Task>? progressCallback,
         CancellationToken cancellationToken)
     {
         var diagnosticLength = 0;
+        var tail = new Queue<string>(DiagnosticTailLines + 1);
         while (await reader.ReadLineAsync(cancellationToken) is { } line)
         {
             diagnosticLength += line.Length + 1;
+            tail.Enqueue(line);
+            if (tail.Count > DiagnosticTailLines)
+            {
+                tail.Dequeue();
+            }
+
             if (progressCallback is not null && EdgeTtsNarrationProvider.TryParseProgress(line, out var progress))
             {
                 await progressCallback(progress, cancellationToken);
             }
         }
 
-        return diagnosticLength;
+        return (diagnosticLength, string.Join(" | ", tail));
     }
 
     private static async Task IgnoreFailureAsync(Task task)
