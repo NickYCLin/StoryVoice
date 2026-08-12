@@ -28,7 +28,7 @@
 - Worker 已能實際 claim 並處理 `MultiCharacter` 朗讀工作：從鎖定的 speech plan 與 cast revision 組出 turn 序列（相鄰同聲線合併、章界／換人有界停頓），送出合成前重算 fingerprint 與逐片段文字雜湊，任一不符永久失敗為 `speech_plan_integrity_mismatch`。
 - 建立／推進全系列 `SeriesCastRebuildBatch` 的 Application 服務已完成並串接前端：owner 可在 `/series` 頁面對已確認劇本的系列建立 staged 多角色朗讀批次，逐冊完成後原子切換 active cast epoch；重試會自動清除同系列失敗的舊批次與孤兒 draft cast revision，不會撞唯一鍵。
 - 對白依情緒（緊張／開心／生氣／難過）微調 Edge TTS 的 rate/pitch/volume，規則式判斷只讀取合成當下已合法取得的正文與 reporting clause，不做情感分析宣稱。
-- 角色自訂聲線工作室（Character Voice Studio，見下方獨立章節）：角色可以用文字描述或上傳錄音克隆出專屬聲線，並依情緒分別建立情境聲線；串接 3wa Cluster API 的 VoxCPM2 引擎，與既有固定 Edge 聲線並存。
+- 角色庫（Character Library，見下方獨立章節）：owner-scoped、跨系列共用的角色管理頁面（`/characters`），角色的基本資料（頭像、年齡、性別、生日、個性、口頭禪、人物背景、說話風格）與自訂聲線（Character Voice Studio）都掛在角色庫上，任何系列的多角色配音都能直接選用同一個角色，不用每個系列各自重建。
 
 ## 多角色系列配音進度
 
@@ -48,14 +48,24 @@
 | Task 11：私有書庫 backfill | 營運工作，未開始 | 必須在 Git 外執行，不可留下私人內容或識別資訊 |
 | Task 12：兩階段正式發布 | 未開始 | 備份、candidate、canary、drift check、監控與 rollback proof |
 
-## 角色自訂聲線工作室（Character Voice Studio）
+## 角色庫（Character Library）與角色自訂聲線工作室（Character Voice Studio）
 
-角色可以在系列配音控制台的「自訂聲線」分頁，替自己建立一組基礎聲線，以及緊張／
-開心／生氣／難過（加上「平常」）最多五組情境聲線；每一組都可以選「文字設計」
-（只給一段文字描述，立即可用）或「上傳錄音克隆」（需要選擇同意類型：本人親自
-錄製／已取得明確同意／已取得合法授權，上傳後走語音辨識草稿→人工確認文字稿的
-流程才會就緒）。合成時依對白情緒查找對應情境聲線，找不到就退回基礎聲線，兩者
-都沒有才安全退回旁白聲線，不會讓整個朗讀工作失敗。
+`/characters` 是獨立於任何系列的 owner-scoped 角色管理頁面：可以建立角色的基本
+資料（頭像、年齡、性別、生日、個性、口頭禪、人物背景、說話風格——AI 補完／AI
+全部重寫按鈕先保留位置，尚未接 LLM），也可以直接在同一頁替角色建立一組基礎
+聲線，以及緊張／開心／生氣／難過（加上「平常」）最多五組情境聲線；每一組都
+可以選「文字設計」（只給一段文字描述，立即可用）或「上傳錄音克隆」（需要選擇
+同意類型：本人親自錄製／已取得明確同意／已取得合法授權，上傳後走語音辨識草稿
+→人工確認文字稿的流程才會就緒）。角色建好之後，在「多角色系列配音」加入角色
+時可以直接從角色庫選入，同一個角色（與其聲線）能跨多個系列重複使用，不用每個
+系列各自重建一次；系列裡的角色也可以不連結角色庫、維持原本手動設定固定 Edge
+聲線的舊流程。合成時依對白情緒查找對應情境聲線，找不到就退回基礎聲線，兩者都
+沒有才安全退回旁白聲線，不會讓整個朗讀工作失敗。
+
+資料模型上，`CharacterVoiceProfile` 掛在 owner-scoped 的 `CharacterProfile`（角色庫
+條目）底下，不再綁死在單一系列的 `SeriesCharacter`；`SeriesCharacter` 有一個可選的
+`CharacterProfileId` 連結欄位，FK 設 `RESTRICT`——系列還在使用中的角色庫角色不能
+直接刪除，要先從系列移除。
 
 實作串接的是 3wa Cluster API（`cluster_api.php?mode=voice_generate`）的 VoxCPM2
 引擎，分成兩條獨立的非同步流程：`profile_prepare/status/confirm`（Application 層，
@@ -68,14 +78,14 @@ URL 展開），但正式啟用前務必先用一個測試角色實際跑一次 
 `Ready`，再跑一次 Design 模式，確認回應形狀跟程式碼的假設一致。
 
 已知限制（刻意排除的範圍，不是漏做）：
-- **旁白聲線無法克隆**：`CharacterVoiceProfile` 只掛在 `SeriesCharacter` 上，系列旁白
-  沒有對應的克隆／設計流程。系列旁白 provider 設成 `3wa-voxcpm2` 時，角色可以
-  自由混用 Edge 固定聲線與 3wa 自訂聲線，但旁白本身永遠只能是 Edge 聲線。
-- 沒有 Gemma／LLM 輔助產生聲線描述或角色欄位（3wa Cluster API 目前沒有對應 mode）。
+- **旁白聲線無法克隆**：角色庫只服務 `SeriesCharacter`，系列旁白沒有對應的克隆／
+  設計流程。系列旁白 provider 設成 `3wa-voxcpm2` 時，角色可以自由混用 Edge 固定
+  聲線與 3wa 自訂聲線，但旁白本身永遠只能是 Edge 聲線。
+- 角色基本資料的「AI 補完」／「AI 全部重寫」按鈕只是預留位置，沒有接 LLM（3wa
+  Cluster API 目前沒有對應的 chat/生成 mode）。
 - 沒有串接 GPT-SoVITS 或其他第二個聲音引擎（`IMultiVoiceNarrationProvider` 的擴充點
   讓這件事之後可以純新增，不用重構既有 provider）。
-- 沒有角色大頭照上傳（跟聲音無關的另一個小功能）。
-- 沒有匿名／公開的聲線建立入口，一律維持既有的 owner-scoped 私有資料邊界。
+- 沒有匿名／公開的角色或聲線建立入口，一律維持既有的 owner-scoped 私有資料邊界。
 
 ## 公開 repository 邊界
 

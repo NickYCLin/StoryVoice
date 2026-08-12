@@ -4,7 +4,7 @@ import { apiUrl, fetchJson, responseProblem } from './api'
 
 type VoiceProfile = {
   id: string
-  characterId: string
+  characterProfileId: string
   kind: 'Base' | 'Scene'
   sceneCode: string | null
   mode: 'Design' | 'Clone'
@@ -48,23 +48,22 @@ const STATUS_STYLE: Record<VoiceProfile['status'], string> = {
   Failed: 'border-rose-200 bg-rose-50 text-rose-700',
 }
 
-function basePath(seriesId: string, characterId: string) {
-  return `/api/series/${seriesId}/characters/${characterId}/voice-profiles`
+function basePath(characterProfileId: string) {
+  return `/api/character-profiles/${characterProfileId}/voice-profiles`
 }
 
-function slotPath(seriesId: string, characterId: string, sceneCode: string | null) {
-  const root = basePath(seriesId, characterId)
+function slotPath(characterProfileId: string, sceneCode: string | null) {
+  const root = basePath(characterProfileId)
   return sceneCode ? `${root}/scenes/${sceneCode}` : `${root}/base`
 }
 
 type Props = {
-  seriesId: string
-  characterId: string
+  characterProfileId: string
   characterName: string
   csrfToken: string
 }
 
-export function CharacterVoiceProfilesPanel({ seriesId, characterId, characterName, csrfToken }: Props) {
+export function CharacterVoiceProfilesPanel({ characterProfileId, characterName, csrfToken }: Props) {
   const [profiles, setProfiles] = useState<VoiceProfile[] | null>(null)
   const [message, setMessage] = useState('')
   const [busySlot, setBusySlot] = useState<string | null>(null)
@@ -76,12 +75,12 @@ export function CharacterVoiceProfilesPanel({ seriesId, characterId, characterNa
 
   const load = useCallback(async () => {
     try {
-      const list = await fetchJson<VoiceProfile[]>(basePath(seriesId, characterId))
+      const list = await fetchJson<VoiceProfile[]>(basePath(characterProfileId))
       setProfiles(list)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '無法讀取這個角色的自訂聲線。')
     }
-  }, [characterId, seriesId])
+  }, [characterProfileId])
 
   useEffect(() => {
     void load()
@@ -96,7 +95,7 @@ export function CharacterVoiceProfilesPanel({ seriesId, characterId, characterNa
     if (!text) return
     setBusySlot(slotKey)
     try {
-      await fetchJson(`${slotPath(seriesId, characterId, sceneCode)}/design`, {
+      await fetchJson(`${slotPath(characterProfileId, sceneCode)}/design`, {
         method: 'POST',
         csrfToken,
         body: { voicePrompt: text },
@@ -129,7 +128,7 @@ export function CharacterVoiceProfilesPanel({ seriesId, characterId, characterNa
 
     setBusySlot(slotKey)
     try {
-      const response = await fetch(apiUrl(slotPath(seriesId, characterId, sceneCode)), {
+      const response = await fetch(apiUrl(slotPath(characterProfileId, sceneCode)), {
         method: 'POST',
         body: formData,
         credentials: 'same-origin',
@@ -150,7 +149,7 @@ export function CharacterVoiceProfilesPanel({ seriesId, characterId, characterNa
   async function refreshStatus(profile: VoiceProfile) {
     setBusySlot(profile.id)
     try {
-      await fetchJson(`${basePath(seriesId, characterId)}/${profile.id}/refresh-status`, { method: 'POST', csrfToken, body: {} })
+      await fetchJson(`${basePath(characterProfileId)}/${profile.id}/refresh-status`, { method: 'POST', csrfToken, body: {} })
       await load()
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '更新狀態失敗。')
@@ -164,7 +163,7 @@ export function CharacterVoiceProfilesPanel({ seriesId, characterId, characterNa
     if (!transcript) return
     setBusySlot(profile.id)
     try {
-      await fetchJson(`${basePath(seriesId, characterId)}/${profile.id}/confirm-transcript`, {
+      await fetchJson(`${basePath(characterProfileId)}/${profile.id}/confirm-transcript`, {
         method: 'POST',
         csrfToken,
         body: { transcript },
@@ -181,7 +180,7 @@ export function CharacterVoiceProfilesPanel({ seriesId, characterId, characterNa
   async function rebuild(profile: VoiceProfile) {
     setBusySlot(profile.id)
     try {
-      await fetchJson(`${basePath(seriesId, characterId)}/${profile.id}/rebuild`, { method: 'POST', csrfToken, body: {} })
+      await fetchJson(`${basePath(characterProfileId)}/${profile.id}/rebuild`, { method: 'POST', csrfToken, body: {} })
       await load()
       setMessage('已用本地保存的錄音與文字稿重新建立聲線。')
     } catch (error) {
@@ -194,7 +193,7 @@ export function CharacterVoiceProfilesPanel({ seriesId, characterId, characterNa
   async function remove(profile: VoiceProfile) {
     setBusySlot(profile.id)
     try {
-      await fetchJson(`${basePath(seriesId, characterId)}/${profile.id}`, { method: 'DELETE', csrfToken })
+      await fetchJson(`${basePath(characterProfileId)}/${profile.id}`, { method: 'DELETE', csrfToken })
       await load()
       setMessage('聲線已刪除。')
     } catch (error) {
@@ -211,7 +210,7 @@ export function CharacterVoiceProfilesPanel({ seriesId, characterId, characterNa
       </p>
       <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {SLOTS.map((slot) => {
-          const slotKey = `${characterId}:${slot.sceneCode ?? 'base'}`
+          const slotKey = `${characterProfileId}:${slot.sceneCode ?? 'base'}`
           const profile = profileFor(slot.sceneCode)
           const isOpen = openSlot === slotKey
           const isBusy = busySlot === slotKey || (profile !== null && busySlot === profile.id)

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
+import { Link } from 'react-router-dom'
 
 import { fetchJson } from './api'
 import { useAuthedOutletContext } from './authOutletContext'
@@ -6,6 +7,14 @@ import { CharacterVoiceProfilesPanel } from './CharacterVoiceProfilesPanel'
 import { ConfirmDialog } from './components/ConfirmDialog'
 import { SpeechPlanReview, type SeriesCharacterChoice, type SpeechPlanDraft } from './SpeechPlanReview'
 import type { BookDetails, BookSummary } from './types'
+
+const CUSTOM_VOICE_PROVIDER = '3wa-voxcpm2'
+
+type CharacterProfileSummary = {
+  id: string
+  canonicalName: string
+  hasAvatar: boolean
+}
 
 type VoiceOption = {
   provider: string
@@ -41,6 +50,7 @@ type SeriesCharacter = SeriesCharacterChoice & {
   pitch: string
   volume: string
   notes: string | null
+  characterProfileId: string | null
   aliases: Array<{ id: string; value: string }>
 }
 
@@ -79,6 +89,7 @@ export function SeriesCastPanel() {
   const [series, setSeries] = useState<SeriesSummary[]>([])
   const [voiceOptions, setVoiceOptions] = useState<VoiceOption[]>([])
   const [libraryBooks, setLibraryBooks] = useState<BookSummary[]>([])
+  const [characterProfiles, setCharacterProfiles] = useState<CharacterProfileSummary[]>([])
   const [selectedSeriesId, setSelectedSeriesId] = useState('')
   const [details, setDetails] = useState<SeriesDetails | null>(null)
   const [state, setState] = useState<LoadState>('loading')
@@ -91,6 +102,7 @@ export function SeriesCastPanel() {
   const [characterName, setCharacterName] = useState('')
   const [characterRole, setCharacterRole] = useState<SeriesCharacter['role']>('Supporting')
   const [characterVoice, setCharacterVoice] = useState('')
+  const [selectedCharacterProfileId, setSelectedCharacterProfileId] = useState('')
   const [aliasCharacterId, setAliasCharacterId] = useState('')
   const [alias, setAlias] = useState('')
   const [formState, setFormState] = useState<LoadState>('idle')
@@ -104,14 +116,16 @@ export function SeriesCastPanel() {
   const loadSeries = useCallback(async () => {
     setState('loading')
     try {
-      const [items, voices, books] = await Promise.all([
+      const [items, voices, books, profiles] = await Promise.all([
         fetchJson<SeriesSummary[]>('/api/series/'),
         fetchJson<VoiceOption[]>('/api/series/voice-options'),
         fetchJson<BookSummary[]>('/api/books'),
+        fetchJson<CharacterProfileSummary[]>('/api/character-profiles'),
       ])
       setSeries(items)
       setVoiceOptions(voices)
       setLibraryBooks(books)
+      setCharacterProfiles(profiles)
       setNarratorVoice((current) => current || voices[0]?.voice || '')
       setCharacterVoice((current) => current || voices[0]?.voice || '')
       setSelectedSeriesId((current) => current || items[0]?.id || '')
@@ -278,29 +292,40 @@ export function SeriesCastPanel() {
 
   async function addCharacter(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!details || !characterName.trim() || !characterVoice) return
-    const selectedVoice = voiceOptions.find((option) => option.voice === characterVoice)
+    const usingLibraryCharacter = Boolean(selectedCharacterProfileId)
+    const libraryCharacter = characterProfiles.find((profile) => profile.id === selectedCharacterProfileId)
+    const resolvedName = usingLibraryCharacter ? libraryCharacter?.canonicalName ?? '' : characterName.trim()
+    if (!details || !resolvedName) return
+    if (!usingLibraryCharacter && !characterVoice) return
+
+    const customVoice = voiceOptions.find((option) => option.provider === CUSTOM_VOICE_PROVIDER)
+    const selectedVoice = usingLibraryCharacter
+      ? customVoice
+      : voiceOptions.find((option) => option.voice === characterVoice)
     if (!selectedVoice) return
+
     setFormState('loading')
     try {
       const updated = await fetchJson<SeriesDetails>(`/api/series/${details.id}/characters`, {
         method: 'POST',
         csrfToken,
         body: {
-          canonicalName: characterName.trim(),
+          canonicalName: resolvedName,
           role: characterRole,
           voiceProvider: selectedVoice.provider,
-          voice: characterVoice,
+          voice: selectedVoice.voice,
           rate: profileDefaults.rate,
           pitch: profileDefaults.pitch,
           volume: profileDefaults.volume,
           notes: null,
+          characterProfileId: usingLibraryCharacter ? selectedCharacterProfileId : null,
         },
       })
       setDetails(updated)
       setCharacterName('')
+      setSelectedCharacterProfileId('')
       setAliasCharacterId((current) => current || updated.characters.at(-1)?.id || '')
-      setMessage('角色與固定聲線已加入這個系列。')
+      setMessage(usingLibraryCharacter ? '已從角色庫選入這個角色，聲線沿用角色庫設定。' : '角色與固定聲線已加入這個系列。')
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '新增角色失敗。')
     } finally {
@@ -387,7 +412,7 @@ export function SeriesCastPanel() {
                   <form className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end" onSubmit={addBook}><label className="text-xs text-stone-500">從可用正文加入<select className="auth-input mt-2" onChange={(event) => setBookId(event.target.value)} value={bookId}><option value="">選擇書籍</option>{eligibleBooks.map((book) => <option key={book.id} value={book.id}>{book.title}</option>)}</select></label><label className="text-xs text-stone-500">冊次標籤<input className="auth-input mt-2" maxLength={100} onChange={(event) => setVolumeLabel(event.target.value)} placeholder="第一冊" value={volumeLabel} /></label><button className="secondary-button" disabled={formState === 'loading' || !bookId} type="submit">加入系列</button></form>
                 </section>
 
-                <section className="mt-7 border-t border-stone-200 pt-5" aria-label="固定角色聲線"><h3 className="font-serif text-xl text-stone-900">固定角色聲線</h3><p className="mt-1 text-sm text-stone-500">角色與別名都限制在這個 owner 的系列；跨角色 alias 衝突會直接拒絕。</p>
+                <section className="mt-7 border-t border-stone-200 pt-5" aria-label="固定角色聲線"><h3 className="font-serif text-xl text-stone-900">固定角色聲線</h3><p className="mt-1 text-sm text-stone-500">角色與別名都限制在這個 owner 的系列；跨角色 alias 衝突會直接拒絕。角色也可以直接從<Link className="text-amber-700 underline" to="/characters">角色庫</Link>選入，跨系列共用同一組自訂聲線。</p>
                   <div className="mt-3 space-y-2">
                     {details.characters.map((character) => (
                       <div className="rounded-xl border border-stone-200 bg-stone-50 p-3" key={character.id}>
@@ -395,30 +420,85 @@ export function SeriesCastPanel() {
                           <p className="text-sm text-stone-800">{character.canonicalName} · {character.role}</p>
                           <div className="flex items-center gap-3">
                             <button className="text-xs text-amber-700" onClick={() => previewVoice(character.voice)} type="button">播放固定示範句</button>
-                            <button
-                              className="text-xs text-amber-700"
-                              onClick={() => setExpandedCharacterId((current) => (current === character.id ? null : character.id))}
-                              type="button"
-                            >
-                              {expandedCharacterId === character.id ? '收起自訂聲線' : '自訂聲線'}
-                            </button>
+                            {character.characterProfileId && (
+                              <button
+                                className="text-xs text-amber-700"
+                                onClick={() => setExpandedCharacterId((current) => (current === character.id ? null : character.id))}
+                                type="button"
+                              >
+                                {expandedCharacterId === character.id ? '收起自訂聲線' : '自訂聲線'}
+                              </button>
+                            )}
                           </div>
                         </div>
                         <p className="mt-1 text-xs text-stone-500">{voiceLabel(character.voice, voiceOptions)} · 別名：{character.aliases.map((item) => item.value).join('、') || '—'}</p>
-                        {expandedCharacterId === character.id && (
+                        {expandedCharacterId === character.id && character.characterProfileId && (
                           <div className="mt-3">
                             <CharacterVoiceProfilesPanel
-                              characterId={character.id}
                               characterName={character.canonicalName}
+                              characterProfileId={character.characterProfileId}
                               csrfToken={csrfToken}
-                              seriesId={details.id}
                             />
                           </div>
                         )}
                       </div>
                     ))}
                   </div>
-                  <form className="mt-4 grid gap-3 sm:grid-cols-3" onSubmit={addCharacter}><label className="text-xs text-stone-500">角色名稱<input className="auth-input mt-2" maxLength={160} onChange={(event) => setCharacterName(event.target.value)} required value={characterName} /></label><label className="text-xs text-stone-500">角色定位<select className="auth-input mt-2" onChange={(event) => setCharacterRole(event.target.value as SeriesCharacter['role'])} value={characterRole}><option value="Main">主要</option><option value="Supporting">配角</option><option value="Minor">次要</option></select></label><label className="text-xs text-stone-500">聲線<select className="auth-input mt-2" onChange={(event) => setCharacterVoice(event.target.value)} value={characterVoice}>{voiceOptions.map((option) => <option key={`${option.provider}:${option.voice}`} value={option.voice}>{option.displayName}（{option.locale}）</option>)}</select></label><button className="secondary-button sm:col-span-3" disabled={formState === 'loading' || !characterName.trim() || !characterVoice} type="submit">加入角色與固定聲線</button></form>
+                  <form className="mt-4 grid gap-3 sm:grid-cols-3" onSubmit={addCharacter}>
+                    <label className="text-xs text-stone-500 sm:col-span-3">
+                      從角色庫選擇（可選，選了就沿用角色庫的自訂聲線）
+                      <select
+                        className="auth-input mt-2"
+                        onChange={(event) => setSelectedCharacterProfileId(event.target.value)}
+                        value={selectedCharacterProfileId}
+                      >
+                        <option value="">不使用角色庫，手動設定</option>
+                        {characterProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.canonicalName}</option>)}
+                      </select>
+                    </label>
+                    <label className="text-xs text-stone-500">
+                      角色名稱
+                      <input
+                        className="auth-input mt-2 disabled:opacity-60"
+                        disabled={Boolean(selectedCharacterProfileId)}
+                        maxLength={160}
+                        onChange={(event) => setCharacterName(event.target.value)}
+                        required={!selectedCharacterProfileId}
+                        value={selectedCharacterProfileId
+                          ? characterProfiles.find((profile) => profile.id === selectedCharacterProfileId)?.canonicalName ?? ''
+                          : characterName}
+                      />
+                    </label>
+                    <label className="text-xs text-stone-500">
+                      角色定位
+                      <select className="auth-input mt-2" onChange={(event) => setCharacterRole(event.target.value as SeriesCharacter['role'])} value={characterRole}>
+                        <option value="Main">主要</option>
+                        <option value="Supporting">配角</option>
+                        <option value="Minor">次要</option>
+                      </select>
+                    </label>
+                    <label className="text-xs text-stone-500">
+                      聲線
+                      <select
+                        className="auth-input mt-2 disabled:opacity-60"
+                        disabled={Boolean(selectedCharacterProfileId)}
+                        onChange={(event) => setCharacterVoice(event.target.value)}
+                        value={selectedCharacterProfileId ? '' : characterVoice}
+                      >
+                        {selectedCharacterProfileId && <option value="">沿用角色庫自訂聲線</option>}
+                        {voiceOptions.filter((option) => option.provider !== CUSTOM_VOICE_PROVIDER).map((option) => (
+                          <option key={`${option.provider}:${option.voice}`} value={option.voice}>{option.displayName}（{option.locale}）</option>
+                        ))}
+                      </select>
+                    </label>
+                    <button
+                      className="secondary-button sm:col-span-3"
+                      disabled={formState === 'loading' || (!selectedCharacterProfileId && (!characterName.trim() || !characterVoice))}
+                      type="submit"
+                    >
+                      加入角色與固定聲線
+                    </button>
+                  </form>
                   <form className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end" onSubmit={addAlias}><label className="text-xs text-stone-500">角色<select className="auth-input mt-2" onChange={(event) => setAliasCharacterId(event.target.value)} value={aliasCharacterId}><option value="">選擇角色</option>{details.characters.map((character) => <option key={character.id} value={character.id}>{character.canonicalName}</option>)}</select></label><label className="text-xs text-stone-500">別名<input className="auth-input mt-2" maxLength={160} onChange={(event) => setAlias(event.target.value)} placeholder="例如：小明" value={alias} /></label><button className="secondary-button" disabled={formState === 'loading' || !aliasCharacterId || !alias.trim()} type="submit">加入別名</button></form>
                 </section>
               </div>

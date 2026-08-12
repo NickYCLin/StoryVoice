@@ -44,6 +44,7 @@ export function AppLayout() {
           <NavLink className={navLinkClassName} end to="/">首頁</NavLink>
           <NavLink className={navLinkClassName} to="/library">書庫</NavLink>
           <NavLink className={navLinkClassName} to="/collections">書冊</NavLink>
+          <NavLink className={navLinkClassName} to="/characters">角色管理</NavLink>
           <NavLink className={navLinkClassName} to="/shared">分享給我的</NavLink>
         </nav>
 
