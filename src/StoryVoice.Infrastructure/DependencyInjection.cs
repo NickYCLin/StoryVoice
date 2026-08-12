@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using StoryVoice.Application.BookImports;
 using StoryVoice.Application.Books;
 using StoryVoice.Application.Collections;
@@ -30,6 +31,13 @@ public static class DependencyInjection
         services.Configure<BookStorageOptions>(options =>
             options.RootPath = configuration[$"{BookStorageOptions.SectionName}:RootPath"]
                 ?? options.RootPath);
+        services.Configure<CharacterVoiceStorageOptions>(options =>
+            options.RootPath = configuration[$"{CharacterVoiceStorageOptions.SectionName}:RootPath"]
+                ?? options.RootPath);
+        services.AddOptions<ThreeWaAiHubOptions>()
+            .Bind(configuration.GetSection(ThreeWaAiHubOptions.SectionName))
+            .Validate(options => !string.IsNullOrWhiteSpace(options.BaseUrl), "3wa Cluster API base URL is required.")
+            .ValidateOnStart();
         services.AddOptions<NarrationOptions>()
             .Bind(configuration.GetSection(NarrationOptions.SectionName))
             .Validate(options => !string.IsNullOrWhiteSpace(options.AudioRootPath), "Narration audio root is required.")
@@ -93,6 +101,13 @@ public static class DependencyInjection
         services.AddSingleton<IBookImportParser, PlainTextBookParser>();
         services.AddSingleton<IBookImportParser, EpubBookParser>();
         services.AddSingleton<IBookFileStorage, LocalBookFileStorage>();
+        services.AddSingleton<LocalCharacterVoiceAudioStorage>();
+        services.AddScoped<ICharacterVoiceProfileService, CharacterVoiceProfileService>();
+        services.AddHttpClient<IThreeWaVoiceProfileClient, ThreeWaVoiceProfileClient>((provider, client) =>
+        {
+            var hubOptions = provider.GetRequiredService<IOptions<ThreeWaAiHubOptions>>().Value;
+            client.BaseAddress = new Uri(hubOptions.BaseUrl);
+        });
         return services;
     }
 }
