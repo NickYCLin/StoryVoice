@@ -100,6 +100,26 @@ public static class CharacterProfileEndpoints
         })
         .AddEndpointFilter<AntiforgeryEndpointFilter>();
 
+        group.MapPost("/{characterProfileId:guid}/activate", async (
+            Guid characterProfileId,
+            ICharacterProfileService service,
+            CancellationToken cancellationToken) =>
+        {
+            var profile = await service.SetActiveAsync(characterProfileId, true, cancellationToken);
+            return profile is null ? Results.NotFound() : Results.Ok(profile);
+        })
+        .AddEndpointFilter<AntiforgeryEndpointFilter>();
+
+        group.MapPost("/{characterProfileId:guid}/deactivate", async (
+            Guid characterProfileId,
+            ICharacterProfileService service,
+            CancellationToken cancellationToken) =>
+        {
+            var profile = await service.SetActiveAsync(characterProfileId, false, cancellationToken);
+            return profile is null ? Results.NotFound() : Results.Ok(profile);
+        })
+        .AddEndpointFilter<AntiforgeryEndpointFilter>();
+
         return endpoints;
     }
 }

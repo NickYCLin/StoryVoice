@@ -178,6 +178,32 @@ internal sealed class CharacterProfileService(
             avatarStorage.ResolveContentType(profile.AvatarRelativePath));
     }
 
+    public async Task<CharacterProfileResponse?> SetActiveAsync(
+        Guid characterProfileId,
+        bool isActive,
+        CancellationToken cancellationToken)
+    {
+        var ownerId = EnsureCurrentOwnerId();
+        var profile = await LoadAsync(ownerId, characterProfileId, cancellationToken);
+        if (profile is null)
+        {
+            return null;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        if (isActive)
+        {
+            profile.Activate(now);
+        }
+        else
+        {
+            profile.Deactivate(now);
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return ToResponse(profile);
+    }
+
     private async Task<CharacterProfile?> LoadAsync(
         Guid ownerId,
         Guid characterProfileId,
@@ -198,6 +224,7 @@ internal sealed class CharacterProfileService(
             profile.Catchphrase,
             profile.Background,
             profile.SpeakingStyle,
+            profile.IsActive,
             profile.CreatedAt,
             profile.UpdatedAt);
 

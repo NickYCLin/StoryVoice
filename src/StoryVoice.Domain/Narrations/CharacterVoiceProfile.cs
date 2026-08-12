@@ -79,6 +79,7 @@ public sealed class CharacterVoiceProfile
         string? consentType,
         string? referenceAudioRelativePath,
         string? referenceAudioSha256,
+        double? referenceAudioDurationSeconds,
         string? voicePromptText,
         Guid? rightsConfirmedByUserId,
         DateTimeOffset now)
@@ -96,6 +97,7 @@ public sealed class CharacterVoiceProfile
         ConsentType = consentType;
         ReferenceAudioRelativePath = referenceAudioRelativePath;
         ReferenceAudioSha256 = referenceAudioSha256;
+        ReferenceAudioDurationSeconds = referenceAudioDurationSeconds;
         VoicePromptText = voicePromptText;
         RightsConfirmedByUserId = rightsConfirmedByUserId;
         RightsConfirmedAt = rightsConfirmedByUserId is not null ? now : null;
@@ -114,6 +116,7 @@ public sealed class CharacterVoiceProfile
     public string? ConsentType { get; private set; }
     public string? ReferenceAudioRelativePath { get; private set; }
     public string? ReferenceAudioSha256 { get; private set; }
+    public double? ReferenceAudioDurationSeconds { get; private set; }
     public string? VoicePromptText { get; private set; }
     public string? Transcript { get; private set; }
     public DateTimeOffset? TranscriptConfirmedAt { get; private set; }
@@ -134,11 +137,17 @@ public sealed class CharacterVoiceProfile
         string consentType,
         string referenceAudioRelativePath,
         string referenceAudioSha256,
+        double? referenceAudioDurationSeconds,
         Guid rightsConfirmedByUserId,
         DateTimeOffset now)
     {
         ValidateSceneCode(kind, sceneCode);
         EnsureId(rightsConfirmedByUserId, nameof(rightsConfirmedByUserId));
+        if (referenceAudioDurationSeconds is < 0)
+        {
+            throw new ArgumentException("音檔時長不可為負值。", nameof(referenceAudioDurationSeconds));
+        }
+
         var normalizedConsent = ValidateConsentType(consentType);
         var normalizedPath = SeriesValueValidator.NormalizePrintable(
             referenceAudioRelativePath,
@@ -156,6 +165,7 @@ public sealed class CharacterVoiceProfile
             normalizedConsent,
             normalizedPath,
             normalizedSha256,
+            referenceAudioDurationSeconds,
             voicePromptText: null,
             rightsConfirmedByUserId,
             now);
@@ -183,6 +193,7 @@ public sealed class CharacterVoiceProfile
             consentType: null,
             referenceAudioRelativePath: null,
             referenceAudioSha256: null,
+            referenceAudioDurationSeconds: null,
             normalizedPrompt,
             rightsConfirmedByUserId: null,
             now);

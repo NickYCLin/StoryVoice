@@ -6,7 +6,7 @@ RUN dotnet publish src/StoryVoice.Api/StoryVoice.Api.csproj -c Release -o /app -
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0-alpine AS final
 WORKDIR /app
-RUN apk add --no-cache krb5-libs
+RUN apk add --no-cache krb5-libs ffmpeg
 COPY --from=build /app .
 EXPOSE 8080
 ENTRYPOINT ["dotnet", "StoryVoice.Api.dll"]

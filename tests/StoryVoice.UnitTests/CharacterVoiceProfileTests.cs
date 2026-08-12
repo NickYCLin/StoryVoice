@@ -18,6 +18,7 @@ public sealed class CharacterVoiceProfileTests
             CharacterVoiceConsentTypes.SelfRecorded,
             referenceAudioRelativePath: "voices/a.wav",
             referenceAudioSha256: new string('a', 64),
+            referenceAudioDurationSeconds: 12.5,
             rightsConfirmedByUserId: Guid.NewGuid(),
             Now);
 
@@ -37,7 +38,7 @@ public sealed class CharacterVoiceProfileTests
     {
         Assert.Throws<ArgumentException>(() => CharacterVoiceProfile.CreateClone(
             Guid.NewGuid(), OwnerId, CharacterProfileId, CharacterVoiceProfileKind.Base, null,
-            "totally_made_up", "voices/a.wav", new string('a', 64), Guid.NewGuid(), Now));
+            "totally_made_up", "voices/a.wav", new string('a', 64), 12.5, Guid.NewGuid(), Now));
     }
 
     [Fact]
@@ -45,7 +46,7 @@ public sealed class CharacterVoiceProfileTests
     {
         Assert.Throws<ArgumentException>(() => CharacterVoiceProfile.CreateClone(
             Guid.NewGuid(), OwnerId, CharacterProfileId, CharacterVoiceProfileKind.Base, null,
-            CharacterVoiceConsentTypes.SelfRecorded, "voices/a.wav", "not-a-hash", Guid.NewGuid(), Now));
+            CharacterVoiceConsentTypes.SelfRecorded, "voices/a.wav", "not-a-hash", 12.5, Guid.NewGuid(), Now));
     }
 
     [Fact]
@@ -53,7 +54,7 @@ public sealed class CharacterVoiceProfileTests
     {
         Assert.Throws<ArgumentException>(() => CharacterVoiceProfile.CreateClone(
             Guid.NewGuid(), OwnerId, CharacterProfileId, CharacterVoiceProfileKind.Base, "nervous",
-            CharacterVoiceConsentTypes.SelfRecorded, "voices/a.wav", new string('a', 64), Guid.NewGuid(), Now));
+            CharacterVoiceConsentTypes.SelfRecorded, "voices/a.wav", new string('a', 64), 12.5, Guid.NewGuid(), Now));
     }
 
     [Fact]
@@ -61,7 +62,7 @@ public sealed class CharacterVoiceProfileTests
     {
         Assert.Throws<ArgumentException>(() => CharacterVoiceProfile.CreateClone(
             Guid.NewGuid(), OwnerId, CharacterProfileId, CharacterVoiceProfileKind.Scene, null,
-            CharacterVoiceConsentTypes.SelfRecorded, "voices/a.wav", new string('a', 64), Guid.NewGuid(), Now));
+            CharacterVoiceConsentTypes.SelfRecorded, "voices/a.wav", new string('a', 64), 12.5, Guid.NewGuid(), Now));
     }
 
     [Fact]
@@ -69,7 +70,15 @@ public sealed class CharacterVoiceProfileTests
     {
         Assert.Throws<ArgumentException>(() => CharacterVoiceProfile.CreateClone(
             Guid.NewGuid(), OwnerId, CharacterProfileId, CharacterVoiceProfileKind.Scene, "furious",
-            CharacterVoiceConsentTypes.SelfRecorded, "voices/a.wav", new string('a', 64), Guid.NewGuid(), Now));
+            CharacterVoiceConsentTypes.SelfRecorded, "voices/a.wav", new string('a', 64), 12.5, Guid.NewGuid(), Now));
+    }
+
+    [Fact]
+    public void CreateClone_rejects_a_negative_reference_audio_duration()
+    {
+        Assert.Throws<ArgumentException>(() => CharacterVoiceProfile.CreateClone(
+            Guid.NewGuid(), OwnerId, CharacterProfileId, CharacterVoiceProfileKind.Base, null,
+            CharacterVoiceConsentTypes.SelfRecorded, "voices/a.wav", new string('a', 64), -1.0, Guid.NewGuid(), Now));
     }
 
     [Fact]

@@ -15,6 +15,7 @@ public sealed record CharacterVoiceProfileResponse(
     string? Transcript,
     bool TranscriptConfirmed,
     string Status,
+    double? ReferenceAudioDurationSeconds,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
 

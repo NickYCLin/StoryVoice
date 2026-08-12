@@ -226,6 +226,38 @@ public sealed class CharacterProfileApiTests(ApiFactory factory) : IClassFixture
         Assert.Equal(HttpStatusCode.BadRequest, deleteResponse.StatusCode);
     }
 
+    [Fact]
+    public async Task A_character_profile_starts_active_and_can_be_deactivated_and_reactivated()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+
+        using var createResponse = await client.PostWithCsrfAsync(
+            "/api/character-profiles",
+            CreateCharacterBody("啟用狀態測試角色"),
+            cancellationToken);
+        var created = await createResponse.Content.ReadFromJsonAsync<CharacterProfileResponse>(cancellationToken);
+        Assert.NotNull(created);
+        Assert.True(created.IsActive);
+
+        using var deactivateResponse = await client.PostWithCsrfAsync(
+            $"/api/character-profiles/{created.Id}/deactivate",
+            new { },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, deactivateResponse.StatusCode);
+        var deactivated = await deactivateResponse.Content.ReadFromJsonAsync<CharacterProfileResponse>(cancellationToken);
+        Assert.NotNull(deactivated);
+        Assert.False(deactivated.IsActive);
+
+        using var activateResponse = await client.PostWithCsrfAsync(
+            $"/api/character-profiles/{created.Id}/activate",
+            new { },
+            cancellationToken);
+        var activated = await activateResponse.Content.ReadFromJsonAsync<CharacterProfileResponse>(cancellationToken);
+        Assert.NotNull(activated);
+        Assert.True(activated.IsActive);
+    }
+
     private static object CreateCharacterBody(string canonicalName) => new
     {
         canonicalName,

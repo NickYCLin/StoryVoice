@@ -31,6 +31,7 @@ public sealed record CharacterProfileResponse(
     string? Catchphrase,
     string? Background,
     string? SpeakingStyle,
+    bool IsActive,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
 
@@ -66,4 +67,6 @@ public interface ICharacterProfileService
     Task<bool> DeleteAsync(Guid characterProfileId, CancellationToken cancellationToken);
 
     Task<CharacterProfileAvatar?> GetAvatarAsync(Guid characterProfileId, CancellationToken cancellationToken);
+
+    Task<CharacterProfileResponse?> SetActiveAsync(Guid characterProfileId, bool isActive, CancellationToken cancellationToken);
 }

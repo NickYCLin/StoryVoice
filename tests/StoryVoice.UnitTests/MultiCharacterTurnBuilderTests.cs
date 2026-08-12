@@ -333,6 +333,7 @@ public sealed class MultiCharacterTurnBuilderTests
             CharacterVoiceConsentTypes.SelfRecorded,
             referenceAudioRelativePath: "2026/08/reference.wav",
             referenceAudioSha256: new string('a', 64),
+            referenceAudioDurationSeconds: 8.0,
             rightsConfirmedByUserId: OwnerId,
             now);
         profile.AttachDraftTranscript(taskId, "draft transcript", now);

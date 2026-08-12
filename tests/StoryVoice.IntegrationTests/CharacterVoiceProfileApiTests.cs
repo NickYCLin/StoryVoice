@@ -118,6 +118,39 @@ public sealed class CharacterVoiceProfileApiTests(ApiFactory factory) : IClassFi
         Assert.Equal(HttpStatusCode.NotFound, referenceAudioResponse.StatusCode);
     }
 
+    [Fact]
+    public async Task Preview_rejects_blank_or_overlong_text_and_unknown_profiles_before_ever_calling_3wa()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        var characterProfileId = await CreateCharacterProfileAsync(client, cancellationToken);
+
+        using var createResponse = await client.PostWithCsrfAsync(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/base/design",
+            new { voicePrompt = "溫柔、略帶沙啞的女聲" },
+            cancellationToken);
+        var created = await createResponse.Content.ReadFromJsonAsync<CharacterVoiceProfileResponse>(cancellationToken);
+        Assert.NotNull(created);
+
+        using var blankResponse = await client.PostWithCsrfAsync(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/{created.Id}/preview",
+            new { text = "   " },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, blankResponse.StatusCode);
+
+        using var overlongResponse = await client.PostWithCsrfAsync(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/{created.Id}/preview",
+            new { text = new string('a', 500) },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, overlongResponse.StatusCode);
+
+        using var unknownProfileResponse = await client.PostWithCsrfAsync(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/{Guid.NewGuid()}/preview",
+            new { text = "你好" },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.NotFound, unknownProfileResponse.StatusCode);
+    }
+
     private static async Task<Guid> CreateCharacterProfileAsync(
         HttpClient client,
         CancellationToken cancellationToken)

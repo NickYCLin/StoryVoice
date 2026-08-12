@@ -64,6 +64,9 @@ internal sealed class CharacterVoiceProfileService(
         try
         {
             var now = DateTimeOffset.UtcNow;
+            var durationSeconds = await AudioDurationProbe.TryProbeSecondsAsync(
+                audioStorage.ResolveFullPath(stored.RelativePath),
+                cancellationToken);
             var profile = CharacterVoiceProfile.CreateClone(
                 Guid.NewGuid(),
                 ownerId,
@@ -73,6 +76,7 @@ internal sealed class CharacterVoiceProfileService(
                 consentType,
                 stored.RelativePath,
                 stored.Sha256Hex,
+                durationSeconds,
                 ownerId,
                 now);
 
@@ -328,6 +332,7 @@ internal sealed class CharacterVoiceProfileService(
             profile.Transcript,
             profile.TranscriptConfirmedAt is not null,
             profile.Status.ToString(),
+            profile.ReferenceAudioDurationSeconds,
             profile.CreatedAt,
             profile.UpdatedAt);
 

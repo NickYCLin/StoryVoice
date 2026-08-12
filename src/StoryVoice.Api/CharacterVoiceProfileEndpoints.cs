@@ -125,6 +125,18 @@ public static class CharacterVoiceProfileEndpoints
                 : Results.File(audio.AbsolutePath, audio.ContentType, enableRangeProcessing: true);
         });
 
+        group.MapPost("/{profileId:guid}/preview", async (
+            Guid characterProfileId,
+            Guid profileId,
+            PreviewVoiceProfileRequest request,
+            ICharacterVoicePreviewService previewService,
+            CancellationToken cancellationToken) =>
+        {
+            var preview = await previewService.PreviewAsync(characterProfileId, profileId, request, cancellationToken);
+            return preview is null ? Results.NotFound() : Results.File(preview.Content, preview.ContentType);
+        })
+        .AddEndpointFilter<AntiforgeryEndpointFilter>();
+
         return endpoints;
     }
 

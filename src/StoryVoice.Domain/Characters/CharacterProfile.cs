@@ -54,6 +54,7 @@ public sealed class CharacterProfile
         Catchphrase = SeriesValueValidator.NormalizeOptionalPrintable(catchphrase, CharacterProfileFieldLimits.MediumText, nameof(catchphrase));
         Background = SeriesValueValidator.NormalizeOptionalPrintable(background, CharacterProfileFieldLimits.LongText, nameof(background));
         SpeakingStyle = SeriesValueValidator.NormalizeOptionalPrintable(speakingStyle, CharacterProfileFieldLimits.MediumText, nameof(speakingStyle));
+        IsActive = true;
         CreatedAt = now;
         UpdatedAt = now;
         ConcurrencyStamp = Guid.NewGuid();
@@ -70,6 +71,7 @@ public sealed class CharacterProfile
     public string? Catchphrase { get; private set; }
     public string? Background { get; private set; }
     public string? SpeakingStyle { get; private set; }
+    public bool IsActive { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
     public Guid ConcurrencyStamp { get; private set; }
@@ -127,6 +129,18 @@ public sealed class CharacterProfile
     {
         AvatarRelativePath = SeriesValueValidator.NormalizeOptionalPrintable(
             avatarRelativePath, CharacterProfileFieldLimits.AvatarPath, nameof(avatarRelativePath));
+        Touch(now);
+    }
+
+    public void Activate(DateTimeOffset now)
+    {
+        IsActive = true;
+        Touch(now);
+    }
+
+    public void Deactivate(DateTimeOffset now)
+    {
+        IsActive = false;
         Touch(now);
     }
 

@@ -110,6 +110,7 @@ public static class DependencyInjection
         services.AddSingleton<LocalCharacterAvatarStorage>();
         services.AddScoped<ICharacterProfileService, CharacterProfileService>();
         services.AddScoped<ICharacterVoiceProfileService, CharacterVoiceProfileService>();
+        services.AddScoped<ICharacterVoicePreviewService, CharacterVoicePreviewService>();
         services.AddHttpClient<IThreeWaVoiceProfileClient, ThreeWaVoiceProfileClient>((provider, client) =>
         {
             var hubOptions = provider.GetRequiredService<IOptions<ThreeWaAiHubOptions>>().Value;
