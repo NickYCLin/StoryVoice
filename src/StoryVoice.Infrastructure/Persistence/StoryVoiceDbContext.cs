@@ -27,6 +27,8 @@ public sealed class StoryVoiceDbContext(DbContextOptions<StoryVoiceDbContext> op
 
     public DbSet<NarrationCastAssignment> NarrationCastAssignments => Set<NarrationCastAssignment>();
 
+    public DbSet<CharacterVoiceProfile> CharacterVoiceProfiles => Set<CharacterVoiceProfile>();
+
     public DbSet<SeriesCastRebuildBatch> SeriesCastRebuildBatches => Set<SeriesCastRebuildBatch>();
 
     public DbSet<SeriesCastRebuildMember> SeriesCastRebuildMembers => Set<SeriesCastRebuildMember>();
