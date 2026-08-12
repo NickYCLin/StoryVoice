@@ -5,6 +5,7 @@ import test from 'node:test'
 const panel = readFileSync(new URL('../src/SeriesCastPanel.tsx', import.meta.url), 'utf8')
 const narrationPanel = readFileSync(new URL('../src/NarrationPanel.tsx', import.meta.url), 'utf8')
 const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
+const voiceProfilesPanel = readFileSync(new URL('../src/CharacterVoiceProfilesPanel.tsx', import.meta.url), 'utf8')
 
 test('系列配音控制台固定使用 owner-scoped series、角色與 alias API', () => {
   assert.match(panel, /\/api\/series\/voice-options/)
@@ -30,4 +31,23 @@ test('書庫朗讀面板不再建立單聲線工作，而是導向系列配音�
 test('App 可開啟系列配音控制台', () => {
   assert.match(app, /path="\/series"/)
   assert.match(app, /SeriesCastPanel/)
+})
+
+test('系列配音控制台每個角色都可以展開自訂聲線工作室', () => {
+  assert.match(panel, /import { CharacterVoiceProfilesPanel } from '\.\/CharacterVoiceProfilesPanel'/)
+  assert.match(panel, /<CharacterVoiceProfilesPanel/)
+  assert.match(panel, /自訂聲線/)
+})
+
+test('自訂聲線工作室固定使用 owner-scoped voice-profiles API，涵蓋基礎與五種情境聲線', () => {
+  assert.match(voiceProfilesPanel, /\/api\/series\/\$\{seriesId\}\/characters\/\$\{characterId\}\/voice-profiles/)
+  assert.match(voiceProfilesPanel, /sceneCode: 'neutral'/)
+  assert.match(voiceProfilesPanel, /sceneCode: 'nervous'/)
+  assert.match(voiceProfilesPanel, /sceneCode: 'happy'/)
+  assert.match(voiceProfilesPanel, /sceneCode: 'angry'/)
+  assert.match(voiceProfilesPanel, /sceneCode: 'sad'/)
+  assert.match(voiceProfilesPanel, /self_recorded/)
+  assert.match(voiceProfilesPanel, /explicit_permission/)
+  assert.match(voiceProfilesPanel, /licensed_voice/)
+  assert.doesNotMatch(voiceProfilesPanel, /fuzzy|模糊比對/i)
 })

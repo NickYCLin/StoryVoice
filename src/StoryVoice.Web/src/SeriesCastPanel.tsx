@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react
 
 import { fetchJson } from './api'
 import { useAuthedOutletContext } from './authOutletContext'
+import { CharacterVoiceProfilesPanel } from './CharacterVoiceProfilesPanel'
 import { ConfirmDialog } from './components/ConfirmDialog'
 import { SpeechPlanReview, type SeriesCharacterChoice, type SpeechPlanDraft } from './SpeechPlanReview'
 import type { BookDetails, BookSummary } from './types'
@@ -98,6 +99,7 @@ export function SeriesCastPanel() {
   const [draftsByChapter, setDraftsByChapter] = useState<Record<string, SpeechPlanDraft>>({})
   const [batch, setBatch] = useState<RebuildBatch | null>(null)
   const [activateDialogOpen, setActivateDialogOpen] = useState(false)
+  const [expandedCharacterId, setExpandedCharacterId] = useState<string | null>(null)
 
   const loadSeries = useCallback(async () => {
     setState('loading')
@@ -132,6 +134,7 @@ export function SeriesCastPanel() {
       setBookId('')
       setVolumeLabel('')
       setBatch(null)
+      setExpandedCharacterId(null)
     } catch (error) {
       setDetails(null)
       setMessage(error instanceof Error ? error.message : '無法讀取這個系列。')
@@ -384,7 +387,37 @@ export function SeriesCastPanel() {
                   <form className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end" onSubmit={addBook}><label className="text-xs text-stone-500">從可用正文加入<select className="auth-input mt-2" onChange={(event) => setBookId(event.target.value)} value={bookId}><option value="">選擇書籍</option>{eligibleBooks.map((book) => <option key={book.id} value={book.id}>{book.title}</option>)}</select></label><label className="text-xs text-stone-500">冊次標籤<input className="auth-input mt-2" maxLength={100} onChange={(event) => setVolumeLabel(event.target.value)} placeholder="第一冊" value={volumeLabel} /></label><button className="secondary-button" disabled={formState === 'loading' || !bookId} type="submit">加入系列</button></form>
                 </section>
 
-                <section className="mt-7 border-t border-stone-200 pt-5" aria-label="固定角色聲線"><h3 className="font-serif text-xl text-stone-900">固定角色聲線</h3><p className="mt-1 text-sm text-stone-500">角色與別名都限制在這個 owner 的系列；跨角色 alias 衝突會直接拒絕。</p><div className="mt-3 space-y-2">{details.characters.map((character) => <div className="rounded-xl border border-stone-200 bg-stone-50 p-3" key={character.id}><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm text-stone-800">{character.canonicalName} · {character.role}</p><button className="text-xs text-amber-700" onClick={() => previewVoice(character.voice)} type="button">播放固定示範句</button></div><p className="mt-1 text-xs text-stone-500">{voiceLabel(character.voice, voiceOptions)} · 別名：{character.aliases.map((item) => item.value).join('、') || '—'}</p></div>)}</div>
+                <section className="mt-7 border-t border-stone-200 pt-5" aria-label="固定角色聲線"><h3 className="font-serif text-xl text-stone-900">固定角色聲線</h3><p className="mt-1 text-sm text-stone-500">角色與別名都限制在這個 owner 的系列；跨角色 alias 衝突會直接拒絕。</p>
+                  <div className="mt-3 space-y-2">
+                    {details.characters.map((character) => (
+                      <div className="rounded-xl border border-stone-200 bg-stone-50 p-3" key={character.id}>
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="text-sm text-stone-800">{character.canonicalName} · {character.role}</p>
+                          <div className="flex items-center gap-3">
+                            <button className="text-xs text-amber-700" onClick={() => previewVoice(character.voice)} type="button">播放固定示範句</button>
+                            <button
+                              className="text-xs text-amber-700"
+                              onClick={() => setExpandedCharacterId((current) => (current === character.id ? null : character.id))}
+                              type="button"
+                            >
+                              {expandedCharacterId === character.id ? '收起自訂聲線' : '自訂聲線'}
+                            </button>
+                          </div>
+                        </div>
+                        <p className="mt-1 text-xs text-stone-500">{voiceLabel(character.voice, voiceOptions)} · 別名：{character.aliases.map((item) => item.value).join('、') || '—'}</p>
+                        {expandedCharacterId === character.id && (
+                          <div className="mt-3">
+                            <CharacterVoiceProfilesPanel
+                              characterId={character.id}
+                              characterName={character.canonicalName}
+                              csrfToken={csrfToken}
+                              seriesId={details.id}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                   <form className="mt-4 grid gap-3 sm:grid-cols-3" onSubmit={addCharacter}><label className="text-xs text-stone-500">角色名稱<input className="auth-input mt-2" maxLength={160} onChange={(event) => setCharacterName(event.target.value)} required value={characterName} /></label><label className="text-xs text-stone-500">角色定位<select className="auth-input mt-2" onChange={(event) => setCharacterRole(event.target.value as SeriesCharacter['role'])} value={characterRole}><option value="Main">主要</option><option value="Supporting">配角</option><option value="Minor">次要</option></select></label><label className="text-xs text-stone-500">聲線<select className="auth-input mt-2" onChange={(event) => setCharacterVoice(event.target.value)} value={characterVoice}>{voiceOptions.map((option) => <option key={`${option.provider}:${option.voice}`} value={option.voice}>{option.displayName}（{option.locale}）</option>)}</select></label><button className="secondary-button sm:col-span-3" disabled={formState === 'loading' || !characterName.trim() || !characterVoice} type="submit">加入角色與固定聲線</button></form>
                   <form className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end" onSubmit={addAlias}><label className="text-xs text-stone-500">角色<select className="auth-input mt-2" onChange={(event) => setAliasCharacterId(event.target.value)} value={aliasCharacterId}><option value="">選擇角色</option>{details.characters.map((character) => <option key={character.id} value={character.id}>{character.canonicalName}</option>)}</select></label><label className="text-xs text-stone-500">別名<input className="auth-input mt-2" maxLength={160} onChange={(event) => setAlias(event.target.value)} placeholder="例如：小明" value={alias} /></label><button className="secondary-button" disabled={formState === 'loading' || !aliasCharacterId || !alias.trim()} type="submit">加入別名</button></form>
                 </section>
