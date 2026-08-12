@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Mvc;
 using StoryVoice.Application.Narrations;
 
 namespace StoryVoice.Api;
@@ -25,7 +26,7 @@ public static class CharacterVoiceProfileEndpoints
         group.MapPost("/base", (
             Guid characterProfileId,
             IFormFile referenceAudio,
-            string consentType,
+            [FromForm] string consentType,
             HttpContext httpContext,
             ICharacterVoiceProfileService service,
             CancellationToken cancellationToken) =>
@@ -48,7 +49,7 @@ public static class CharacterVoiceProfileEndpoints
             Guid characterProfileId,
             string sceneCode,
             IFormFile referenceAudio,
-            string consentType,
+            [FromForm] string consentType,
             HttpContext httpContext,
             ICharacterVoiceProfileService service,
             CancellationToken cancellationToken) =>

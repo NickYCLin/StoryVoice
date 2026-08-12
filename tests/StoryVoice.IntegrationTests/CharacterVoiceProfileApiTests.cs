@@ -151,6 +151,29 @@ public sealed class CharacterVoiceProfileApiTests(ApiFactory factory) : IClassFi
         Assert.Equal(HttpStatusCode.NotFound, unknownProfileResponse.StatusCode);
     }
 
+    [Fact]
+    public async Task Clone_upload_with_header_based_csrf_reaches_the_service_layer_instead_of_failing_form_binding()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        var characterProfileId = await CreateCharacterProfileAsync(client, cancellationToken);
+
+        using var content = new MultipartFormDataContent();
+        var file = new ByteArrayContent(new byte[] { 0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x41, 0x56, 0x45 });
+        file.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("audio/wav");
+        content.Add(file, "referenceAudio", "sample.wav");
+        content.Add(new StringContent("explicit_permission"), "consentType");
+
+        using var response = await client.PostMultipartWithCsrfAsync(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/base",
+            content,
+            cancellationToken);
+
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("ThreeWaAiHub__ApiToken", body);
+    }
+
     private static async Task<Guid> CreateCharacterProfileAsync(
         HttpClient client,
         CancellationToken cancellationToken)
