@@ -165,7 +165,7 @@ public sealed class MultiCharacterNarrationApiTests(ApiFactory factory) : IClass
     }
 
     [Fact]
-    public async Task Retrying_after_a_failed_batch_reuses_the_unchanged_cast_revision_instead_of_violating_the_fingerprint_index()
+    public async Task Retrying_after_a_failed_batch_purges_the_stale_batch_and_succeeds_with_an_unchanged_cast()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         using var owner = await factory.CreateAuthenticatedClientAsync(cancellationToken);
@@ -216,7 +216,7 @@ public sealed class MultiCharacterNarrationApiTests(ApiFactory factory) : IClass
             retryBody,
             new JsonSerializerOptions(JsonSerializerDefaults.Web));
         Assert.NotNull(retryBatch);
-        Assert.Equal(firstBatch!.DraftCastRevisionId, retryBatch!.DraftCastRevisionId);
+        Assert.NotEqual(firstBatch!.Id, retryBatch!.Id);
 
         await using var verifyScope = factory.Services.CreateAsyncScope();
         var verifyDb = verifyScope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();

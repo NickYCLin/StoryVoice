@@ -85,6 +85,13 @@ internal sealed class SeriesNarrationService(
                 throw new InvalidOperationException("這個系列已有尚未完成啟用的多聲線重建批次。");
             }
 
+            // A batch and its draft cast revision are each usable exactly once
+            // (UX_rebuild_batches_draft_cast / UX_ncast_revs_fingerprint). A batch that already
+            // failed will never be activated, so it's safe to clear it out before staging a fresh
+            // attempt — otherwise retrying with an unchanged voice cast would deterministically
+            // collide with the leftover row from the failed attempt.
+            await PurgeFailedBatchesAsync(ownerId, seriesId, cancellationToken);
+
             EnsureSingleSynthesisProvider(series);
             var sourceBooks = await LoadSeriesBooksAsync(ownerId, memberships, cancellationToken);
             var confirmedPlans = await LoadLatestConfirmedPlansAsync(
@@ -298,6 +305,59 @@ internal sealed class SeriesNarrationService(
             new CastEpochActivationCommand(ownerId, seriesId, batchId, DateTimeOffset.UtcNow),
             cancellationToken);
         return await GetRebuildAsync(seriesId, batchId, cancellationToken);
+    }
+
+    /// <summary>
+    /// Removes batches that already failed for this series, along with the rows that only exist
+    /// to serve them (their staged jobs, plan links, members, and — when nothing else references
+    /// it — their draft cast revision). Never touches a job whose <see cref="NarrationArtifactVisibility"/>
+    /// is <c>Published</c>, and never touches a cast revision that isn't still <c>Draft</c>.
+    /// </summary>
+    private async Task PurgeFailedBatchesAsync(Guid ownerId, Guid seriesId, CancellationToken cancellationToken)
+    {
+        var failedBatches = await dbContext.SeriesCastRebuildBatches
+            .Include(batch => batch.Members)
+            .Where(batch => batch.OwnerId == ownerId
+                && batch.SeriesId == seriesId
+                && batch.Status == SeriesCastRebuildBatchStatus.Failed)
+            .ToArrayAsync(cancellationToken);
+        if (failedBatches.Length == 0)
+        {
+            return;
+        }
+
+        var batchIds = failedBatches.Select(batch => batch.Id).ToArray();
+        var staleJobs = await dbContext.NarrationJobs
+            .Where(job => job.OwnerId == ownerId
+                && job.SeriesId == seriesId
+                && job.RebuildBatchId != null
+                && batchIds.Contains(job.RebuildBatchId!.Value)
+                && job.Mode == NarrationMode.MultiCharacter
+                && job.Visibility == NarrationArtifactVisibility.Staged)
+            .ToArrayAsync(cancellationToken);
+        var staleJobIds = staleJobs.Select(job => job.Id).ToArray();
+        var stalePlanLinks = await dbContext.NarrationJobSpeechPlans
+            .Where(link => staleJobIds.Contains(link.NarrationJobId))
+            .ToArrayAsync(cancellationToken);
+
+        dbContext.NarrationJobSpeechPlans.RemoveRange(stalePlanLinks);
+        dbContext.NarrationJobs.RemoveRange(staleJobs);
+        dbContext.SeriesCastRebuildBatches.RemoveRange(failedBatches);
+
+        var draftCastRevisionIds = failedBatches.Select(batch => batch.DraftCastRevisionId).Distinct().ToArray();
+        var stillReferencedRevisionIds = await dbContext.SeriesCastRebuildBatches
+            .Where(batch => !batchIds.Contains(batch.Id) && draftCastRevisionIds.Contains(batch.DraftCastRevisionId))
+            .Select(batch => batch.DraftCastRevisionId)
+            .ToArrayAsync(cancellationToken);
+        var purgeableRevisionIds = draftCastRevisionIds.Except(stillReferencedRevisionIds).ToArray();
+        var purgeableDraftRevisions = await dbContext.NarrationCastRevisions
+            .Include(revision => revision.Assignments)
+            .Where(revision => purgeableRevisionIds.Contains(revision.Id)
+                && revision.Status == NarrationCastRevisionStatus.Draft)
+            .ToArrayAsync(cancellationToken);
+        dbContext.NarrationCastRevisions.RemoveRange(purgeableDraftRevisions);
+
+        await dbContext.SaveChangesAsync(cancellationToken);
     }
 
     private async Task<Dictionary<Guid, Book>> LoadSeriesBooksAsync(
