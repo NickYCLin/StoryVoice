@@ -1,6 +1,6 @@
 # StoryVoice 開發進度
 
-最後更新：2026-08-11
+最後更新：2026-08-12
 
 本文件記錄已由程式碼與測試證實的能力，以及接下來可直接實作的項目。
 產品方向與長期資料模型仍以
@@ -26,6 +26,9 @@
 - 逐章劇本審核 API：草稿建立／重建、逐片段確認或拒絕、確認為不可變 `ConfirmedSpeechPlanRevision`（含 canonical fingerprint），私人正文不進回應。
 - 多聲線 Edge TTS provider：以 JSON manifest 透過 stdin 傳入每個 turn 的文字／聲線／停頓，ffmpeg concat + ffprobe 驗證後才原子發布；provider registry／dispatcher 讓未來新增供應商不用動到既有系列角色 ID。
 - Worker 已能實際 claim 並處理 `MultiCharacter` 朗讀工作：從鎖定的 speech plan 與 cast revision 組出 turn 序列（相鄰同聲線合併、章界／換人有界停頓），送出合成前重算 fingerprint 與逐片段文字雜湊，任一不符永久失敗為 `speech_plan_integrity_mismatch`。
+- 建立／推進全系列 `SeriesCastRebuildBatch` 的 Application 服務已完成並串接前端：owner 可在 `/series` 頁面對已確認劇本的系列建立 staged 多角色朗讀批次，逐冊完成後原子切換 active cast epoch；重試會自動清除同系列失敗的舊批次與孤兒 draft cast revision，不會撞唯一鍵。
+- 對白依情緒（緊張／開心／生氣／難過）微調 Edge TTS 的 rate/pitch/volume，規則式判斷只讀取合成當下已合法取得的正文與 reporting clause，不做情感分析宣稱。
+- 角色自訂聲線工作室（Character Voice Studio，見下方獨立章節）：角色可以用文字描述或上傳錄音克隆出專屬聲線，並依情緒分別建立情境聲線；串接 3wa Cluster API 的 VoxCPM2 引擎，與既有固定 Edge 聲線並存。
 
 ## 多角色系列配音進度
 
@@ -40,34 +43,39 @@
 | Task 6：受限說話者辨識 | 已完成 | reporting clause、known identity、unknown／review fallback |
 | Task 7：speech plan 保存與審核 | 已完成 | draft、confirmed revision、stale 與 immutable job binding |
 | Task 8：多聲線 Edge TTS | 已完成 | provider dispatcher、分段合成、ffmpeg／ffprobe（含真實二進位檔驗證）、原子發布 |
-| Task 9：staged multi-character jobs（部分完成，見下） | Worker 合成路徑已完成；建立／審核 staged job 的 API 尚未完成 | active cast 載入、confirmed plan 載入、turn 合併與停頓、完整性重驗證 |
-| Task 10：系列 cast 與 speech-plan UI | 未開始 | 角色聲線、alias、低信心審核與行動版 QA |
+| Task 9：staged multi-character jobs | 已完成 | active cast 載入、confirmed plan 載入、turn 合併與停頓、完整性重驗證、staged batch 建立與原子 epoch 切換 API |
+| Task 10：系列 cast 與 speech-plan UI | 已完成 | 系列／冊次／角色／alias 管理、劇本審核、staged rebuild 狀態與啟用、角色自訂聲線工作室 |
 | Task 11：私有書庫 backfill | 營運工作，未開始 | 必須在 Git 外執行，不可留下私人內容或識別資訊 |
 | Task 12：兩階段正式發布 | 未開始 | 備份、candidate、canary、drift check、監控與 rollback proof |
 
-## Task 9 範圍說明（重要）
+## 角色自訂聲線工作室（Character Voice Studio）
 
-Worker 這一半（`StoryPipelineWorker` 認得 `MultiCharacter` job、`MultiCharacterTurnBuilder`
-組 turn、`NarrationProviderDispatcher` 送去多聲線 provider）已經完成並有測試覆蓋。
+角色可以在系列配音控制台的「自訂聲線」分頁，替自己建立一組基礎聲線，以及緊張／
+開心／生氣／難過（加上「平常」）最多五組情境聲線；每一組都可以選「文字設計」
+（只給一段文字描述，立即可用）或「上傳錄音克隆」（需要選擇同意類型：本人親自
+錄製／已取得明確同意／已取得合法授權，上傳後走語音辨識草稿→人工確認文字稿的
+流程才會就緒）。合成時依對白情緒查找對應情境聲線，找不到就退回基礎聲線，兩者
+都沒有才安全退回旁白聲線，不會讓整個朗讀工作失敗。
 
-**還沒做、也還不能做的部分**：一般使用者還無法透過 API 建立一個 `MultiCharacter`
-staged job。原因是計畫裡描述的「先建立涵蓋全系列書籍的 `SeriesCastRebuildBatch`、
-逐冊完成後才原子切換 active cast epoch」這段編排，目前完全沒有 Application
-層服務——`PostgreSqlCastEpochActivationPublisher`（Task 3）與
-`SeriesCastRebuildBatch`／`SeriesCastRebuildMember`（Task 3 domain）都已經存在且
-測試過，但沒有任何東西呼叫它們。要讓「使用者按下『建立多角色朗讀』」變成真的
-產生 staged job，還需要：
+實作串接的是 3wa Cluster API（`cluster_api.php?mode=voice_generate`）的 VoxCPM2
+引擎，分成兩條獨立的非同步流程：`profile_prepare/status/confirm`（Application 層，
+建立與確認聲線）、`synthesize` 的 submit/poll/result/artifact（Worker 層，實際產生
+朗讀音訊）。**這一段的 HTTP 欄位名稱是從官方文件摘要整理出來的，尚未拿真實
+token 對正式環境跑過一次端對端請求**——文件本身對 `synthesize` 的 `operation`
+欄位、以及 status/result 回應的確切 JSON 形狀描述得不夠精確，程式碼已經盡量寫得
+寬容（缺欄位不直接炸掉、`artifact_url_template`／`ack_url_template` 一律當 opaque
+URL 展開），但正式啟用前務必先用一個測試角色實際跑一次 Clone 模式（短 WAV）到
+`Ready`，再跑一次 Design 模式，確認回應形狀跟程式碼的假設一致。
 
-1. 建立系列 cast revision 的 Application 服務（目前系列 API 只能建立系列本身與角色，
-   不能建立 `NarrationCastRevision`）。
-2. 建立／推進 `SeriesCastRebuildBatch` 的服務：snapshot 全系列冊次、逐冊在
-   對應書籍全部章節 `ConfirmedSpeechPlanRevision` 就緒後建立 staged job 並寫入
-   `NarrationJobSpeechPlan`。
-3. 全批就緒後呼叫既有的 `PostgreSqlCastEpochActivationPublisher` 原子切換。
-4. `NarrationAdmissionOptions`（rollout 用的一次性關閉開關）要跟著這條建立路徑
-   一起加，單獨加沒有意義，因此這次沒有建立空殼。
-
-在這段完成前，README 不應宣稱多角色音訊已可透過 UI／API 端對端使用。
+已知限制（刻意排除的範圍，不是漏做）：
+- **旁白聲線無法克隆**：`CharacterVoiceProfile` 只掛在 `SeriesCharacter` 上，系列旁白
+  沒有對應的克隆／設計流程。系列旁白 provider 設成 `3wa-voxcpm2` 時，角色可以
+  自由混用 Edge 固定聲線與 3wa 自訂聲線，但旁白本身永遠只能是 Edge 聲線。
+- 沒有 Gemma／LLM 輔助產生聲線描述或角色欄位（3wa Cluster API 目前沒有對應 mode）。
+- 沒有串接 GPT-SoVITS 或其他第二個聲音引擎（`IMultiVoiceNarrationProvider` 的擴充點
+  讓這件事之後可以純新增，不用重構既有 provider）。
+- 沒有角色大頭照上傳（跟聲音無關的另一個小功能）。
+- 沒有匿名／公開的聲線建立入口，一律維持既有的 owner-scoped 私有資料邊界。
 
 ## 公開 repository 邊界
 
