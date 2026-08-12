@@ -83,7 +83,9 @@ public static class MultiCharacterTurnBuilder
                     throw new SpeechPlanIntegrityException(IntegrityMismatchReasonCode);
                 }
 
-                var (voice, rate, pitch, volume) = ResolveVoice(castRevision, segment);
+                var contextStart = Math.Max(0, segment.StartOffset - 40);
+                var precedingContext = sourceText[contextStart..segment.StartOffset];
+                var (voice, rate, pitch, volume) = ResolveVoice(castRevision, segment, text, precedingContext);
                 var sameVoiceAsPrevious = voice == previousVoice
                     && rate == previousRate
                     && pitch == previousPitch
@@ -120,7 +122,9 @@ public static class MultiCharacterTurnBuilder
 
     private static (string Voice, string Rate, string Pitch, string Volume) ResolveVoice(
         NarrationCastRevision castRevision,
-        ConfirmedSpeechSegment segment)
+        ConfirmedSpeechSegment segment,
+        string segmentText,
+        string precedingContext)
     {
         if (segment.Kind == SpeechSegmentTurnKind.Dialogue && segment.CharacterId is Guid characterId)
         {
@@ -128,7 +132,13 @@ public static class MultiCharacterTurnBuilder
                 .SingleOrDefault(candidate => candidate.CharacterId == characterId);
             if (assignment is not null)
             {
-                return (assignment.Voice, assignment.Rate, assignment.Pitch, assignment.Volume);
+                var emotion = DialogueEmotionClassifier.Classify(segmentText, precedingContext);
+                var (rateDelta, pitchDelta, volumeDelta) = DialogueEmotionClassifier.ToDeltas(emotion);
+                return (
+                    assignment.Voice,
+                    SynthesisParameterMath.CombinePercent(assignment.Rate, rateDelta),
+                    SynthesisParameterMath.CombineHz(assignment.Pitch, pitchDelta),
+                    SynthesisParameterMath.CombinePercent(assignment.Volume, volumeDelta));
             }
         }
 

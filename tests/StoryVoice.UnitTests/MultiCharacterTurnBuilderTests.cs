@@ -120,6 +120,25 @@ public sealed class MultiCharacterTurnBuilderTests
     }
 
     [Fact]
+    public void An_angry_line_gets_a_distinct_rate_and_pitch_from_a_neutral_line_by_the_same_character_and_they_do_not_merge()
+    {
+        var castRevision = BuildCastRevision(narratorVoice: "narrator-voice", aliceVoice: "alice-voice");
+        var chapter = BuildConfirmedChapter(
+            0,
+            "序章",
+            "「你回來了？」艾莉絲說。「你給我閉嘴！！」艾莉絲吼道。",
+            AliceId);
+
+        var turns = MultiCharacterTurnBuilder.BuildTurns(castRevision, [chapter]);
+
+        var aliceTurns = turns.Where(turn => turn.Voice == "alice-voice").ToArray();
+        Assert.Equal(2, aliceTurns.Length);
+        Assert.Equal("+0%", aliceTurns[0].Rate);
+        Assert.Equal("+10%", aliceTurns[1].Rate);
+        Assert.Equal("-1Hz", aliceTurns[1].Pitch);
+    }
+
+    [Fact]
     public void Throws_integrity_exception_for_an_empty_chapter_plan_list()
     {
         var castRevision = BuildCastRevision(narratorVoice: "narrator-voice", aliceVoice: "alice-voice");
