@@ -254,7 +254,7 @@ public sealed class NarrationCastRevision
         Status = NarrationCastRevisionStatus.Historical;
     }
 
-    private static string ComputeFingerprint(
+    internal static string ComputeFingerprint(
         string narratorProvider,
         string narratorProviderVersion,
         string narratorVoice,

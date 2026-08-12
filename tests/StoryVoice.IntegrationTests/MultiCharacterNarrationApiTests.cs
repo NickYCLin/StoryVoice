@@ -164,6 +164,68 @@ public sealed class MultiCharacterNarrationApiTests(ApiFactory factory) : IClass
         Assert.Equal(SeriesCastRebuildBatchStatus.ReadyToActivate, repaired.Status);
     }
 
+    [Fact]
+    public async Task Retrying_after_a_failed_batch_reuses_the_unchanged_cast_revision_instead_of_violating_the_fingerprint_index()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var owner = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        var book = await ImportTextAsync(owner, "synthetic retry rebuild text", cancellationToken);
+        var series = await CreateSeriesAsync(owner, cancellationToken);
+        await AddBookAsync(owner, series.Id, book.Id, cancellationToken);
+        await AddCharacterAsync(owner, series.Id, cancellationToken);
+        await ConfirmOnlyChapterPlanAsync(owner, series.Id, book, cancellationToken);
+
+        using var firstResponse = await owner.PostWithCsrfAsync(
+            $"/api/series/{series.Id}/narration-rebuilds",
+            new { rightsAttested = true },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.Created, firstResponse.StatusCode);
+        var firstBatch = await firstResponse.Content.ReadFromJsonAsync<SeriesNarrationRebuildResponse>(cancellationToken);
+        Assert.NotNull(firstBatch);
+
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+            var stagedJob = await db.NarrationJobs.SingleAsync(
+                job => job.RebuildBatchId == firstBatch!.Id,
+                cancellationToken);
+            var failedAt = DateTimeOffset.UtcNow;
+            stagedJob.Claim("fingerprint-retry-test", failedAt.AddMinutes(5), failedAt);
+            stagedJob.FailPermanently("synthetic_test_failure");
+            await db.SaveChangesAsync(cancellationToken);
+
+            var progress = scope.ServiceProvider.GetRequiredService<IStagedNarrationBatchProgressService>();
+            await progress.SynchronizeAsync(stagedJob.Id, cancellationToken);
+
+            var failedBatch = await db.SeriesCastRebuildBatches.SingleAsync(
+                candidate => candidate.Id == firstBatch!.Id,
+                cancellationToken);
+            Assert.Equal(SeriesCastRebuildBatchStatus.Failed, failedBatch.Status);
+        }
+
+        // The cast (narrator + character voices) never changed between attempts, so retrying
+        // must reuse the still-Draft cast revision from the failed attempt rather than trying to
+        // insert a second row with the same (OwnerId, SeriesId, Fingerprint).
+        using var retryResponse = await owner.PostWithCsrfAsync(
+            $"/api/series/{series.Id}/narration-rebuilds",
+            new { rightsAttested = true },
+            cancellationToken);
+        var retryBody = await retryResponse.Content.ReadAsStringAsync(cancellationToken);
+        Assert.True(retryResponse.StatusCode == HttpStatusCode.Created, $"Unexpected response: {retryBody}");
+        var retryBatch = JsonSerializer.Deserialize<SeriesNarrationRebuildResponse>(
+            retryBody,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        Assert.NotNull(retryBatch);
+        Assert.Equal(firstBatch!.DraftCastRevisionId, retryBatch!.DraftCastRevisionId);
+
+        await using var verifyScope = factory.Services.CreateAsyncScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+        var revisionCount = await verifyDb.NarrationCastRevisions
+            .Where(revision => revision.SeriesId == series.Id)
+            .CountAsync(cancellationToken);
+        Assert.Equal(1, revisionCount);
+    }
+
     private static async Task AssertSingleVoiceRetiredAsync(
         HttpResponseMessage response,
         CancellationToken cancellationToken)

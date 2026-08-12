@@ -1,4 +1,5 @@
 using System.Data;
+using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Options;
@@ -100,19 +101,14 @@ internal sealed class SeriesNarrationService(
             var configuration = compositionOptions.Value;
             ValidateComposition(configuration);
             var now = DateTimeOffset.UtcNow;
-            var castRevisionId = Guid.NewGuid();
-            var nextCastRevisionNumber = await dbContext.NarrationCastRevisions
-                .Where(revision => revision.OwnerId == ownerId && revision.SeriesId == seriesId)
-                .Select(revision => revision.RevisionNumber)
-                .OrderByDescending(revisionNumber => revisionNumber)
-                .FirstOrDefaultAsync(cancellationToken) + 1;
-            var assignments = series.Characters
+            var tentativeCastRevisionId = Guid.NewGuid();
+            var tentativeAssignments = series.Characters
                 .OrderBy(character => character.Id)
                 .Select(character => NarrationCastAssignment.Create(
                     Guid.NewGuid(),
                     ownerId,
                     seriesId,
-                    castRevisionId,
+                    tentativeCastRevisionId,
                     character.Id,
                     character.CanonicalName,
                     character.VoiceProvider,
@@ -122,11 +118,12 @@ internal sealed class SeriesNarrationService(
                     character.Pitch,
                     character.Volume))
                 .ToArray();
-            var castRevision = NarrationCastRevision.Create(
-                castRevisionId,
-                ownerId,
-                seriesId,
-                nextCastRevisionNumber,
+            var canonicalAssignments = tentativeAssignments
+                .OrderBy(
+                    assignment => assignment.CharacterId.ToString("N", CultureInfo.InvariantCulture),
+                    StringComparer.Ordinal)
+                .ToArray();
+            var prospectiveFingerprint = NarrationCastRevision.ComputeFingerprint(
                 series.NarratorProvider,
                 configuration.ProviderVersion,
                 series.NarratorVoice,
@@ -137,8 +134,51 @@ internal sealed class SeriesNarrationService(
                 configuration.ChapterPauseMs,
                 configuration.CompositionVersion,
                 configuration.FfmpegProfile,
-                now,
-                assignments);
+                canonicalAssignments);
+
+            // A voice cast that hasn't changed since a previous (e.g. failed) attempt hashes to
+            // the same fingerprint; UX_ncast_revs_fingerprint would reject a second insert. Reuse
+            // that still-unused draft instead of minting a duplicate.
+            var reusableRevisionId = await dbContext.NarrationCastRevisions
+                .Where(revision => revision.OwnerId == ownerId
+                    && revision.SeriesId == seriesId
+                    && revision.Fingerprint == prospectiveFingerprint
+                    && revision.Status == NarrationCastRevisionStatus.Draft)
+                .Select(revision => (Guid?)revision.Id)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            Guid castRevisionId;
+            if (reusableRevisionId is Guid existingRevisionId)
+            {
+                castRevisionId = existingRevisionId;
+            }
+            else
+            {
+                castRevisionId = tentativeCastRevisionId;
+                var nextCastRevisionNumber = await dbContext.NarrationCastRevisions
+                    .Where(revision => revision.OwnerId == ownerId && revision.SeriesId == seriesId)
+                    .Select(revision => revision.RevisionNumber)
+                    .OrderByDescending(revisionNumber => revisionNumber)
+                    .FirstOrDefaultAsync(cancellationToken) + 1;
+                var castRevision = NarrationCastRevision.Create(
+                    castRevisionId,
+                    ownerId,
+                    seriesId,
+                    nextCastRevisionNumber,
+                    series.NarratorProvider,
+                    configuration.ProviderVersion,
+                    series.NarratorVoice,
+                    series.NarratorRate,
+                    series.NarratorPitch,
+                    series.NarratorVolume,
+                    series.DefaultSpeakerPauseMs,
+                    configuration.ChapterPauseMs,
+                    configuration.CompositionVersion,
+                    configuration.FfmpegProfile,
+                    now,
+                    tentativeAssignments);
+                dbContext.NarrationCastRevisions.Add(castRevision);
+            }
 
             var batchId = Guid.NewGuid();
             var batch = SeriesCastRebuildBatch.Create(
@@ -192,7 +232,6 @@ internal sealed class SeriesNarrationService(
                     plan.Revision.Id)));
             }
 
-            dbContext.NarrationCastRevisions.Add(castRevision);
             dbContext.SeriesCastRebuildBatches.Add(batch);
             dbContext.NarrationJobs.AddRange(stagedJobs);
             dbContext.NarrationJobSpeechPlans.AddRange(planLinks);
