@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using StoryVoice.Domain.Characters;
 using StoryVoice.Domain.Narrations;
-using StoryVoice.Domain.Series;
 
 namespace StoryVoice.Infrastructure.Persistence;
 
@@ -34,7 +34,7 @@ internal sealed class CharacterVoiceProfileConfiguration : IEntityTypeConfigurat
 
         builder.HasKey(profile => profile.Id);
         builder.Property(profile => profile.Id).ValueGeneratedNever();
-        builder.HasAlternateKey(profile => new { profile.OwnerId, profile.SeriesId, profile.Id })
+        builder.HasAlternateKey(profile => new { profile.OwnerId, profile.CharacterProfileId, profile.Id })
             .HasName("AK_cvp_scope");
 
         builder.Property(profile => profile.Kind)
@@ -60,24 +60,24 @@ internal sealed class CharacterVoiceProfileConfiguration : IEntityTypeConfigurat
             .HasMaxLength(32)
             .IsRequired();
 
-        builder.HasIndex(profile => new { profile.OwnerId, profile.CharacterId, profile.Kind })
+        builder.HasIndex(profile => new { profile.OwnerId, profile.CharacterProfileId, profile.Kind })
             .HasDatabaseName("UX_cvp_base_per_character")
             .IsUnique()
             .HasFilter("\"Kind\" = 'Base'");
-        builder.HasIndex(profile => new { profile.OwnerId, profile.CharacterId, profile.SceneCode })
+        builder.HasIndex(profile => new { profile.OwnerId, profile.CharacterProfileId, profile.SceneCode })
             .HasDatabaseName("UX_cvp_scene_per_character")
             .IsUnique()
             .HasFilter("\"SceneCode\" IS NOT NULL");
-        builder.HasIndex(profile => new { profile.OwnerId, profile.CharacterId, profile.Status })
+        builder.HasIndex(profile => new { profile.OwnerId, profile.CharacterProfileId, profile.Status })
             .HasDatabaseName("IX_cvp_character_status");
         builder.HasIndex(profile => profile.VoiceProfileTaskId)
             .HasDatabaseName("IX_cvp_task");
 
-        builder.HasOne<SeriesCharacter>()
+        builder.HasOne<CharacterProfile>()
             .WithMany()
-            .HasForeignKey(profile => new { profile.OwnerId, profile.SeriesId, profile.CharacterId })
-            .HasPrincipalKey(character => new { character.OwnerId, character.SeriesId, character.Id })
+            .HasForeignKey(profile => new { profile.OwnerId, profile.CharacterProfileId })
+            .HasPrincipalKey(character => new { character.OwnerId, character.Id })
             .OnDelete(DeleteBehavior.Cascade)
-            .HasConstraintName("FK_cvp_character_scope");
+            .HasConstraintName("FK_cvp_character_profile");
     }
 }

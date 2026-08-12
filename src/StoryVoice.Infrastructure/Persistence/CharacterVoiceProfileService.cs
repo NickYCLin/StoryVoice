@@ -1,18 +1,20 @@
 using Microsoft.EntityFrameworkCore;
 using StoryVoice.Application.Authentication;
 using StoryVoice.Application.Narrations;
+using StoryVoice.Domain.Characters;
 using StoryVoice.Domain.Narrations;
-using StoryVoice.Domain.Series;
 using StoryVoice.Infrastructure.Narrations;
 
 namespace StoryVoice.Infrastructure.Persistence;
 
 /// <summary>
-/// Owner-scoped lifecycle service for <see cref="CharacterVoiceProfile"/>. Design-mode profiles are
-/// ready the moment they're created (no 3wa round trip needed); Clone-mode profiles proxy the 3wa
-/// Cluster API's profile_prepare/status/confirm sequence, keeping the locally stored WAV + confirmed
-/// transcript as the canonical, rebuildable asset behind whatever opaque task id the pinned station
-/// currently has.
+/// Owner-scoped lifecycle service for <see cref="CharacterVoiceProfile"/>, hanging off a
+/// <see cref="CharacterProfile"/> library entry rather than any one series — the same character's
+/// voices are reused everywhere that character is cast. Design-mode profiles are ready the moment
+/// they're created (no 3wa round trip needed); Clone-mode profiles proxy the 3wa Cluster API's
+/// profile_prepare/status/confirm sequence, keeping the locally stored WAV + confirmed transcript
+/// as the canonical, rebuildable asset behind whatever opaque task id the pinned station currently
+/// has.
 /// </summary>
 internal sealed class CharacterVoiceProfileService(
     StoryVoiceDbContext dbContext,
@@ -21,21 +23,18 @@ internal sealed class CharacterVoiceProfileService(
     IThreeWaVoiceProfileClient threeWaClient) : ICharacterVoiceProfileService
 {
     public async Task<IReadOnlyList<CharacterVoiceProfileResponse>?> ListAsync(
-        Guid seriesId,
-        Guid characterId,
+        Guid characterProfileId,
         CancellationToken cancellationToken)
     {
         var ownerId = EnsureCurrentOwnerId();
-        var character = await LoadCharacterAsync(ownerId, seriesId, characterId, cancellationToken);
+        var character = await LoadCharacterProfileAsync(ownerId, characterProfileId, cancellationToken);
         if (character is null)
         {
             return null;
         }
 
         var profiles = await dbContext.CharacterVoiceProfiles
-            .Where(profile => profile.OwnerId == ownerId
-                && profile.SeriesId == seriesId
-                && profile.CharacterId == characterId)
+            .Where(profile => profile.OwnerId == ownerId && profile.CharacterProfileId == characterProfileId)
             .OrderBy(profile => profile.Kind)
             .ThenBy(profile => profile.SceneCode)
             .ToListAsync(cancellationToken);
@@ -43,8 +42,7 @@ internal sealed class CharacterVoiceProfileService(
     }
 
     public async Task<CharacterVoiceProfileResponse?> CreateClonedAsync(
-        Guid seriesId,
-        Guid characterId,
+        Guid characterProfileId,
         string kind,
         string? sceneCode,
         string consentType,
@@ -54,13 +52,13 @@ internal sealed class CharacterVoiceProfileService(
     {
         var ownerId = EnsureCurrentOwnerId();
         var parsedKind = ParseKind(kind);
-        var character = await LoadCharacterAsync(ownerId, seriesId, characterId, cancellationToken);
+        var character = await LoadCharacterProfileAsync(ownerId, characterProfileId, cancellationToken);
         if (character is null)
         {
             return null;
         }
 
-        await EnsureNoDuplicateAsync(ownerId, characterId, parsedKind, sceneCode, cancellationToken);
+        await EnsureNoDuplicateAsync(ownerId, characterProfileId, parsedKind, sceneCode, cancellationToken);
 
         var stored = await audioStorage.SaveAsync(referenceAudio, referenceAudioFileName, cancellationToken);
         try
@@ -69,8 +67,7 @@ internal sealed class CharacterVoiceProfileService(
             var profile = CharacterVoiceProfile.CreateClone(
                 Guid.NewGuid(),
                 ownerId,
-                seriesId,
-                characterId,
+                characterProfileId,
                 parsedKind,
                 sceneCode,
                 consentType,
@@ -111,8 +108,7 @@ internal sealed class CharacterVoiceProfileService(
     }
 
     public async Task<CharacterVoiceProfileResponse?> CreateDesignedAsync(
-        Guid seriesId,
-        Guid characterId,
+        Guid characterProfileId,
         string kind,
         string? sceneCode,
         CreateDesignedVoiceProfileRequest request,
@@ -121,20 +117,19 @@ internal sealed class CharacterVoiceProfileService(
         ArgumentNullException.ThrowIfNull(request);
         var ownerId = EnsureCurrentOwnerId();
         var parsedKind = ParseKind(kind);
-        var character = await LoadCharacterAsync(ownerId, seriesId, characterId, cancellationToken);
+        var character = await LoadCharacterProfileAsync(ownerId, characterProfileId, cancellationToken);
         if (character is null)
         {
             return null;
         }
 
-        await EnsureNoDuplicateAsync(ownerId, characterId, parsedKind, sceneCode, cancellationToken);
+        await EnsureNoDuplicateAsync(ownerId, characterProfileId, parsedKind, sceneCode, cancellationToken);
 
         var now = DateTimeOffset.UtcNow;
         var profile = CharacterVoiceProfile.CreateDesign(
             Guid.NewGuid(),
             ownerId,
-            seriesId,
-            characterId,
+            characterProfileId,
             parsedKind,
             sceneCode,
             request.VoicePrompt,
@@ -146,12 +141,12 @@ internal sealed class CharacterVoiceProfileService(
     }
 
     public async Task<CharacterVoiceProfileResponse?> RefreshStatusAsync(
-        Guid seriesId,
+        Guid characterProfileId,
         Guid profileId,
         CancellationToken cancellationToken)
     {
         var ownerId = EnsureCurrentOwnerId();
-        var profile = await LoadProfileAsync(ownerId, seriesId, profileId, cancellationToken);
+        var profile = await LoadProfileAsync(ownerId, characterProfileId, profileId, cancellationToken);
         if (profile is null)
         {
             return null;
@@ -179,14 +174,14 @@ internal sealed class CharacterVoiceProfileService(
     }
 
     public async Task<CharacterVoiceProfileResponse?> ConfirmTranscriptAsync(
-        Guid seriesId,
+        Guid characterProfileId,
         Guid profileId,
         ConfirmVoiceProfileTranscriptRequest request,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         var ownerId = EnsureCurrentOwnerId();
-        var profile = await LoadProfileAsync(ownerId, seriesId, profileId, cancellationToken);
+        var profile = await LoadProfileAsync(ownerId, characterProfileId, profileId, cancellationToken);
         if (profile is null)
         {
             return null;
@@ -199,18 +194,18 @@ internal sealed class CharacterVoiceProfileService(
     }
 
     public async Task<CharacterVoiceProfileResponse?> RebuildAsync(
-        Guid seriesId,
+        Guid characterProfileId,
         Guid profileId,
         CancellationToken cancellationToken)
     {
         var ownerId = EnsureCurrentOwnerId();
-        var profile = await LoadProfileAsync(ownerId, seriesId, profileId, cancellationToken);
+        var profile = await LoadProfileAsync(ownerId, characterProfileId, profileId, cancellationToken);
         if (profile is null)
         {
             return null;
         }
 
-        var character = await LoadCharacterAsync(ownerId, seriesId, profile.CharacterId, cancellationToken)
+        var character = await LoadCharacterProfileAsync(ownerId, characterProfileId, cancellationToken)
             ?? throw new InvalidOperationException("找不到這個聲線所屬的角色。");
 
         await using var uploadStream = File.OpenRead(audioStorage.ResolveFullPath(profile.ReferenceAudioRelativePath!));
@@ -228,10 +223,10 @@ internal sealed class CharacterVoiceProfileService(
         return ToResponse(profile);
     }
 
-    public async Task<bool> DeleteAsync(Guid seriesId, Guid profileId, CancellationToken cancellationToken)
+    public async Task<bool> DeleteAsync(Guid characterProfileId, Guid profileId, CancellationToken cancellationToken)
     {
         var ownerId = EnsureCurrentOwnerId();
-        var profile = await LoadProfileAsync(ownerId, seriesId, profileId, cancellationToken);
+        var profile = await LoadProfileAsync(ownerId, characterProfileId, profileId, cancellationToken);
         if (profile is null)
         {
             return false;
@@ -248,12 +243,12 @@ internal sealed class CharacterVoiceProfileService(
     }
 
     public async Task<CharacterVoiceProfileAudio?> GetReferenceAudioAsync(
-        Guid seriesId,
+        Guid characterProfileId,
         Guid profileId,
         CancellationToken cancellationToken)
     {
         var ownerId = EnsureCurrentOwnerId();
-        var profile = await LoadProfileAsync(ownerId, seriesId, profileId, cancellationToken);
+        var profile = await LoadProfileAsync(ownerId, characterProfileId, profileId, cancellationToken);
         if (profile?.ReferenceAudioRelativePath is null)
         {
             return null;
@@ -264,36 +259,35 @@ internal sealed class CharacterVoiceProfileService(
             "audio/wav");
     }
 
-    private async Task<SeriesCharacter?> LoadCharacterAsync(
+    private async Task<CharacterProfile?> LoadCharacterProfileAsync(
         Guid ownerId,
-        Guid seriesId,
-        Guid characterId,
+        Guid characterProfileId,
         CancellationToken cancellationToken) =>
-        await dbContext.SeriesCharacters.SingleOrDefaultAsync(
-            character => character.OwnerId == ownerId
-                && character.SeriesId == seriesId
-                && character.Id == characterId,
+        await dbContext.CharacterProfiles.SingleOrDefaultAsync(
+            character => character.OwnerId == ownerId && character.Id == characterProfileId,
             cancellationToken);
 
     private async Task<CharacterVoiceProfile?> LoadProfileAsync(
         Guid ownerId,
-        Guid seriesId,
+        Guid characterProfileId,
         Guid profileId,
         CancellationToken cancellationToken) =>
         await dbContext.CharacterVoiceProfiles.SingleOrDefaultAsync(
-            profile => profile.OwnerId == ownerId && profile.SeriesId == seriesId && profile.Id == profileId,
+            profile => profile.OwnerId == ownerId
+                && profile.CharacterProfileId == characterProfileId
+                && profile.Id == profileId,
             cancellationToken);
 
     private async Task EnsureNoDuplicateAsync(
         Guid ownerId,
-        Guid characterId,
+        Guid characterProfileId,
         CharacterVoiceProfileKind kind,
         string? sceneCode,
         CancellationToken cancellationToken)
     {
         var exists = await dbContext.CharacterVoiceProfiles.AnyAsync(
             profile => profile.OwnerId == ownerId
-                && profile.CharacterId == characterId
+                && profile.CharacterProfileId == characterProfileId
                 && (kind == CharacterVoiceProfileKind.Base
                     ? profile.Kind == CharacterVoiceProfileKind.Base
                     : profile.SceneCode == sceneCode),
@@ -325,7 +319,7 @@ internal sealed class CharacterVoiceProfileService(
     private static CharacterVoiceProfileResponse ToResponse(CharacterVoiceProfile profile) =>
         new(
             profile.Id,
-            profile.CharacterId,
+            profile.CharacterProfileId,
             profile.Kind.ToString(),
             profile.SceneCode,
             profile.Mode.ToString(),

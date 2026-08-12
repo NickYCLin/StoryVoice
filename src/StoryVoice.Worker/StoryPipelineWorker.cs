@@ -229,12 +229,16 @@ public sealed class StoryPipelineWorker(
                         job.Id,
                         content,
                         stoppingToken);
-                    var voiceProfiles = await LoadCharacterVoiceProfilesAsync(
+                    var (voiceProfiles, characterProfileIdsByCharacterId) = await LoadCharacterVoiceProfilesAsync(
                         db,
                         job.OwnerId,
                         job.SeriesId.Value,
                         stoppingToken);
-                    var turns = MultiCharacterTurnBuilder.BuildTurns(castRevision, chapterPlans, voiceProfiles);
+                    var turns = MultiCharacterTurnBuilder.BuildTurns(
+                        castRevision,
+                        chapterPlans,
+                        voiceProfiles,
+                        characterProfileIdsByCharacterId);
                     await multiVoiceDispatcher.SynthesizeAsync(
                         castRevision.NarratorProvider,
                         new MultiVoiceNarrationRequest(turns),
@@ -385,15 +389,34 @@ public sealed class StoryPipelineWorker(
             ?? throw new InvalidOperationException(MultiCharacterTurnBuilder.IntegrityMismatchReasonCode);
     }
 
-    private static async Task<IReadOnlyList<CharacterVoiceProfile>> LoadCharacterVoiceProfilesAsync(
-        StoryVoiceDbContext db,
-        Guid ownerId,
-        Guid seriesId,
-        CancellationToken cancellationToken) =>
-        await db.CharacterVoiceProfiles
+    private static async Task<(IReadOnlyList<CharacterVoiceProfile> Profiles, IReadOnlyDictionary<Guid, Guid> CharacterProfileIdsByCharacterId)>
+        LoadCharacterVoiceProfilesAsync(
+            StoryVoiceDbContext db,
+            Guid ownerId,
+            Guid seriesId,
+            CancellationToken cancellationToken)
+    {
+        var characterProfileIdsByCharacterId = await db.SeriesCharacters
             .AsNoTracking()
-            .Where(profile => profile.OwnerId == ownerId && profile.SeriesId == seriesId)
+            .Where(character => character.OwnerId == ownerId
+                && character.SeriesId == seriesId
+                && character.CharacterProfileId != null)
+            .ToDictionaryAsync(
+                character => character.Id,
+                character => character.CharacterProfileId!.Value,
+                cancellationToken);
+        if (characterProfileIdsByCharacterId.Count == 0)
+        {
+            return ([], characterProfileIdsByCharacterId);
+        }
+
+        var characterProfileIds = characterProfileIdsByCharacterId.Values.Distinct().ToArray();
+        var profiles = await db.CharacterVoiceProfiles
+            .AsNoTracking()
+            .Where(profile => profile.OwnerId == ownerId && characterProfileIds.Contains(profile.CharacterProfileId))
             .ToListAsync(cancellationToken);
+        return (profiles, characterProfileIdsByCharacterId);
+    }
 
     private static async Task<IReadOnlyList<ChapterPlanSource>> LoadChapterPlanSourcesAsync(
         StoryVoiceDbContext db,

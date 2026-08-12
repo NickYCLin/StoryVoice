@@ -72,8 +72,7 @@ public sealed class CharacterVoiceProfile
     private CharacterVoiceProfile(
         Guid id,
         Guid ownerId,
-        Guid seriesId,
-        Guid characterId,
+        Guid characterProfileId,
         CharacterVoiceProfileKind kind,
         string? sceneCode,
         CharacterVoiceProfileMode mode,
@@ -86,13 +85,11 @@ public sealed class CharacterVoiceProfile
     {
         EnsureId(id, nameof(id));
         EnsureId(ownerId, nameof(ownerId));
-        EnsureId(seriesId, nameof(seriesId));
-        EnsureId(characterId, nameof(characterId));
+        EnsureId(characterProfileId, nameof(characterProfileId));
 
         Id = id;
         OwnerId = ownerId;
-        SeriesId = seriesId;
-        CharacterId = characterId;
+        CharacterProfileId = characterProfileId;
         Kind = kind;
         SceneCode = sceneCode;
         Mode = mode;
@@ -110,8 +107,7 @@ public sealed class CharacterVoiceProfile
 
     public Guid Id { get; private set; }
     public Guid OwnerId { get; private set; }
-    public Guid SeriesId { get; private set; }
-    public Guid CharacterId { get; private set; }
+    public Guid CharacterProfileId { get; private set; }
     public CharacterVoiceProfileKind Kind { get; private set; }
     public string? SceneCode { get; private set; }
     public CharacterVoiceProfileMode Mode { get; private set; }
@@ -132,8 +128,7 @@ public sealed class CharacterVoiceProfile
     public static CharacterVoiceProfile CreateClone(
         Guid id,
         Guid ownerId,
-        Guid seriesId,
-        Guid characterId,
+        Guid characterProfileId,
         CharacterVoiceProfileKind kind,
         string? sceneCode,
         string consentType,
@@ -154,8 +149,7 @@ public sealed class CharacterVoiceProfile
         return new CharacterVoiceProfile(
             id,
             ownerId,
-            seriesId,
-            characterId,
+            characterProfileId,
             kind,
             sceneCode,
             CharacterVoiceProfileMode.Clone,
@@ -170,8 +164,7 @@ public sealed class CharacterVoiceProfile
     public static CharacterVoiceProfile CreateDesign(
         Guid id,
         Guid ownerId,
-        Guid seriesId,
-        Guid characterId,
+        Guid characterProfileId,
         CharacterVoiceProfileKind kind,
         string? sceneCode,
         string voicePromptText,
@@ -183,8 +176,7 @@ public sealed class CharacterVoiceProfile
         var profile = new CharacterVoiceProfile(
             id,
             ownerId,
-            seriesId,
-            characterId,
+            characterProfileId,
             kind,
             sceneCode,
             CharacterVoiceProfileMode.Design,

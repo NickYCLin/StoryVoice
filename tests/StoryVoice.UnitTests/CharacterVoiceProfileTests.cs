@@ -5,16 +5,14 @@ namespace StoryVoice.UnitTests;
 public sealed class CharacterVoiceProfileTests
 {
     private static readonly Guid OwnerId = Guid.NewGuid();
-    private static readonly Guid SeriesId = Guid.NewGuid();
-    private static readonly Guid CharacterId = Guid.NewGuid();
+    private static readonly Guid CharacterProfileId = Guid.NewGuid();
     private static readonly DateTimeOffset Now = DateTimeOffset.UtcNow;
 
     private static CharacterVoiceProfile CreateBaseClone() =>
         CharacterVoiceProfile.CreateClone(
             Guid.NewGuid(),
             OwnerId,
-            SeriesId,
-            CharacterId,
+            CharacterProfileId,
             CharacterVoiceProfileKind.Base,
             sceneCode: null,
             CharacterVoiceConsentTypes.SelfRecorded,
@@ -38,7 +36,7 @@ public sealed class CharacterVoiceProfileTests
     public void CreateClone_rejects_an_unknown_consent_type()
     {
         Assert.Throws<ArgumentException>(() => CharacterVoiceProfile.CreateClone(
-            Guid.NewGuid(), OwnerId, SeriesId, CharacterId, CharacterVoiceProfileKind.Base, null,
+            Guid.NewGuid(), OwnerId, CharacterProfileId, CharacterVoiceProfileKind.Base, null,
             "totally_made_up", "voices/a.wav", new string('a', 64), Guid.NewGuid(), Now));
     }
 
@@ -46,7 +44,7 @@ public sealed class CharacterVoiceProfileTests
     public void CreateClone_rejects_a_malformed_sha256()
     {
         Assert.Throws<ArgumentException>(() => CharacterVoiceProfile.CreateClone(
-            Guid.NewGuid(), OwnerId, SeriesId, CharacterId, CharacterVoiceProfileKind.Base, null,
+            Guid.NewGuid(), OwnerId, CharacterProfileId, CharacterVoiceProfileKind.Base, null,
             CharacterVoiceConsentTypes.SelfRecorded, "voices/a.wav", "not-a-hash", Guid.NewGuid(), Now));
     }
 
@@ -54,7 +52,7 @@ public sealed class CharacterVoiceProfileTests
     public void CreateClone_rejects_a_scene_code_on_a_base_profile()
     {
         Assert.Throws<ArgumentException>(() => CharacterVoiceProfile.CreateClone(
-            Guid.NewGuid(), OwnerId, SeriesId, CharacterId, CharacterVoiceProfileKind.Base, "nervous",
+            Guid.NewGuid(), OwnerId, CharacterProfileId, CharacterVoiceProfileKind.Base, "nervous",
             CharacterVoiceConsentTypes.SelfRecorded, "voices/a.wav", new string('a', 64), Guid.NewGuid(), Now));
     }
 
@@ -62,7 +60,7 @@ public sealed class CharacterVoiceProfileTests
     public void CreateClone_rejects_a_missing_scene_code_on_a_scene_profile()
     {
         Assert.Throws<ArgumentException>(() => CharacterVoiceProfile.CreateClone(
-            Guid.NewGuid(), OwnerId, SeriesId, CharacterId, CharacterVoiceProfileKind.Scene, null,
+            Guid.NewGuid(), OwnerId, CharacterProfileId, CharacterVoiceProfileKind.Scene, null,
             CharacterVoiceConsentTypes.SelfRecorded, "voices/a.wav", new string('a', 64), Guid.NewGuid(), Now));
     }
 
@@ -70,7 +68,7 @@ public sealed class CharacterVoiceProfileTests
     public void CreateClone_rejects_an_unrecognized_scene_code()
     {
         Assert.Throws<ArgumentException>(() => CharacterVoiceProfile.CreateClone(
-            Guid.NewGuid(), OwnerId, SeriesId, CharacterId, CharacterVoiceProfileKind.Scene, "furious",
+            Guid.NewGuid(), OwnerId, CharacterProfileId, CharacterVoiceProfileKind.Scene, "furious",
             CharacterVoiceConsentTypes.SelfRecorded, "voices/a.wav", new string('a', 64), Guid.NewGuid(), Now));
     }
 
@@ -78,7 +76,7 @@ public sealed class CharacterVoiceProfileTests
     public void CreateDesign_is_immediately_ready_with_no_consent_lifecycle()
     {
         var profile = CharacterVoiceProfile.CreateDesign(
-            Guid.NewGuid(), OwnerId, SeriesId, CharacterId, CharacterVoiceProfileKind.Scene, "happy",
+            Guid.NewGuid(), OwnerId, CharacterProfileId, CharacterVoiceProfileKind.Scene, "happy",
             "一位活潑開朗的年輕女性，語速稍快。", Now);
 
         Assert.Equal(CharacterVoiceProfileStatus.Ready, profile.Status);
@@ -158,7 +156,7 @@ public sealed class CharacterVoiceProfileTests
     public void Clone_only_operations_are_rejected_on_a_design_profile()
     {
         var profile = CharacterVoiceProfile.CreateDesign(
-            Guid.NewGuid(), OwnerId, SeriesId, CharacterId, CharacterVoiceProfileKind.Base, null,
+            Guid.NewGuid(), OwnerId, CharacterProfileId, CharacterVoiceProfileKind.Base, null,
             "沉穩的台灣男性技師。", Now);
 
         Assert.Throws<InvalidOperationException>(() => profile.AttachDraftTranscript("t", "x", Now));

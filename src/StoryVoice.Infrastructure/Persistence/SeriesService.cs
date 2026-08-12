@@ -120,6 +120,8 @@ internal sealed class SeriesService(
         EnsureId(seriesId, nameof(seriesId));
         ArgumentNullException.ThrowIfNull(request);
         var voice = ResolveVoice(request.VoiceProvider, request.Voice);
+        var ownerId = EnsureCurrentOwnerId();
+        await EnsureCharacterProfileOwnedAsync(ownerId, request.CharacterProfileId, cancellationToken);
         var series = await repository.GetForMutationAsync(seriesId, cancellationToken);
         if (series is null)
         {
@@ -134,7 +136,8 @@ internal sealed class SeriesService(
             request.Rate,
             request.Pitch,
             request.Volume,
-            request.Notes);
+            request.Notes,
+            request.CharacterProfileId);
         await SaveChangesAsync(cancellationToken);
         return await ToDetailsAsync(series, cancellationToken);
     }
@@ -149,6 +152,8 @@ internal sealed class SeriesService(
         EnsureId(characterId, nameof(characterId));
         ArgumentNullException.ThrowIfNull(request);
         var voice = ResolveVoice(request.VoiceProvider, request.Voice);
+        var ownerId = EnsureCurrentOwnerId();
+        await EnsureCharacterProfileOwnedAsync(ownerId, request.CharacterProfileId, cancellationToken);
         var series = await repository.GetForMutationAsync(seriesId, cancellationToken);
         if (series is null || series.Characters.All(character => character.Id != characterId))
         {
@@ -164,7 +169,8 @@ internal sealed class SeriesService(
             request.Rate,
             request.Pitch,
             request.Volume,
-            request.Notes);
+            request.Notes,
+            request.CharacterProfileId);
         await SaveChangesAsync(cancellationToken);
         return await ToDetailsAsync(series, cancellationToken);
     }
@@ -275,6 +281,7 @@ internal sealed class SeriesService(
                     character.Pitch,
                     character.Volume,
                     character.Notes,
+                    character.CharacterProfileId,
                     aliasesByCharacter.GetValueOrDefault(
                         character.Id,
                         Array.Empty<StorySeriesAliasResponse>()),
@@ -293,6 +300,25 @@ internal sealed class SeriesService(
         }
 
         return currentUser.UserId;
+    }
+
+    private async Task EnsureCharacterProfileOwnedAsync(
+        Guid ownerId,
+        Guid? characterProfileId,
+        CancellationToken cancellationToken)
+    {
+        if (characterProfileId is null)
+        {
+            return;
+        }
+
+        var exists = await dbContext.CharacterProfiles.AnyAsync(
+            profile => profile.OwnerId == ownerId && profile.Id == characterProfileId,
+            cancellationToken);
+        if (!exists)
+        {
+            throw new InvalidOperationException("找不到指定的角色庫角色。");
+        }
     }
 
     private static void EnsureId(Guid value, string parameterName)

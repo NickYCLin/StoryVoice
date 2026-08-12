@@ -24,7 +24,8 @@ public sealed record AddSeriesCharacterRequest(
     string Rate,
     string Pitch,
     string Volume,
-    string? Notes);
+    string? Notes,
+    Guid? CharacterProfileId = null);
 
 public sealed record UpdateSeriesCharacterRequest(
     string CanonicalName,
@@ -34,7 +35,8 @@ public sealed record UpdateSeriesCharacterRequest(
     string Rate,
     string Pitch,
     string Volume,
-    string? Notes);
+    string? Notes,
+    Guid? CharacterProfileId = null);
 
 public sealed record AddSeriesCharacterAliasRequest(string Alias);
 
@@ -76,6 +78,7 @@ public sealed record StorySeriesCharacterResponse(
     string Pitch,
     string Volume,
     string? Notes,
+    Guid? CharacterProfileId,
     IReadOnlyList<StorySeriesAliasResponse> Aliases,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);

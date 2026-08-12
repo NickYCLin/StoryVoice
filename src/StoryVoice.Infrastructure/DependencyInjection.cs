@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using StoryVoice.Application.BookImports;
 using StoryVoice.Application.Books;
+using StoryVoice.Application.Characters;
 using StoryVoice.Application.Collections;
 using StoryVoice.Application.Insights;
 using StoryVoice.Application.Library;
@@ -11,6 +12,7 @@ using StoryVoice.Application.Narrations;
 using StoryVoice.Application.Narrations.SpeechPlanning;
 using StoryVoice.Application.Series;
 using StoryVoice.Infrastructure.BookImports;
+using StoryVoice.Infrastructure.Characters;
 using StoryVoice.Infrastructure.Identity;
 using StoryVoice.Infrastructure.Narrations;
 using StoryVoice.Infrastructure.Persistence;
@@ -33,6 +35,9 @@ public static class DependencyInjection
                 ?? options.RootPath);
         services.Configure<CharacterVoiceStorageOptions>(options =>
             options.RootPath = configuration[$"{CharacterVoiceStorageOptions.SectionName}:RootPath"]
+                ?? options.RootPath);
+        services.Configure<CharacterAvatarStorageOptions>(options =>
+            options.RootPath = configuration[$"{CharacterAvatarStorageOptions.SectionName}:RootPath"]
                 ?? options.RootPath);
         services.AddOptions<ThreeWaAiHubOptions>()
             .Bind(configuration.GetSection(ThreeWaAiHubOptions.SectionName))
@@ -102,6 +107,8 @@ public static class DependencyInjection
         services.AddSingleton<IBookImportParser, EpubBookParser>();
         services.AddSingleton<IBookFileStorage, LocalBookFileStorage>();
         services.AddSingleton<LocalCharacterVoiceAudioStorage>();
+        services.AddSingleton<LocalCharacterAvatarStorage>();
+        services.AddScoped<ICharacterProfileService, CharacterProfileService>();
         services.AddScoped<ICharacterVoiceProfileService, CharacterVoiceProfileService>();
         services.AddHttpClient<IThreeWaVoiceProfileClient, ThreeWaVoiceProfileClient>((provider, client) =>
         {

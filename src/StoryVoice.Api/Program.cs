@@ -205,6 +205,7 @@ app.MapSeriesEndpoints();
 app.MapSeriesNarrationEndpoints();
 app.MapCollectionEndpoints();
 app.MapSpeechPlanEndpoints();
+app.MapCharacterProfileEndpoints();
 app.MapCharacterVoiceProfileEndpoints();
 app.Run();
 

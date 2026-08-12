@@ -6,7 +6,7 @@ public sealed record ConfirmVoiceProfileTranscriptRequest(string Transcript);
 
 public sealed record CharacterVoiceProfileResponse(
     Guid Id,
-    Guid CharacterId,
+    Guid CharacterProfileId,
     string Kind,
     string? SceneCode,
     string Mode,
@@ -20,16 +20,20 @@ public sealed record CharacterVoiceProfileResponse(
 
 public sealed record CharacterVoiceProfileAudio(string AbsolutePath, string ContentType);
 
+/// <summary>
+/// Manages the voice profiles (base + situational scenes) hanging off one
+/// <see cref="StoryVoice.Domain.Characters.CharacterProfile"/> library entry — owner-scoped, not
+/// tied to any one series, so the same character's voices can be reused across every series it's
+/// cast into.
+/// </summary>
 public interface ICharacterVoiceProfileService
 {
     Task<IReadOnlyList<CharacterVoiceProfileResponse>?> ListAsync(
-        Guid seriesId,
-        Guid characterId,
+        Guid characterProfileId,
         CancellationToken cancellationToken);
 
     Task<CharacterVoiceProfileResponse?> CreateClonedAsync(
-        Guid seriesId,
-        Guid characterId,
+        Guid characterProfileId,
         string kind,
         string? sceneCode,
         string consentType,
@@ -38,33 +42,32 @@ public interface ICharacterVoiceProfileService
         CancellationToken cancellationToken);
 
     Task<CharacterVoiceProfileResponse?> CreateDesignedAsync(
-        Guid seriesId,
-        Guid characterId,
+        Guid characterProfileId,
         string kind,
         string? sceneCode,
         CreateDesignedVoiceProfileRequest request,
         CancellationToken cancellationToken);
 
     Task<CharacterVoiceProfileResponse?> RefreshStatusAsync(
-        Guid seriesId,
+        Guid characterProfileId,
         Guid profileId,
         CancellationToken cancellationToken);
 
     Task<CharacterVoiceProfileResponse?> ConfirmTranscriptAsync(
-        Guid seriesId,
+        Guid characterProfileId,
         Guid profileId,
         ConfirmVoiceProfileTranscriptRequest request,
         CancellationToken cancellationToken);
 
     Task<CharacterVoiceProfileResponse?> RebuildAsync(
-        Guid seriesId,
+        Guid characterProfileId,
         Guid profileId,
         CancellationToken cancellationToken);
 
-    Task<bool> DeleteAsync(Guid seriesId, Guid profileId, CancellationToken cancellationToken);
+    Task<bool> DeleteAsync(Guid characterProfileId, Guid profileId, CancellationToken cancellationToken);
 
     Task<CharacterVoiceProfileAudio?> GetReferenceAudioAsync(
-        Guid seriesId,
+        Guid characterProfileId,
         Guid profileId,
         CancellationToken cancellationToken);
 }

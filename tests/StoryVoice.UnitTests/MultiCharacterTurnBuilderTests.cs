@@ -10,6 +10,7 @@ public sealed class MultiCharacterTurnBuilderTests
     private static readonly Guid SeriesId = Guid.NewGuid();
     private static readonly Guid BookId = Guid.NewGuid();
     private static readonly Guid AliceId = Guid.NewGuid();
+    private static readonly Guid AliceCharacterProfileId = Guid.NewGuid();
     private static readonly ChineseSpeechSegmenter Segmenter = new();
 
     [Fact]
@@ -187,8 +188,9 @@ public sealed class MultiCharacterTurnBuilderTests
             BuildReadyProfile(CharacterVoiceProfileKind.Base, sceneCode: null, taskId: "base-task"),
             BuildReadyProfile(CharacterVoiceProfileKind.Scene, CharacterVoiceSceneCodes.Angry, taskId: "angry-task"),
         };
+        var characterProfileIdsByCharacterId = new Dictionary<Guid, Guid> { [AliceId] = AliceCharacterProfileId };
 
-        var turns = MultiCharacterTurnBuilder.BuildTurns(castRevision, [chapter], voiceProfiles);
+        var turns = MultiCharacterTurnBuilder.BuildTurns(castRevision, [chapter], voiceProfiles, characterProfileIdsByCharacterId);
 
         var aliceTurn = Assert.Single(turns, turn => turn.Voice.StartsWith("clone:", StringComparison.Ordinal));
         Assert.Equal("clone:angry-task", aliceTurn.Voice);
@@ -210,8 +212,9 @@ public sealed class MultiCharacterTurnBuilderTests
         {
             BuildReadyProfile(CharacterVoiceProfileKind.Base, sceneCode: null, taskId: "base-task"),
         };
+        var characterProfileIdsByCharacterId = new Dictionary<Guid, Guid> { [AliceId] = AliceCharacterProfileId };
 
-        var turns = MultiCharacterTurnBuilder.BuildTurns(castRevision, [chapter], voiceProfiles);
+        var turns = MultiCharacterTurnBuilder.BuildTurns(castRevision, [chapter], voiceProfiles, characterProfileIdsByCharacterId);
 
         var aliceTurn = Assert.Single(turns, turn => turn.Voice.StartsWith("clone:", StringComparison.Ordinal));
         Assert.Equal("clone:base-task", aliceTurn.Voice);
@@ -324,8 +327,7 @@ public sealed class MultiCharacterTurnBuilderTests
         var profile = CharacterVoiceProfile.CreateClone(
             Guid.NewGuid(),
             OwnerId,
-            SeriesId,
-            AliceId,
+            AliceCharacterProfileId,
             kind,
             sceneCode,
             CharacterVoiceConsentTypes.SelfRecorded,

@@ -41,7 +41,8 @@ public static class MultiCharacterTurnBuilder
     public static IReadOnlyList<NarrationTurn> BuildTurns(
         NarrationCastRevision castRevision,
         IReadOnlyList<ChapterPlanSource> chapterPlans,
-        IReadOnlyList<CharacterVoiceProfile>? voiceProfiles = null)
+        IReadOnlyList<CharacterVoiceProfile>? voiceProfiles = null,
+        IReadOnlyDictionary<Guid, Guid>? characterProfileIdsByCharacterId = null)
     {
         ArgumentNullException.ThrowIfNull(castRevision);
         ArgumentNullException.ThrowIfNull(chapterPlans);
@@ -50,7 +51,7 @@ public static class MultiCharacterTurnBuilder
             throw new SpeechPlanIntegrityException(IntegrityMismatchReasonCode);
         }
 
-        var profilesByCharacter = BuildProfileLookup(voiceProfiles);
+        var profilesByCharacter = BuildProfileLookup(voiceProfiles, characterProfileIdsByCharacterId);
         var orderedChapters = chapterPlans.OrderBy(plan => plan.ChapterSortOrder).ToArray();
         var turns = new List<NarrationTurn>();
         string? previousVoice = null;
@@ -214,15 +215,26 @@ public static class MultiCharacterTurnBuilder
             ? $"clone:{profile.VoiceProfileTaskId}"
             : $"design:{profile.VoicePromptText}";
 
+    /// <summary>
+    /// Voice profiles hang off a <c>CharacterProfile</c> library entry, not off any one series'
+    /// <c>SeriesCharacter</c> — but <see cref="ConfirmedSpeechSegment.CharacterId"/> (and therefore
+    /// <see cref="NarrationCastAssignment.CharacterId"/>) always refers to the series-scoped
+    /// character. <paramref name="characterProfileIdsByCharacterId"/> is that one indirection
+    /// (SeriesCharacter.Id → CharacterProfile.Id, only present for characters actually linked to a
+    /// library entry), letting this stay a single dictionary keyed by series character id, exactly
+    /// like <see cref="ResolveVoice"/> already expects.
+    /// </summary>
     private static Dictionary<Guid, CharacterVoiceProfileBundle> BuildProfileLookup(
-        IReadOnlyList<CharacterVoiceProfile>? voiceProfiles)
+        IReadOnlyList<CharacterVoiceProfile>? voiceProfiles,
+        IReadOnlyDictionary<Guid, Guid>? characterProfileIdsByCharacterId)
     {
         var result = new Dictionary<Guid, CharacterVoiceProfileBundle>();
-        if (voiceProfiles is null)
+        if (voiceProfiles is null || voiceProfiles.Count == 0 || characterProfileIdsByCharacterId is null)
         {
             return result;
         }
 
+        var bundlesByCharacterProfileId = new Dictionary<Guid, CharacterVoiceProfileBundle>();
         foreach (var profile in voiceProfiles)
         {
             if (profile.Status != CharacterVoiceProfileStatus.Ready)
@@ -230,10 +242,10 @@ public static class MultiCharacterTurnBuilder
                 continue;
             }
 
-            if (!result.TryGetValue(profile.CharacterId, out var bundle))
+            if (!bundlesByCharacterProfileId.TryGetValue(profile.CharacterProfileId, out var bundle))
             {
                 bundle = new CharacterVoiceProfileBundle();
-                result[profile.CharacterId] = bundle;
+                bundlesByCharacterProfileId[profile.CharacterProfileId] = bundle;
             }
 
             if (profile.Kind == CharacterVoiceProfileKind.Base)
@@ -243,6 +255,14 @@ public static class MultiCharacterTurnBuilder
             else if (profile.SceneCode is not null)
             {
                 bundle.Scenes[profile.SceneCode] = profile;
+            }
+        }
+
+        foreach (var (characterId, characterProfileId) in characterProfileIdsByCharacterId)
+        {
+            if (bundlesByCharacterProfileId.TryGetValue(characterProfileId, out var bundle))
+            {
+                result[characterId] = bundle;
             }
         }
 

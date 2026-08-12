@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using StoryVoice.Domain.Books;
+using StoryVoice.Domain.Characters;
 using StoryVoice.Domain.Collections;
 using StoryVoice.Domain.Insights;
 using StoryVoice.Domain.Narrations;
@@ -28,6 +29,8 @@ public sealed class StoryVoiceDbContext(DbContextOptions<StoryVoiceDbContext> op
     public DbSet<NarrationCastAssignment> NarrationCastAssignments => Set<NarrationCastAssignment>();
 
     public DbSet<CharacterVoiceProfile> CharacterVoiceProfiles => Set<CharacterVoiceProfile>();
+
+    public DbSet<CharacterProfile> CharacterProfiles => Set<CharacterProfile>();
 
     public DbSet<SeriesCastRebuildBatch> SeriesCastRebuildBatches => Set<SeriesCastRebuildBatch>();
 

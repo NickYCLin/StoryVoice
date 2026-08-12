@@ -159,7 +159,8 @@ public sealed class StorySeries
         string rate,
         string pitch,
         string volume,
-        string? notes)
+        string? notes,
+        Guid? characterProfileId = null)
     {
         EnsureMutationAggregateComplete();
         EnsureIdentityKeyAvailable(canonicalName, SeriesFieldLimits.CharacterName);
@@ -172,6 +173,7 @@ public sealed class StorySeries
             OwnerId,
             Id,
             canonicalIdentityKeyId,
+            characterProfileId,
             canonicalName,
             role,
             voiceProvider,
@@ -263,7 +265,8 @@ public sealed class StorySeries
         string rate,
         string pitch,
         string volume,
-        string? notes)
+        string? notes,
+        Guid? characterProfileId = null)
     {
         EnsureMutationAggregateComplete();
         EnsureId(characterId, nameof(characterId));
@@ -287,6 +290,7 @@ public sealed class StorySeries
             pitch,
             volume,
             notes,
+            characterProfileId,
             now);
         canonicalKey.RenameCanonical(character.CanonicalName);
         Touch(now);

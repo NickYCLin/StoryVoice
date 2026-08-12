@@ -18,6 +18,7 @@ public sealed class SeriesCharacter
         Guid ownerId,
         Guid seriesId,
         Guid canonicalIdentityKeyId,
+        Guid? characterProfileId,
         string canonicalName,
         SeriesCharacterRole role,
         string voiceProvider,
@@ -32,6 +33,11 @@ public sealed class SeriesCharacter
         EnsureId(ownerId, nameof(ownerId));
         EnsureId(seriesId, nameof(seriesId));
         EnsureId(canonicalIdentityKeyId, nameof(canonicalIdentityKeyId));
+        if (characterProfileId == Guid.Empty)
+        {
+            throw new ArgumentException("角色庫識別碼在有值時不可為空白 Guid。", nameof(characterProfileId));
+        }
+
         if (!Enum.IsDefined(role))
         {
             throw new ArgumentOutOfRangeException(nameof(role), "角色類型無效。");
@@ -41,6 +47,7 @@ public sealed class SeriesCharacter
         OwnerId = ownerId;
         SeriesId = seriesId;
         CanonicalIdentityKeyId = canonicalIdentityKeyId;
+        CharacterProfileId = characterProfileId;
         CanonicalName = SeriesIdentityNormalizer.NormalizeDisplayValue(
             canonicalName,
             nameof(canonicalName),
@@ -68,6 +75,7 @@ public sealed class SeriesCharacter
     public Guid OwnerId { get; private set; }
     public Guid SeriesId { get; private set; }
     public Guid CanonicalIdentityKeyId { get; private set; }
+    public Guid? CharacterProfileId { get; private set; }
     public string CanonicalName { get; private set; } = string.Empty;
     public string NormalizedName { get; private set; } = string.Empty;
     public SeriesCharacterRole Role { get; private set; }
@@ -86,6 +94,7 @@ public sealed class SeriesCharacter
         Guid ownerId,
         Guid seriesId,
         Guid canonicalIdentityKeyId,
+        Guid? characterProfileId,
         string canonicalName,
         SeriesCharacterRole role,
         string voiceProvider,
@@ -100,6 +109,7 @@ public sealed class SeriesCharacter
             ownerId,
             seriesId,
             canonicalIdentityKeyId,
+            characterProfileId,
             canonicalName,
             role,
             voiceProvider,
@@ -133,11 +143,17 @@ public sealed class SeriesCharacter
         string pitch,
         string volume,
         string? notes,
+        Guid? characterProfileId,
         DateTimeOffset now)
     {
         if (!Enum.IsDefined(role))
         {
             throw new ArgumentOutOfRangeException(nameof(role), "角色類型無效。");
+        }
+
+        if (characterProfileId == Guid.Empty)
+        {
+            throw new ArgumentException("角色庫識別碼在有值時不可為空白 Guid。", nameof(characterProfileId));
         }
 
         var normalizedName = SeriesIdentityNormalizer.NormalizeDisplayValue(
@@ -182,6 +198,7 @@ public sealed class SeriesCharacter
         Pitch = normalizedPitch;
         Volume = normalizedVolume;
         Notes = normalizedNotes;
+        CharacterProfileId = characterProfileId;
         UpdatedAt = now;
         ConcurrencyStamp = Guid.NewGuid();
     }

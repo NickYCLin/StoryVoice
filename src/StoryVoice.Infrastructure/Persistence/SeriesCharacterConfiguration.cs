@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using StoryVoice.Domain.Characters;
 using StoryVoice.Domain.Series;
 
 namespace StoryVoice.Infrastructure.Persistence;
@@ -49,5 +50,14 @@ internal sealed class SeriesCharacterConfiguration : IEntityTypeConfiguration<Se
             .HasComputedColumnSql("'Canonical'", stored: true)
             .IsRequired();
         builder.Property(character => character.ConcurrencyStamp).IsConcurrencyToken();
+
+        builder.HasIndex(character => new { character.OwnerId, character.CharacterProfileId })
+            .HasDatabaseName("IX_series_characters_character_profile");
+        builder.HasOne<CharacterProfile>()
+            .WithMany()
+            .HasForeignKey(character => new { character.OwnerId, character.CharacterProfileId })
+            .HasPrincipalKey(profile => new { profile.OwnerId, profile.Id })
+            .OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("FK_series_characters_character_profile");
     }
 }

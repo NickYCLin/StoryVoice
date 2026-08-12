@@ -39,6 +39,7 @@ services:
       ConnectionStrings__Redis: redis:6379,abortConnect=false
       BookStorage__RootPath: /data/books
       CharacterVoiceStorage__RootPath: /data/character-voices
+      CharacterAvatarStorage__RootPath: /data/character-avatars
       ThreeWaAiHub__BaseUrl: ${THREEWA_BASE_URL:-https://3wa.tw/3waAIHub/}
       ThreeWaAiHub__ApiToken: ${THREEWA_API_TOKEN:-}
       Narration__AudioRootPath: /data/audio
@@ -47,6 +48,7 @@ services:
     volumes:
       - book-storage:/data/books
       - character-voice-storage:/data/character-voices
+      - character-avatar-storage:/data/character-avatars
       - audio-storage:/data/audio:ro
       - data-protection-keys:/var/lib/storyvoice/data-protection-keys
     ports:
@@ -114,5 +116,6 @@ volumes:
   redis-data:
   book-storage:
   character-voice-storage:
+  character-avatar-storage:
   audio-storage:
   data-protection-keys:

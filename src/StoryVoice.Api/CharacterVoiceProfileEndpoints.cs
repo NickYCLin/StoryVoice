@@ -9,127 +9,117 @@ public static class CharacterVoiceProfileEndpoints
     public static IEndpointRouteBuilder MapCharacterVoiceProfileEndpoints(this IEndpointRouteBuilder endpoints)
     {
         var group = endpoints
-            .MapGroup("/api/series/{seriesId:guid}/characters/{characterId:guid}/voice-profiles")
+            .MapGroup("/api/character-profiles/{characterProfileId:guid}/voice-profiles")
             .WithTags("CharacterVoiceProfiles")
             .RequireAuthorization(StoryVoicePolicies.UserSession);
 
         group.MapGet("/", async (
-            Guid seriesId,
-            Guid characterId,
+            Guid characterProfileId,
             ICharacterVoiceProfileService service,
             CancellationToken cancellationToken) =>
         {
-            var profiles = await service.ListAsync(seriesId, characterId, cancellationToken);
+            var profiles = await service.ListAsync(characterProfileId, cancellationToken);
             return profiles is null ? Results.NotFound() : Results.Ok(profiles);
         });
 
         group.MapPost("/base", (
-            Guid seriesId,
-            Guid characterId,
+            Guid characterProfileId,
             IFormFile referenceAudio,
             string consentType,
             HttpContext httpContext,
             ICharacterVoiceProfileService service,
             CancellationToken cancellationToken) =>
-            CreateClonedAsync(seriesId, characterId, "Base", sceneCode: null, consentType, referenceAudio, httpContext, service, cancellationToken))
+            CreateClonedAsync(characterProfileId, "Base", null, consentType, referenceAudio, httpContext, service, cancellationToken))
         .DisableAntiforgery()
         .AddEndpointFilter<AntiforgeryEndpointFilter>();
 
         group.MapPost("/base/design", async (
-            Guid seriesId,
-            Guid characterId,
+            Guid characterProfileId,
             CreateDesignedVoiceProfileRequest request,
             ICharacterVoiceProfileService service,
             CancellationToken cancellationToken) =>
         {
-            var profile = await service.CreateDesignedAsync(seriesId, characterId, "Base", sceneCode: null, request, cancellationToken);
+            var profile = await service.CreateDesignedAsync(characterProfileId, "Base", sceneCode: null, request, cancellationToken);
             return profile is null ? Results.NotFound() : Results.Ok(profile);
         })
         .AddEndpointFilter<AntiforgeryEndpointFilter>();
 
         group.MapPost("/scenes/{sceneCode}", (
-            Guid seriesId,
-            Guid characterId,
+            Guid characterProfileId,
             string sceneCode,
             IFormFile referenceAudio,
             string consentType,
             HttpContext httpContext,
             ICharacterVoiceProfileService service,
             CancellationToken cancellationToken) =>
-            CreateClonedAsync(seriesId, characterId, "Scene", sceneCode, consentType, referenceAudio, httpContext, service, cancellationToken))
+            CreateClonedAsync(characterProfileId, "Scene", sceneCode, consentType, referenceAudio, httpContext, service, cancellationToken))
         .DisableAntiforgery()
         .AddEndpointFilter<AntiforgeryEndpointFilter>();
 
         group.MapPost("/scenes/{sceneCode}/design", async (
-            Guid seriesId,
-            Guid characterId,
+            Guid characterProfileId,
             string sceneCode,
             CreateDesignedVoiceProfileRequest request,
             ICharacterVoiceProfileService service,
             CancellationToken cancellationToken) =>
         {
-            var profile = await service.CreateDesignedAsync(seriesId, characterId, "Scene", sceneCode, request, cancellationToken);
+            var profile = await service.CreateDesignedAsync(characterProfileId, "Scene", sceneCode, request, cancellationToken);
             return profile is null ? Results.NotFound() : Results.Ok(profile);
         })
         .AddEndpointFilter<AntiforgeryEndpointFilter>();
 
         group.MapPost("/{profileId:guid}/refresh-status", async (
-            Guid seriesId,
-            Guid characterId,
+            Guid characterProfileId,
             Guid profileId,
             ICharacterVoiceProfileService service,
             CancellationToken cancellationToken) =>
         {
-            var profile = await service.RefreshStatusAsync(seriesId, profileId, cancellationToken);
+            var profile = await service.RefreshStatusAsync(characterProfileId, profileId, cancellationToken);
             return profile is null ? Results.NotFound() : Results.Ok(profile);
         })
         .AddEndpointFilter<AntiforgeryEndpointFilter>();
 
         group.MapPost("/{profileId:guid}/confirm-transcript", async (
-            Guid seriesId,
-            Guid characterId,
+            Guid characterProfileId,
             Guid profileId,
             ConfirmVoiceProfileTranscriptRequest request,
             ICharacterVoiceProfileService service,
             CancellationToken cancellationToken) =>
         {
-            var profile = await service.ConfirmTranscriptAsync(seriesId, profileId, request, cancellationToken);
+            var profile = await service.ConfirmTranscriptAsync(characterProfileId, profileId, request, cancellationToken);
             return profile is null ? Results.NotFound() : Results.Ok(profile);
         })
         .AddEndpointFilter<AntiforgeryEndpointFilter>();
 
         group.MapPost("/{profileId:guid}/rebuild", async (
-            Guid seriesId,
-            Guid characterId,
+            Guid characterProfileId,
             Guid profileId,
             ICharacterVoiceProfileService service,
             CancellationToken cancellationToken) =>
         {
-            var profile = await service.RebuildAsync(seriesId, profileId, cancellationToken);
+            var profile = await service.RebuildAsync(characterProfileId, profileId, cancellationToken);
             return profile is null ? Results.NotFound() : Results.Ok(profile);
         })
         .AddEndpointFilter<AntiforgeryEndpointFilter>();
 
         group.MapDelete("/{profileId:guid}", async (
-            Guid seriesId,
-            Guid characterId,
+            Guid characterProfileId,
             Guid profileId,
             ICharacterVoiceProfileService service,
             CancellationToken cancellationToken) =>
         {
-            var deleted = await service.DeleteAsync(seriesId, profileId, cancellationToken);
+            var deleted = await service.DeleteAsync(characterProfileId, profileId, cancellationToken);
             return deleted ? Results.NoContent() : Results.NotFound();
         })
         .AddEndpointFilter<AntiforgeryEndpointFilter>();
 
         group.MapGet("/{profileId:guid}/reference-audio", async (
-            Guid seriesId,
-            Guid characterId,
+            Guid characterProfileId,
             Guid profileId,
             ICharacterVoiceProfileService service,
             CancellationToken cancellationToken) =>
         {
-            var audio = await service.GetReferenceAudioAsync(seriesId, profileId, cancellationToken);
+            var audio = await service.GetReferenceAudioAsync(characterProfileId, profileId, cancellationToken);
             return audio is null
                 ? Results.NotFound()
                 : Results.File(audio.AbsolutePath, audio.ContentType, enableRangeProcessing: true);
@@ -139,8 +129,7 @@ public static class CharacterVoiceProfileEndpoints
     }
 
     private static async Task<IResult> CreateClonedAsync(
-        Guid seriesId,
-        Guid characterId,
+        Guid characterProfileId,
         string kind,
         string? sceneCode,
         string consentType,
@@ -164,8 +153,7 @@ public static class CharacterVoiceProfileEndpoints
 
         await using var content = referenceAudio.OpenReadStream();
         var profile = await service.CreateClonedAsync(
-            seriesId,
-            characterId,
+            characterProfileId,
             kind,
             sceneCode,
             consentType,
@@ -174,6 +162,6 @@ public static class CharacterVoiceProfileEndpoints
             cancellationToken);
         return profile is null
             ? Results.NotFound()
-            : Results.Created($"{httpContext.Request.PathBase}/api/series/{seriesId}/characters/{characterId}/voice-profiles", profile);
+            : Results.Created($"{httpContext.Request.PathBase}/api/character-profiles/{characterProfileId}/voice-profiles", profile);
     }
 }

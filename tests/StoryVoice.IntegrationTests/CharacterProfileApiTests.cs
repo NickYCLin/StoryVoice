@@ -1,0 +1,240 @@
+using System.Net;
+using System.Net.Http.Json;
+using StoryVoice.Application.Characters;
+using StoryVoice.Application.Series;
+
+namespace StoryVoice.IntegrationTests;
+
+public sealed class CharacterProfileApiTests(ApiFactory factory) : IClassFixture<ApiFactory>
+{
+    [Fact]
+    public async Task Character_profile_endpoints_require_authentication_and_mutations_require_csrf()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var anonymousClient = factory.CreateClient();
+        using var anonymousResponse = await anonymousClient.GetAsync("/api/character-profiles", cancellationToken);
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymousResponse.StatusCode);
+
+        using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        using var missingCsrfResponse = await client.PostAsJsonAsync(
+            "/api/character-profiles",
+            CreateCharacterBody("缺少 CSRF 的角色"),
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, missingCsrfResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task A_character_profile_can_be_created_updated_and_listed_with_all_bio_fields()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+
+        using var createResponse = await client.PostWithCsrfAsync(
+            "/api/character-profiles",
+            new
+            {
+                canonicalName = "小羽",
+                age = "16",
+                gender = "女",
+                birthday = "2009-11-23",
+                personality = "溫柔、細心、善解人意，偶爾有點害羞",
+                catchphrase = "「嗯～我想想…」、「沒問題的，我會努力的！」",
+                background = "住在海邊小鎮的高中生，喜歡繪畫與音樂。",
+                speakingStyle = "語氣輕柔、語速偏慢，常用敬語"
+            },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
+        var created = await createResponse.Content.ReadFromJsonAsync<CharacterProfileResponse>(cancellationToken);
+        Assert.NotNull(created);
+        Assert.Equal("小羽", created.CanonicalName);
+        Assert.Equal("16", created.Age);
+        Assert.False(created.HasAvatar);
+
+        using var listResponse = await client.GetAsync("/api/character-profiles", cancellationToken);
+        var list = await listResponse.Content.ReadFromJsonAsync<CharacterProfileResponse[]>(cancellationToken);
+        Assert.NotNull(list);
+        Assert.Contains(list, profile => profile.Id == created.Id);
+
+        using var updateResponse = await client.PutWithCsrfAsync(
+            $"/api/character-profiles/{created.Id}",
+            new
+            {
+                canonicalName = "小羽",
+                age = "17",
+                gender = "女",
+                birthday = "2009-11-23",
+                personality = "更加成熟穩重了",
+                catchphrase = created.Catchphrase,
+                background = created.Background,
+                speakingStyle = created.SpeakingStyle
+            },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, updateResponse.StatusCode);
+        var updated = await updateResponse.Content.ReadFromJsonAsync<CharacterProfileResponse>(cancellationToken);
+        Assert.NotNull(updated);
+        Assert.Equal("17", updated.Age);
+        Assert.Equal("更加成熟穩重了", updated.Personality);
+    }
+
+    [Fact]
+    public async Task Character_profiles_are_owner_scoped()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var ownerAClient = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        using var ownerBClient = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+
+        using var createResponse = await ownerAClient.PostWithCsrfAsync(
+            "/api/character-profiles",
+            CreateCharacterBody("只有 A 看得到的角色"),
+            cancellationToken);
+        var created = await createResponse.Content.ReadFromJsonAsync<CharacterProfileResponse>(cancellationToken);
+        Assert.NotNull(created);
+
+        using var ownerBGetResponse = await ownerBClient.GetAsync(
+            $"/api/character-profiles/{created.Id}",
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.NotFound, ownerBGetResponse.StatusCode);
+
+        using var ownerBListResponse = await ownerBClient.GetAsync("/api/character-profiles", cancellationToken);
+        var ownerBList = await ownerBListResponse.Content.ReadFromJsonAsync<CharacterProfileResponse[]>(cancellationToken);
+        Assert.NotNull(ownerBList);
+        Assert.DoesNotContain(ownerBList, profile => profile.Id == created.Id);
+    }
+
+    [Fact]
+    public async Task A_character_profile_can_be_picked_when_adding_a_series_character()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+
+        using var characterProfileResponse = await client.PostWithCsrfAsync(
+            "/api/character-profiles",
+            CreateCharacterBody("跨系列共用角色"),
+            cancellationToken);
+        var characterProfile = await characterProfileResponse.Content
+            .ReadFromJsonAsync<CharacterProfileResponse>(cancellationToken);
+        Assert.NotNull(characterProfile);
+
+        using var seriesResponse = await client.PostWithCsrfAsync(
+            "/api/series",
+            new
+            {
+                name = $"角色庫測試系列-{Guid.NewGuid():N}",
+                narratorProvider = "edge",
+                narratorVoice = "zh-TW-YunJheNeural",
+                narratorRate = "-5%",
+                narratorPitch = "+0Hz",
+                narratorVolume = "+0%",
+                defaultSpeakerPauseMs = 350
+            },
+            cancellationToken);
+        var series = await seriesResponse.Content.ReadFromJsonAsync<StorySeriesDetailsResponse>(cancellationToken);
+        Assert.NotNull(series);
+
+        using var addCharacterResponse = await client.PostWithCsrfAsync(
+            $"/api/series/{series.Id}/characters",
+            new
+            {
+                canonicalName = characterProfile.CanonicalName,
+                role = "Supporting",
+                voiceProvider = "3wa-voxcpm2",
+                voice = "custom",
+                rate = "+0%",
+                pitch = "+0Hz",
+                volume = "+0%",
+                notes = (string?)null,
+                characterProfileId = characterProfile.Id
+            },
+            cancellationToken);
+        Assert.True(
+            addCharacterResponse.StatusCode == HttpStatusCode.OK,
+            $"Unexpected response: {await addCharacterResponse.Content.ReadAsStringAsync(cancellationToken)}");
+        var withCharacter = await addCharacterResponse.Content
+            .ReadFromJsonAsync<StorySeriesDetailsResponse>(cancellationToken);
+        Assert.NotNull(withCharacter);
+        var seriesCharacter = Assert.Single(withCharacter.Characters);
+        Assert.Equal(characterProfile.Id, seriesCharacter.CharacterProfileId);
+
+        using var unknownProfileResponse = await client.PostWithCsrfAsync(
+            $"/api/series/{series.Id}/characters",
+            new
+            {
+                canonicalName = "另一個角色",
+                role = "Supporting",
+                voiceProvider = "3wa-voxcpm2",
+                voice = "custom",
+                rate = "+0%",
+                pitch = "+0Hz",
+                volume = "+0%",
+                notes = (string?)null,
+                characterProfileId = Guid.NewGuid()
+            },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, unknownProfileResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task Deleting_a_character_profile_still_linked_to_a_series_character_is_rejected()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+
+        using var characterProfileResponse = await client.PostWithCsrfAsync(
+            "/api/character-profiles",
+            CreateCharacterBody("被系列使用中的角色"),
+            cancellationToken);
+        var characterProfile = await characterProfileResponse.Content
+            .ReadFromJsonAsync<CharacterProfileResponse>(cancellationToken);
+        Assert.NotNull(characterProfile);
+
+        using var seriesResponse = await client.PostWithCsrfAsync(
+            "/api/series",
+            new
+            {
+                name = $"刪除保護測試系列-{Guid.NewGuid():N}",
+                narratorProvider = "edge",
+                narratorVoice = "zh-TW-YunJheNeural",
+                narratorRate = "-5%",
+                narratorPitch = "+0Hz",
+                narratorVolume = "+0%",
+                defaultSpeakerPauseMs = 350
+            },
+            cancellationToken);
+        var series = await seriesResponse.Content.ReadFromJsonAsync<StorySeriesDetailsResponse>(cancellationToken);
+        Assert.NotNull(series);
+
+        using var addCharacterResponse = await client.PostWithCsrfAsync(
+            $"/api/series/{series.Id}/characters",
+            new
+            {
+                canonicalName = characterProfile.CanonicalName,
+                role = "Supporting",
+                voiceProvider = "3wa-voxcpm2",
+                voice = "custom",
+                rate = "+0%",
+                pitch = "+0Hz",
+                volume = "+0%",
+                notes = (string?)null,
+                characterProfileId = characterProfile.Id
+            },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, addCharacterResponse.StatusCode);
+
+        using var deleteResponse = await client.DeleteWithCsrfAsync(
+            $"/api/character-profiles/{characterProfile.Id}",
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, deleteResponse.StatusCode);
+    }
+
+    private static object CreateCharacterBody(string canonicalName) => new
+    {
+        canonicalName,
+        age = (string?)null,
+        gender = (string?)null,
+        birthday = (string?)null,
+        personality = (string?)null,
+        catchphrase = (string?)null,
+        background = (string?)null,
+        speakingStyle = (string?)null
+    };
+}

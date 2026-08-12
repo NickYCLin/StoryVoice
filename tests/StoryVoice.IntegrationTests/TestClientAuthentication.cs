@@ -100,6 +100,32 @@ internal static class TestClientAuthentication
         return await client.SendAsync(request, cancellationToken);
     }
 
+    public static async Task<HttpResponseMessage> PutWithCsrfAsync<T>(
+        this HttpClient client,
+        string path,
+        T body,
+        CancellationToken cancellationToken)
+    {
+        var csrfToken = await client.GetCsrfTokenAsync(cancellationToken);
+        using var request = new HttpRequestMessage(HttpMethod.Put, path)
+        {
+            Content = JsonContent.Create(body)
+        };
+        request.Headers.Add("X-CSRF-TOKEN", csrfToken);
+        return await client.SendAsync(request, cancellationToken);
+    }
+
+    public static async Task<HttpResponseMessage> DeleteWithCsrfAsync(
+        this HttpClient client,
+        string path,
+        CancellationToken cancellationToken)
+    {
+        var csrfToken = await client.GetCsrfTokenAsync(cancellationToken);
+        using var request = new HttpRequestMessage(HttpMethod.Delete, path);
+        request.Headers.Add("X-CSRF-TOKEN", csrfToken);
+        return await client.SendAsync(request, cancellationToken);
+    }
+
     public static async Task RegisterAsync(
         this HttpClient client,
         string email,
