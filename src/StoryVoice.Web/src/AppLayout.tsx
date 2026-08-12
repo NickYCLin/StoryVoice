@@ -6,18 +6,18 @@ import type { AuthedOutletContext } from './authOutletContext'
 
 const navLinkClassName = ({ isActive }: { isActive: boolean }) =>
   `rounded-full px-4 py-2 text-sm transition ${isActive
-    ? 'border border-amber-300/30 bg-amber-200/[.08] text-amber-200'
-    : 'border border-transparent text-stone-400 hover:border-white/10 hover:text-stone-200'}`
+    ? 'border border-amber-300 bg-amber-50 text-amber-800'
+    : 'border border-transparent text-stone-500 hover:border-stone-200 hover:text-stone-800'}`
 
 export function AppLayout() {
   const { authState, loadAuthSession, logout } = useAuthSession()
 
   if (authState.status === 'loading') {
-    return <main className="grid min-h-screen place-items-center bg-[#09070d] text-stone-400">正在確認 StoryVoice 登入狀態…</main>
+    return <main className="grid min-h-screen place-items-center bg-[#faf6ee] text-stone-500">正在確認 StoryVoice 登入狀態…</main>
   }
 
   if (authState.status === 'error') {
-    return <main className="grid min-h-screen place-items-center bg-[#09070d] px-6 text-center text-rose-200">無法連接登入服務，請重新整理頁面。</main>
+    return <main className="grid min-h-screen place-items-center bg-[#faf6ee] px-6 text-center text-rose-700">無法連接登入服務，請重新整理頁面。</main>
   }
 
   if (authState.status === 'anonymous') {
@@ -25,17 +25,17 @@ export function AppLayout() {
   }
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-[#09070d] text-[#f7f2ea]">
+    <div className="relative min-h-screen overflow-hidden bg-[#faf6ee] text-[#332a1f]">
       <div className="ambient ambient-one" aria-hidden="true" />
       <div className="ambient ambient-two" aria-hidden="true" />
 
       <header className="relative z-10 mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-6 py-6 lg:px-10">
         <NavLink className="group flex items-center gap-3" to="/" aria-label="StoryVoice 首頁">
-          <span className="grid h-11 w-11 place-items-center rounded-2xl border border-amber-300/20 bg-amber-100/10 font-serif text-lg text-amber-200 shadow-[0_0_32px_rgba(245,158,11,.12)] transition group-hover:border-amber-300/40">
+          <span className="grid h-11 w-11 place-items-center rounded-2xl border border-amber-300 bg-amber-50 font-serif text-lg text-amber-800 shadow-[0_4px_18px_rgba(180,101,15,.14)] transition group-hover:border-amber-400">
             SV
           </span>
           <span>
-            <strong className="block font-serif text-lg tracking-wide">StoryVoice</strong>
+            <strong className="block font-serif text-lg tracking-wide text-stone-900">StoryVoice</strong>
             <span className="block text-[10px] uppercase tracking-[.26em] text-stone-500">AI Story Director</span>
           </span>
         </NavLink>
@@ -49,9 +49,9 @@ export function AppLayout() {
 
         <div className="flex items-center gap-4">
           <span className="hidden max-w-52 truncate text-xs text-stone-500 md:inline">{authState.email}</span>
-          <button className="rounded-full border border-white/10 px-4 py-2 text-sm text-stone-300 transition hover:border-rose-300/30 hover:text-rose-200" onClick={() => void logout()} type="button">登出</button>
+          <button className="rounded-full border border-stone-200 px-4 py-2 text-sm text-stone-700 transition hover:border-rose-300 hover:text-rose-700" onClick={() => void logout()} type="button">登出</button>
           <a
-            className="rounded-full border border-white/10 bg-white/[.04] px-4 py-2 text-sm text-stone-200 transition hover:border-amber-300/30 hover:bg-amber-200/[.06]"
+            className="rounded-full border border-stone-200 bg-white px-4 py-2 text-sm text-stone-700 transition hover:border-amber-300 hover:bg-amber-50"
             href="https://github.com/NickYCLin/StoryVoice"
             rel="noreferrer"
             target="_blank"
@@ -63,7 +63,7 @@ export function AppLayout() {
 
       <Outlet context={{ email: authState.email, csrfToken: authState.csrfToken } satisfies AuthedOutletContext} />
 
-      <footer className="relative z-10 border-t border-white/[.06] px-6 py-8 text-center text-xs leading-6 text-stone-600">
+      <footer className="relative z-10 border-t border-stone-200 px-6 py-8 text-center text-xs leading-6 text-stone-400">
         StoryVoice is open source. No DRM circumvention. Process only content you have the right to use.
       </footer>
     </div>

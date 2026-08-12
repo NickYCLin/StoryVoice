@@ -25,7 +25,7 @@ function SharedBookChapters({ collectionId, bookId }: { collectionId: string; bo
   }, [collectionId, bookId])
 
   if (state === 'loading') return <p className="px-4 py-4 text-xs text-stone-500">正在讀取章節…</p>
-  if (state === 'error' || !content) return <p className="px-4 py-4 text-xs text-rose-300">章節讀取失敗。</p>
+  if (state === 'error' || !content) return <p className="px-4 py-4 text-xs text-rose-600">章節讀取失敗。</p>
   if (content.chapters.length === 0) return <p className="px-4 py-4 text-xs text-stone-500">這本書還沒有章節。</p>
 
   return (
@@ -33,9 +33,9 @@ function SharedBookChapters({ collectionId, bookId }: { collectionId: string; bo
       {content.chapters.map((chapter) => (
         <details className="chapter-panel group" key={chapter.id}>
           <summary className="flex cursor-pointer list-none items-center gap-4 px-4 py-4 text-left">
-            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-amber-200/[.07] font-mono text-xs text-amber-200/70">{String(chapter.chapterNumber).padStart(2, '0')}</span>
-            <span className="min-w-0 flex-1 truncate font-serif text-lg text-stone-200">{chapter.title}</span>
-            <span className="text-stone-600 transition group-open:rotate-45">＋</span>
+            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-amber-50 font-mono text-xs text-amber-700">{String(chapter.chapterNumber).padStart(2, '0')}</span>
+            <span className="min-w-0 flex-1 truncate font-serif text-lg text-stone-800">{chapter.title}</span>
+            <span className="text-stone-400 transition group-open:rotate-45">＋</span>
           </summary>
           <div className="reading-text">{chapter.originalText}</div>
         </details>
@@ -72,7 +72,7 @@ export function SharedCollectionPage() {
   if (state === 'error' || !collection || !collectionId) {
     return (
       <section className="relative z-10 mx-auto max-w-5xl px-6 py-12 lg:px-10">
-        <div className="library-state border-rose-400/20 text-rose-200">找不到這個分享，或已被撤銷。</div>
+        <div className="library-state border-rose-300 text-rose-700">找不到這個分享，或已被撤銷。</div>
         <Link className="secondary-button mt-6 inline-flex" to="/shared">回到分享列表</Link>
       </section>
     )
@@ -80,12 +80,12 @@ export function SharedCollectionPage() {
 
   return (
     <section className="relative z-10 mx-auto max-w-5xl px-6 py-12 lg:px-10">
-      <Link className="text-sm text-stone-500 transition hover:text-stone-300" to="/shared">← 回到分享列表</Link>
+      <Link className="text-sm text-stone-500 transition hover:text-stone-800" to="/shared">← 回到分享列表</Link>
 
-      <div className="mt-6 rounded-3xl border border-white/[.07] bg-white/[.018] p-5 sm:p-7">
+      <div className="mt-6 rounded-3xl border border-stone-200 bg-white p-5 sm:p-7">
         <p className="eyebrow">來自 {collection.ownerEmail} · 唯讀</p>
-        <h1 className="mt-2 font-serif text-3xl text-stone-100">{collection.name}</h1>
-        {collection.description && <p className="mt-3 text-sm leading-7 text-stone-400">{collection.description}</p>}
+        <h1 className="mt-2 font-serif text-3xl text-stone-900">{collection.name}</h1>
+        {collection.description && <p className="mt-3 text-sm leading-7 text-stone-600">{collection.description}</p>}
       </div>
 
       <section className="mt-8 space-y-3" aria-label="書冊內書籍">
@@ -102,12 +102,12 @@ export function SharedCollectionPage() {
                     : <span>{book.bookTitle.slice(0, 1)}</span>}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate font-serif text-lg text-stone-200">{book.volumeLabel ? `${book.volumeLabel} · ` : ''}{book.bookTitle}</p>
-                  <p className="mt-1 truncate text-xs text-stone-600">{book.bookAuthor}</p>
+                  <p className="truncate font-serif text-lg text-stone-800">{book.volumeLabel ? `${book.volumeLabel} · ` : ''}{book.bookTitle}</p>
+                  <p className="mt-1 truncate text-xs text-stone-400">{book.bookAuthor}</p>
                 </div>
-                <span className="text-stone-600 transition group-open:rotate-45">＋</span>
+                <span className="text-stone-400 transition group-open:rotate-45">＋</span>
               </summary>
-              <div className="border-t border-white/[.06]">
+              <div className="border-t border-stone-200">
                 <SharedBookChapters bookId={book.id} collectionId={collectionId} />
               </div>
             </details>

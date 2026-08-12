@@ -149,14 +149,14 @@ export function SpeechPlanReview({
   }
 
   return (
-    <section className="mt-8 rounded-3xl border border-amber-300/15 bg-amber-300/[.025] p-5 sm:p-7" aria-label="跨冊劇本審核">
+    <section className="mt-8 rounded-3xl border border-amber-100 bg-amber-50/60 p-5 sm:p-7" aria-label="跨冊劇本審核">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[.22em] text-amber-200/70">Speech plan review</p>
-          <h2 className="mt-1 font-serif text-2xl text-stone-100">逐章角色審核</h2>
+          <p className="text-xs font-semibold uppercase tracking-[.22em] text-amber-700">Speech plan review</p>
+          <h2 className="mt-1 font-serif text-2xl text-stone-900">逐章角色審核</h2>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-stone-500">只有目前章節正文的 owner 頁面會顯示這些切片；staged batch API 不回傳正文。</p>
         </div>
-        <span className="rounded-full border border-amber-300/20 bg-amber-300/10 px-3 py-1 text-xs text-amber-100">尚缺 {confirmedGapCount} 章確認</span>
+        <span className="rounded-full border border-amber-200 bg-amber-100 px-3 py-1 text-xs text-amber-800">尚缺 {confirmedGapCount} 章確認</span>
       </div>
 
       <div className="mt-5 space-y-4">
@@ -165,14 +165,14 @@ export function SpeechPlanReview({
           const needsReview = draft?.segments.filter((segment) => segment.kind === 'Dialogue' && segment.reviewStatus !== 'Confirmed') ?? []
           const isConfirmed = draft?.confirmedRevisionId !== null && draft !== null
           return (
-            <article className="rounded-2xl border border-white/[.07] bg-black/10 p-4" key={entry.chapter.id}>
+            <article className="rounded-2xl border border-stone-200 bg-white p-4" key={entry.chapter.id}>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <p className="text-xs text-stone-500">{entry.book.title}</p>
-                  <h3 className="mt-1 font-medium text-stone-200">{entry.chapter.title}</h3>
+                  <h3 className="mt-1 font-medium text-stone-800">{entry.chapter.title}</h3>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <span className={`rounded-full px-2.5 py-1 text-xs ${isConfirmed ? 'bg-emerald-300/10 text-emerald-200' : 'bg-white/[.06] text-stone-400'}`}>
+                  <span className={`rounded-full px-2.5 py-1 text-xs ${isConfirmed ? 'bg-emerald-50 text-emerald-700' : 'bg-stone-100 text-stone-500'}`}>
                     {isConfirmed ? '目前 revision 已確認' : draft ? `草稿：${draft.status}` : '尚未產生草稿'}
                   </span>
                   <button className="secondary-button px-3 py-1.5 text-xs" disabled={busyChapterId === entry.chapter.id} onClick={() => void buildDraft(entry)} type="button">
@@ -184,10 +184,10 @@ export function SpeechPlanReview({
               {draft && (
                 <div className="mt-4 space-y-2">
                   {draft.segments.map((segment) => (
-                    <div className="rounded-xl border border-white/[.06] bg-white/[.02] p-3" key={segment.id}>
+                    <div className="rounded-xl border border-stone-200 bg-stone-50/70 p-3" key={segment.id}>
                       <div className="flex flex-wrap items-start justify-between gap-3">
-                        <p className="min-w-0 flex-1 text-sm leading-6 text-stone-300">{segmentText(entry.chapter, segment)}</p>
-                        <span className={`shrink-0 text-xs ${segment.reviewStatus === 'Confirmed' ? 'text-emerald-200' : 'text-amber-200'}`}>
+                        <p className="min-w-0 flex-1 text-sm leading-6 text-stone-700">{segmentText(entry.chapter, segment)}</p>
+                        <span className={`shrink-0 text-xs ${segment.reviewStatus === 'Confirmed' ? 'text-emerald-700' : 'text-amber-700'}`}>
                           {segment.reviewStatus === 'Confirmed' ? '已確認' : `待審核 · 信心 ${segment.confidence}%`}
                         </span>
                       </div>
@@ -233,9 +233,9 @@ export function SpeechPlanReview({
         })}
       </div>
 
-      <div className="mt-6 border-t border-white/[.07] pt-5">
-        <label className="flex max-w-4xl items-start gap-3 text-sm leading-6 text-stone-400">
-          <input checked={rightsAttested} className="mt-1 h-4 w-4 accent-amber-300" onChange={(event) => setRightsAttested(event.target.checked)} type="checkbox" />
+      <div className="mt-6 border-t border-stone-200 pt-5">
+        <label className="flex max-w-4xl items-start gap-3 text-sm leading-6 text-stone-600">
+          <input checked={rightsAttested} className="mt-1 h-4 w-4 accent-amber-600" onChange={(event) => setRightsAttested(event.target.checked)} type="checkbox" />
           <span>我確認這個系列所有正文都可合法交給 Edge 神經語音服務處理；這會建立整批私有 staged 音訊，直到所有冊次完成才可手動啟用。</span>
         </label>
         <button

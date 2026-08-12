@@ -72,13 +72,13 @@ export function CollectionsPage() {
       <div className="mb-10">
         <p className="eyebrow">Collections</p>
         <h1 className="mt-3 font-serif text-4xl tracking-tight sm:text-5xl">把同系列的書整理成書冊。</h1>
-        <p className="mt-4 max-w-2xl text-sm leading-7 text-stone-400">
+        <p className="mt-4 max-w-2xl text-sm leading-7 text-stone-600">
           書冊只是單純的書本分類收藏，跟角色配音無關；可以把系列作品排序收在一起，也可以唯讀分享給其他 StoryVoice 使用者。
         </p>
       </div>
 
-      <form className="mb-10 overflow-hidden rounded-3xl border border-amber-300/20 bg-gradient-to-br from-amber-200/[.08] via-white/[.025] to-orange-300/[.04] p-5 sm:p-7" onSubmit={handleCreate}>
-        <h2 className="font-serif text-2xl text-stone-100">建立新書冊</h2>
+      <form className="mb-10 overflow-hidden rounded-3xl border border-amber-200 bg-gradient-to-br from-amber-50 via-white to-orange-50 p-5 sm:p-7" onSubmit={handleCreate}>
+        <h2 className="font-serif text-2xl text-stone-900">建立新書冊</h2>
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
           <label className="text-xs text-stone-500">
             書冊名稱
@@ -96,11 +96,11 @@ export function CollectionsPage() {
       </form>
 
       {listState === 'loading' && <div className="library-state">正在讀取書冊…</div>}
-      {listState === 'error' && <div className="library-state border-rose-400/20 text-rose-200">書冊讀取失敗，請重新整理頁面。</div>}
+      {listState === 'error' && <div className="library-state border-rose-300 text-rose-700">書冊讀取失敗，請重新整理頁面。</div>}
       {listState === 'ready' && collections.length === 0 && (
         <div className="library-state min-h-52">
           <div>
-            <h3 className="font-serif text-2xl text-stone-200">還沒有書冊。</h3>
+            <h3 className="font-serif text-2xl text-stone-800">還沒有書冊。</h3>
             <p className="mt-3 text-sm text-stone-500">用上面的表單建立第一個書冊，再把書庫裡的書加進去。</p>
           </div>
         </div>
@@ -110,14 +110,14 @@ export function CollectionsPage() {
           {collections.map((collection) => (
             <div className="book-card flex-col items-start gap-3" key={collection.id}>
               <Link className="block w-full" to={`/collections/${collection.id}`}>
-                <p className="font-serif text-xl text-stone-100">{collection.name}</p>
+                <p className="font-serif text-xl text-stone-900">{collection.name}</p>
                 {collection.description && <p className="mt-2 line-clamp-2 text-sm text-stone-500">{collection.description}</p>}
-                <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-stone-600">
+                <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-stone-400">
                   <span>{collection.bookCount} 本書</span><span>·</span><span>{collection.shareCount} 個分享</span>
                 </div>
               </Link>
               <button
-                className="mt-1 text-xs text-rose-300/70 transition hover:text-rose-200"
+                className="mt-1 text-xs text-rose-500 transition hover:text-rose-700"
                 onClick={() => setPendingDeleteId(collection.id)}
                 type="button"
               >

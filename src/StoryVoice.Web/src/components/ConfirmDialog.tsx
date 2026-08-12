@@ -40,17 +40,17 @@ export function ConfirmDialog({
     <div
       aria-labelledby="confirm-dialog-title"
       aria-modal="true"
-      className="fixed inset-0 z-50 grid place-items-center bg-black/60 px-5 backdrop-blur-sm"
+      className="fixed inset-0 z-50 grid place-items-center bg-stone-900/40 px-5 backdrop-blur-sm"
       role="dialog"
     >
-      <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-[#100d15] p-6 shadow-2xl shadow-black/50">
-        <h3 className="font-serif text-xl text-stone-100" id="confirm-dialog-title">{title}</h3>
-        {description && <p className="mt-3 text-sm leading-6 text-stone-400">{description}</p>}
+      <div className="w-full max-w-sm rounded-2xl border border-stone-200 bg-white p-6 shadow-2xl shadow-stone-400/30">
+        <h3 className="font-serif text-xl text-stone-900" id="confirm-dialog-title">{title}</h3>
+        {description && <p className="mt-3 text-sm leading-6 text-stone-600">{description}</p>}
         <div className="mt-6 flex justify-end gap-3">
           <button className="secondary-button" onClick={onCancel} type="button">{cancelLabel}</button>
           <button
             className={destructive
-              ? 'rounded-full bg-rose-500/90 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-500'
+              ? 'rounded-full bg-rose-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-700'
               : 'primary-button'}
             onClick={onConfirm}
             ref={confirmButtonRef}

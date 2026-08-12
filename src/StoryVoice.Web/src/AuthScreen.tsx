@@ -51,56 +51,56 @@ export function AuthScreen({ csrfToken, onAuthenticated }: AuthScreenProps) {
   }
 
   return (
-    <main className="relative grid min-h-screen place-items-center overflow-hidden bg-[#09070d] px-5 py-12 text-[#f7f2ea]">
+    <main className="relative grid min-h-screen place-items-center overflow-hidden bg-[#faf6ee] px-5 py-12 text-[#332a1f]">
       <div className="ambient ambient-one" aria-hidden="true" />
       <div className="ambient ambient-two" aria-hidden="true" />
-      <section className="relative z-10 grid w-full max-w-5xl overflow-hidden rounded-[2rem] border border-white/10 bg-[#100d15]/90 shadow-2xl shadow-black/50 backdrop-blur-xl lg:grid-cols-[1.05fr_.95fr]">
-        <div className="border-b border-white/[.07] p-8 sm:p-12 lg:border-b-0 lg:border-r">
+      <section className="relative z-10 grid w-full max-w-5xl overflow-hidden rounded-[2rem] border border-stone-200 bg-white/90 shadow-2xl shadow-stone-400/20 backdrop-blur-xl lg:grid-cols-[1.05fr_.95fr]">
+        <div className="border-b border-stone-200 bg-gradient-to-br from-amber-50/70 to-transparent p-8 sm:p-12 lg:border-b-0 lg:border-r">
           <div className="flex items-center gap-3">
-            <span className="grid h-12 w-12 place-items-center rounded-2xl border border-amber-300/20 bg-amber-100/10 font-serif text-lg text-amber-200">SV</span>
+            <span className="grid h-12 w-12 place-items-center rounded-2xl border border-amber-300 bg-amber-50 font-serif text-lg text-amber-800">SV</span>
             <div>
-              <strong className="block font-serif text-xl">StoryVoice</strong>
+              <strong className="block font-serif text-xl text-stone-900">StoryVoice</strong>
               <span className="text-[10px] uppercase tracking-[.26em] text-stone-500">Your private story library</span>
             </div>
           </div>
           <p className="eyebrow mt-14">Step 1</p>
-          <h1 className="mt-4 max-w-xl font-serif text-4xl leading-tight sm:text-5xl">先登入 StoryVoice，<span className="text-amber-200">再連接自己的書櫃。</span></h1>
-          <p className="mt-6 max-w-xl text-sm leading-7 text-stone-400">每個帳號都有獨立書庫。StoryVoice 只保存你主動匯入的檔案與書目，不會接收博客來帳密、Cookie 或受 DRM 保護的內文。</p>
-          <ol className="mt-10 space-y-4 text-sm text-stone-400">
-            <li><span className="mr-3 text-amber-200">01</span>登入或建立 StoryVoice 帳號</li>
-            <li><span className="mr-3 text-orange-200">02</span>登入自己的博客來官方書櫃</li>
-            <li><span className="mr-3 text-rose-200">03</span>用 Companion 同步已呈現的書目</li>
+          <h1 className="mt-4 max-w-xl font-serif text-4xl leading-tight text-stone-900 sm:text-5xl">先登入 StoryVoice，<span className="text-amber-700">再連接自己的書櫃。</span></h1>
+          <p className="mt-6 max-w-xl text-sm leading-7 text-stone-600">每個帳號都有獨立書庫。StoryVoice 只保存你主動匯入的檔案與書目，不會接收博客來帳密、Cookie 或受 DRM 保護的內文。</p>
+          <ol className="mt-10 space-y-4 text-sm text-stone-600">
+            <li><span className="mr-3 text-amber-700">01</span>登入或建立 StoryVoice 帳號</li>
+            <li><span className="mr-3 text-orange-700">02</span>登入自己的博客來官方書櫃</li>
+            <li><span className="mr-3 text-rose-600">03</span>用 Companion 同步已呈現的書目</li>
           </ol>
         </div>
 
         <div className="p-8 sm:p-12">
-          <div className="flex rounded-full border border-white/[.08] bg-black/20 p-1">
+          <div className="flex rounded-full border border-stone-200 bg-stone-100 p-1">
             <button className={`auth-tab ${mode === 'login' ? 'active' : ''}`} onClick={() => { setMode('login'); setMessage('') }} type="button">登入</button>
             <button className={`auth-tab ${mode === 'register' ? 'active' : ''}`} onClick={() => { setMode('register'); setMessage('') }} type="button">建立帳號</button>
           </div>
-          <h2 className="mt-9 font-serif text-3xl">{mode === 'login' ? '登入 StoryVoice' : '建立 StoryVoice 帳號'}</h2>
+          <h2 className="mt-9 font-serif text-3xl text-stone-900">{mode === 'login' ? '登入 StoryVoice' : '建立 StoryVoice 帳號'}</h2>
           <p className="mt-2 text-sm text-stone-500">{mode === 'login' ? '回到你的個人故事書庫。' : '使用電子郵件建立獨立書庫。'}</p>
 
           <form className="mt-8 space-y-5" onSubmit={handleSubmit}>
-            <label className="block text-sm text-stone-300">
+            <label className="block text-sm text-stone-700">
               電子郵件
               <input autoComplete="email" className="auth-input mt-2" name="email" required type="email" />
             </label>
-            <label className="block text-sm text-stone-300">
+            <label className="block text-sm text-stone-700">
               密碼
               <input autoComplete={mode === 'login' ? 'current-password' : 'new-password'} className="auth-input mt-2" minLength={10} name="password" required type="password" />
             </label>
-            {mode === 'register' && <p className="text-xs leading-6 text-stone-600">至少 10 字元，並包含大小寫英文字母、數字與符號。</p>}
+            {mode === 'register' && <p className="text-xs leading-6 text-stone-400">至少 10 字元，並包含大小寫英文字母、數字與符號。</p>}
             {mode === 'login' && (
               <label className="flex items-center gap-2 text-xs text-stone-500">
-                <input className="h-4 w-4 accent-amber-300" name="rememberMe" type="checkbox" />
+                <input className="h-4 w-4 accent-amber-600" name="rememberMe" type="checkbox" />
                 在這台裝置保持登入
               </label>
             )}
             <button className="primary-button w-full disabled:cursor-wait disabled:opacity-60" disabled={state === 'loading'} type="submit">
               {state === 'loading' ? '請稍候…' : mode === 'login' ? '登入 StoryVoice' : '建立帳號並登入'}
             </button>
-            <p className={`min-h-6 text-sm ${state === 'error' ? 'text-rose-300' : 'text-stone-500'}`} role="status">{message}</p>
+            <p className={`min-h-6 text-sm ${state === 'error' ? 'text-rose-600' : 'text-stone-500'}`} role="status">{message}</p>
           </form>
         </div>
       </section>

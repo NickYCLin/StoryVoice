@@ -298,26 +298,26 @@ export function LibraryPage() {
         <div>
           <p className="eyebrow">Your library</p>
           <h1 className="mt-3 font-serif text-4xl tracking-tight sm:text-5xl">整理你的故事書庫。</h1>
-          <p className="mt-4 max-w-2xl text-sm leading-7 text-stone-400">搜尋、篩選、排序並加上此裝置標籤；有合法正文的 EPUB／TXT 仍可直接匯入章節。</p>
+          <p className="mt-4 max-w-2xl text-sm leading-7 text-stone-600">搜尋、篩選、排序並加上此裝置標籤；有合法正文的 EPUB／TXT 仍可直接匯入章節。</p>
         </div>
-        <span className="rounded-full border border-white/[.08] px-3 py-1 text-xs text-stone-500">書庫已有 {books.length} 本</span>
+        <span className="rounded-full border border-stone-200 px-3 py-1 text-xs text-stone-500">書庫已有 {books.length} 本</span>
       </div>
 
-      <form className="mb-6 overflow-hidden rounded-3xl border border-amber-300/20 bg-gradient-to-br from-amber-200/[.08] via-white/[.025] to-orange-300/[.04] p-5 sm:p-7" onSubmit={handleUpload}>
+      <form className="mb-6 overflow-hidden rounded-3xl border border-amber-200 bg-gradient-to-br from-amber-50 via-white to-orange-50 p-5 sm:p-7" onSubmit={handleUpload}>
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
           <div className="min-w-0">
-            <span className="inline-flex rounded-full border border-emerald-300/20 bg-emerald-300/[.08] px-3 py-1 text-xs font-semibold text-emerald-200">推薦方式</span>
-            <label className="mt-4 block font-serif text-2xl text-stone-100" htmlFor="book-file">選擇 EPUB 或 TXT</label>
-            <p className="mt-2 text-sm leading-7 text-stone-400">只要準備一個無 DRM 的 EPUB 或 UTF-8 TXT。選好後按「匯入並解析」，不用填其他欄位。</p>
+            <span className="inline-flex rounded-full border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">推薦方式</span>
+            <label className="mt-4 block font-serif text-2xl text-stone-900" htmlFor="book-file">選擇 EPUB 或 TXT</label>
+            <p className="mt-2 text-sm leading-7 text-stone-600">只要準備一個無 DRM 的 EPUB 或 UTF-8 TXT。選好後按「匯入並解析」，不用填其他欄位。</p>
             <input
               accept=".epub,.txt,application/epub+zip,text/plain"
-              className="mt-5 block w-full scroll-mt-6 cursor-pointer rounded-2xl border border-white/10 bg-black/20 p-2.5 text-sm text-stone-400 file:mr-4 file:rounded-xl file:border-0 file:bg-amber-200/10 file:px-4 file:py-2.5 file:font-semibold file:text-amber-100 hover:border-amber-300/25"
+              className="mt-5 block w-full scroll-mt-6 cursor-pointer rounded-2xl border border-stone-200 bg-white p-2.5 text-sm text-stone-600 file:mr-4 file:rounded-xl file:border-0 file:bg-amber-100 file:px-4 file:py-2.5 file:font-semibold file:text-amber-800 hover:border-amber-300"
               id="book-file"
               name="file"
               required
               type="file"
             />
-            <p className={`mt-3 min-h-5 text-xs ${uploadState === 'error' ? 'text-rose-300' : uploadState === 'ready' ? 'text-emerald-300' : 'text-stone-500'}`} role="status">
+            <p className={`mt-3 min-h-5 text-xs ${uploadState === 'error' ? 'text-rose-600' : uploadState === 'ready' ? 'text-emerald-700' : 'text-stone-500'}`} role="status">
               {uploadMessage || '支援 EPUB、UTF-8 TXT，最大 10 MiB；請只處理你有權使用的內容。'}
             </p>
           </div>
@@ -327,33 +327,33 @@ export function LibraryPage() {
         </div>
       </form>
 
-      <details className="group mb-10 overflow-hidden rounded-2xl border border-white/[.07] bg-white/[.018]">
-        <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-4 text-sm text-stone-300 sm:px-6">
-          <span><strong className="font-semibold text-stone-200">進階：同步博客來書櫃書目</strong><span className="ml-2 text-stone-600">不含受保護內文</span></span>
-          <span className="text-stone-600 transition group-open:rotate-45">＋</span>
+      <details className="group mb-10 overflow-hidden rounded-2xl border border-stone-200 bg-white">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-4 text-sm text-stone-700 sm:px-6">
+          <span><strong className="font-semibold text-stone-800">進階：同步博客來書櫃書目</strong><span className="ml-2 text-stone-400">不含受保護內文</span></span>
+          <span className="text-stone-400 transition group-open:rotate-45">＋</span>
         </summary>
-        <div className="grid gap-6 border-t border-white/[.06] px-5 py-6 sm:px-6 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
+        <div className="grid gap-6 border-t border-stone-200 px-5 py-6 sm:px-6 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
           <div className="min-w-0">
-            <p className="text-sm leading-7 text-stone-400">這條路只同步書名、作者、封面、官方閱讀連結，以及頁面明確標示的版型／官方 TTS 狀態；不會把電子書內文匯入 StoryVoice。</p>
+            <p className="text-sm leading-7 text-stone-600">這條路只同步書名、作者、封面、官方閱讀連結，以及頁面明確標示的版型／官方 TTS 狀態；不會把電子書內文匯入 StoryVoice。</p>
             <ol className="mt-4 grid gap-2 text-xs text-stone-500 sm:grid-cols-3">
-              <li><span className="mr-2 text-orange-200/70">01</span>登入博客來官方書櫃</li>
-              <li><span className="mr-2 text-orange-200/70">02</span>建立金鑰並貼到 Companion</li>
-              <li><span className="mr-2 text-orange-200/70">03</span>勾選同步後重新整理</li>
+              <li><span className="mr-2 text-orange-600">01</span>登入博客來官方書櫃</li>
+              <li><span className="mr-2 text-orange-600">02</span>建立金鑰並貼到 Companion</li>
+              <li><span className="mr-2 text-orange-600">03</span>勾選同步後重新整理</li>
             </ol>
-            <div className="mt-5 rounded-2xl border border-sky-300/15 bg-sky-300/[.035] p-4">
-              <strong className="text-sm text-stone-200">第一次安裝 Companion</strong>
+            <div className="mt-5 rounded-2xl border border-sky-200 bg-sky-50 p-4">
+              <strong className="text-sm text-stone-800">第一次安裝 Companion</strong>
               <ol className="mt-3 space-y-2 text-xs leading-6 text-stone-500">
-                <li><span className="mr-2 text-sky-200/70">1.</span>按「下載 Companion ZIP」，下載後解壓縮。</li>
-                <li><span className="mr-2 text-sky-200/70">2.</span>在 Chrome 網址列輸入 <code className="text-sky-200">chrome://extensions</code>，開啟「開發人員模式」。</li>
-                <li><span className="mr-2 text-sky-200/70">3.</span>按「載入未封裝項目」，選擇剛才解壓縮後的資料夾。</li>
+                <li><span className="mr-2 text-sky-700">1.</span>按「下載 Companion ZIP」，下載後解壓縮。</li>
+                <li><span className="mr-2 text-sky-700">2.</span>在 Chrome 網址列輸入 <code className="rounded bg-sky-100 px-1 text-sky-800">chrome://extensions</code>，開啟「開發人員模式」。</li>
+                <li><span className="mr-2 text-sky-700">3.</span>按「載入未封裝項目」，選擇剛才解壓縮後的資料夾。</li>
               </ol>
-              <p className="mt-3 text-xs leading-5 text-stone-600">Chrome 基於安全規則，這一步必須由你親自確認；安裝後不用提供博客來帳密給 StoryVoice。</p>
-              <a className="mt-3 inline-flex text-xs text-sky-200 transition hover:text-sky-100" href="https://github.com/NickYCLin/StoryVoice/tree/main/extensions/books-com-tw-companion" rel="noreferrer" target="_blank">檢視 Companion 原始碼 ↗</a>
+              <p className="mt-3 text-xs leading-5 text-stone-400">Chrome 基於安全規則，這一步必須由你親自確認；安裝後不用提供博客來帳密給 StoryVoice。</p>
+              <a className="mt-3 inline-flex text-xs text-sky-700 transition hover:text-sky-800" href="https://github.com/NickYCLin/StoryVoice/tree/main/extensions/books-com-tw-companion" rel="noreferrer" target="_blank">檢視 Companion 原始碼 ↗</a>
             </div>
-            <div className="mt-5 rounded-2xl border border-orange-300/15 bg-orange-300/[.035] p-4">
+            <div className="mt-5 rounded-2xl border border-orange-200 bg-orange-50 p-4">
               <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
                 <div>
-                  <strong className="text-sm text-stone-200">StoryVoice 連線金鑰</strong>
+                  <strong className="text-sm text-stone-800">StoryVoice 連線金鑰</strong>
                   <p className="mt-1 text-xs leading-5 text-stone-500">只允許 Companion 把 metadata 同步到你的帳號；重新建立會撤銷舊金鑰。</p>
                 </div>
                 <div className="flex shrink-0 flex-wrap gap-2">
@@ -369,7 +369,7 @@ export function LibraryPage() {
                   <button className="secondary-button shrink-0" onClick={handleCopyCompanionToken} type="button">複製金鑰</button>
                 </div>
               )}
-              <p className={`mt-2 min-h-5 text-xs ${companionTokenState === 'error' ? 'text-rose-300' : 'text-stone-500'}`} role="status">{companionTokenMessage || '金鑰只會在建立當下顯示；請貼到 Companion 後再同步。'}</p>
+              <p className={`mt-2 min-h-5 text-xs ${companionTokenState === 'error' ? 'text-rose-600' : 'text-stone-500'}`} role="status">{companionTokenMessage || '金鑰只會在建立當下顯示；請貼到 Companion 後再同步。'}</p>
             </div>
           </div>
           <div className="grid gap-3 sm:grid-cols-3 lg:w-52 lg:grid-cols-1">
@@ -389,7 +389,7 @@ export function LibraryPage() {
       )}
 
       {libraryState === 'ready' && books.length > 0 && (
-        <section aria-label="書庫整理工具" className="mb-6 rounded-3xl border border-white/[.07] bg-white/[.018] p-5 sm:p-6">
+        <section aria-label="書庫整理工具" className="mb-6 rounded-3xl border border-stone-200 bg-white p-5 sm:p-6">
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <label className="text-xs text-stone-500 sm:col-span-2 lg:col-span-1">
               搜尋書名、作者、書籍 ID 或標籤
@@ -444,7 +444,7 @@ export function LibraryPage() {
               </select>
             </label>
           </div>
-          <div className="mt-5 flex flex-col justify-between gap-3 border-t border-white/[.06] pt-4 text-xs text-stone-500 sm:flex-row sm:items-center">
+          <div className="mt-5 flex flex-col justify-between gap-3 border-t border-stone-200 pt-4 text-xs text-stone-500 sm:flex-row sm:items-center">
             <span role="status">符合 {visibleBooks.length}／全部 {books.length} 本</span>
             <button className="secondary-button disabled:opacity-40" disabled={!hasCatalogFilters} onClick={() => setCatalogFilters(defaultCatalogFilters)} type="button">清除條件</button>
           </div>
@@ -452,26 +452,26 @@ export function LibraryPage() {
       )}
 
       {libraryState === 'loading' && <div className="library-state">正在連接 StoryVoice API…</div>}
-      {libraryState === 'error' && <div className="library-state border-rose-400/20 text-rose-200">API 尚未連線。請確認後端服務已啟動。</div>}
+      {libraryState === 'error' && <div className="library-state border-rose-300 text-rose-700">API 尚未連線。請確認後端服務已啟動。</div>}
       {libraryState === 'ready' && books.length === 0 && (
         <div className="library-state min-h-64">
           <div>
-            <span className="mx-auto mb-5 grid h-14 w-14 place-items-center rounded-2xl border border-amber-300/20 bg-amber-300/[.06] text-2xl">◇</span>
-            <h3 className="font-serif text-2xl text-stone-200">還沒有書，從上面的檔案選擇開始。</h3>
+            <span className="mx-auto mb-5 grid h-14 w-14 place-items-center rounded-2xl border border-amber-200 bg-amber-50 text-2xl">◇</span>
+            <h3 className="font-serif text-2xl text-stone-800">還沒有書，從上面的檔案選擇開始。</h3>
             <p className="mx-auto mt-3 max-w-md text-sm leading-7 text-stone-500">選好 EPUB 或 TXT，再按「匯入並解析」。完成後，書名與章節會出現在這裡。</p>
             <ol className="mx-auto mt-6 grid max-w-md gap-2 text-left text-xs text-stone-500">
-              <li><span className="mr-2 text-amber-200/70">01</span>準備一本你有權處理、無 DRM 的 EPUB 或 UTF-8 TXT</li>
-              <li><span className="mr-2 text-amber-200/70">02</span>選擇檔案並按「匯入並解析」</li>
-              <li><span className="mr-2 text-amber-200/70">03</span>匯入後選書、展開章節檢查解析內容</li>
+              <li><span className="mr-2 text-amber-700">01</span>準備一本你有權處理、無 DRM 的 EPUB 或 UTF-8 TXT</li>
+              <li><span className="mr-2 text-amber-700">02</span>選擇檔案並按「匯入並解析」</li>
+              <li><span className="mr-2 text-amber-700">03</span>匯入後選書、展開章節檢查解析內容</li>
             </ol>
-            <a className="mt-6 inline-flex text-sm font-semibold text-amber-200 transition hover:text-amber-100" href="#book-file">回到選擇檔案 ↑</a>
+            <a className="mt-6 inline-flex text-sm font-semibold text-amber-700 transition hover:text-amber-800" href="#book-file">回到選擇檔案 ↑</a>
           </div>
         </div>
       )}
       {libraryState === 'ready' && books.length > 0 && visibleBooks.length === 0 && (
         <div className="library-state min-h-56">
           <div>
-            <h3 className="font-serif text-2xl text-stone-200">沒有符合條件的書。</h3>
+            <h3 className="font-serif text-2xl text-stone-800">沒有符合條件的書。</h3>
             <p className="mt-3 text-sm text-stone-500">換一組條件，或清除全部篩選。</p>
             <button className="secondary-button mt-5" onClick={() => setCatalogFilters(defaultCatalogFilters)} type="button">清除條件</button>
           </div>
@@ -493,16 +493,16 @@ export function LibraryPage() {
                     : <span>{book.title.slice(0, 1)}</span>}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate font-serif text-xl text-stone-100">{book.title}</p>
+                  <p className="truncate font-serif text-xl text-stone-900">{book.title}</p>
                   <p className="mt-1 truncate text-sm text-stone-500">{book.author}</p>
-                  <div className="mt-7 flex flex-wrap items-center gap-3 text-xs text-stone-600">
+                  <div className="mt-7 flex flex-wrap items-center gap-3 text-xs text-stone-400">
                     <span>{book.chapterCount} 章</span><span>·</span><span>{book.sourceProvider === 'books-com-tw' ? '博客來' : book.fileType.toUpperCase()}</span><span>·</span><span>{book.status === 'Linked' ? '已連結' : book.status}</span>
-                    {book.nativeTtsAvailable === true && <><span>·</span><span className="text-emerald-300/80">官方 TTS</span></>}
+                    {book.nativeTtsAvailable === true && <><span>·</span><span className="text-emerald-600">官方 TTS</span></>}
                   </div>
                   {(deviceBookTags[book.id]?.length ?? 0) > 0 && (
                     <div className="mt-3 flex flex-wrap gap-2">
                       {deviceBookTags[book.id].slice(0, 3).map((tag) => (
-                        <span className="rounded-full border border-sky-300/15 bg-sky-300/[.04] px-2 py-1 text-[10px] text-sky-200/70" key={tag}>{tag}</span>
+                        <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-1 text-[10px] text-sky-700" key={tag}>{tag}</span>
                       ))}
                     </div>
                   )}
@@ -511,36 +511,36 @@ export function LibraryPage() {
             ))}
           </div>
 
-          <aside className="min-h-80 rounded-3xl border border-white/[.07] bg-white/[.018] p-5 sm:p-7">
+          <aside className="min-h-80 rounded-3xl border border-stone-200 bg-white p-5 sm:p-7">
             {detailState === 'loading' && <div className="library-state h-full">正在展開章節…</div>}
-            {detailState === 'error' && <div className="library-state h-full border-rose-400/20 text-rose-200">章節讀取失敗，請重新選擇書籍。</div>}
+            {detailState === 'error' && <div className="library-state h-full border-rose-300 text-rose-700">章節讀取失敗，請重新選擇書籍。</div>}
             {detailState === 'ready' && selectedBook && (
               <div>
-                <div className="flex flex-col justify-between gap-4 border-b border-white/[.07] pb-6 sm:flex-row sm:items-start">
+                <div className="flex flex-col justify-between gap-4 border-b border-stone-200 pb-6 sm:flex-row sm:items-start">
                   <div className="min-w-0">
                     <p className="eyebrow">{selectedBook.sourceProvider === 'books-com-tw' ? 'Books.com.tw linked book' : 'Selected story'}</p>
-                    <h3 className="mt-2 break-words font-serif text-3xl text-stone-100">{selectedBook.title}</h3>
+                    <h3 className="mt-2 break-words font-serif text-3xl text-stone-900">{selectedBook.title}</h3>
                     <p className="mt-2 text-sm text-stone-500">{selectedBook.author} · {selectedBook.language} · {selectedBook.sourceProvider === 'books-com-tw' ? '博客來書櫃' : selectedBook.fileType.toUpperCase()}</p>
                     {selectedBook.sourceProvider === 'books-com-tw' && (
-                      <p className="mt-2 text-xs text-stone-600">
+                      <p className="mt-2 text-xs text-stone-400">
                         {selectedBook.ebookLayout === 'Reflowable' ? 'EPUB 流動版型' : selectedBook.ebookLayout === 'Fixed' ? 'EPUB 固定版型' : '版型未標示'}
                         {' · '}
                         {selectedBook.nativeTtsAvailable === true ? '博客來官方 TTS 可用' : selectedBook.nativeTtsAvailable === false ? '博客來官方 TTS 未開放' : '官方 TTS 狀態未標示'}
                       </p>
                     )}
                     {selectedBook.sourceUrl && (
-                      <a className="mt-4 inline-flex text-sm text-orange-200 transition hover:text-orange-100" href={selectedBook.sourceUrl} rel="noreferrer" target="_blank">回博客來官方閱讀器 ↗</a>
+                      <a className="mt-4 inline-flex text-sm text-orange-700 transition hover:text-orange-800" href={selectedBook.sourceUrl} rel="noreferrer" target="_blank">回博客來官方閱讀器 ↗</a>
                     )}
                   </div>
-                  <span className="shrink-0 rounded-full border border-white/[.08] px-3 py-1 text-xs text-stone-500">{selectedBook.chapters.length} 章</span>
+                  <span className="shrink-0 rounded-full border border-stone-200 px-3 py-1 text-xs text-stone-500">{selectedBook.chapters.length} 章</span>
                 </div>
-                <div className="mt-5 rounded-2xl border border-sky-300/10 bg-sky-300/[.025] p-4">
+                <div className="mt-5 rounded-2xl border border-sky-100 bg-sky-50/70 p-4">
                   <div className="flex flex-wrap items-center gap-2">
-                    <strong className="mr-1 text-xs text-stone-300">此裝置標籤</strong>
+                    <strong className="mr-1 text-xs text-stone-700">此裝置標籤</strong>
                     {(deviceBookTags[selectedBook.id] ?? []).map((tag) => (
                       <button
                         aria-label={`移除標籤 ${tag}`}
-                        className="rounded-full border border-sky-300/15 bg-sky-300/[.05] px-2.5 py-1 text-xs text-sky-200/80 transition hover:border-rose-300/25 hover:text-rose-200"
+                        className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-xs text-sky-700 transition hover:border-rose-300 hover:text-rose-700"
                         key={tag}
                         onClick={() => removeDeviceTag(selectedBook.id, tag)}
                         type="button"
@@ -548,7 +548,7 @@ export function LibraryPage() {
                         {tag} ×
                       </button>
                     ))}
-                    {(deviceBookTags[selectedBook.id]?.length ?? 0) === 0 && <span className="text-xs text-stone-600">尚未加標籤</span>}
+                    {(deviceBookTags[selectedBook.id]?.length ?? 0) === 0 && <span className="text-xs text-stone-400">尚未加標籤</span>}
                   </div>
                   <form className="mt-3 flex flex-col gap-2 sm:flex-row" onSubmit={handleAddDeviceTag}>
                     <input
@@ -561,7 +561,7 @@ export function LibraryPage() {
                     />
                     <button className="secondary-button shrink-0" disabled={!normalizeDeviceTag(deviceTagDraft) || (deviceBookTags[selectedBook.id]?.length ?? 0) >= 8} type="submit">加入標籤</button>
                   </form>
-                  <p className="mt-2 text-[10px] leading-5 text-stone-600">最多 8 個，只保存在目前瀏覽器；不會傳到博客來。</p>
+                  <p className="mt-2 text-[10px] leading-5 text-stone-400">最多 8 個，只保存在目前瀏覽器；不會傳到博客來。</p>
                 </div>
                 <BookInsightsPanel
                   book={selectedBook}
@@ -575,19 +575,19 @@ export function LibraryPage() {
                   {selectedBook.chapters.length === 0 && selectedBook.sourceProvider === 'books-com-tw' && (
                     <div className="library-state min-h-52">
                       <div>
-                        <span className="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-2xl border border-orange-300/20 bg-orange-300/[.06] text-orange-200">↗</span>
-                        <h4 className="font-serif text-xl text-stone-200">{selectedBook.nativeTtsAvailable === true ? '這本書可用博客來官方 TTS' : '書櫃資料已連結，內文仍在博客來'}</h4>
+                        <span className="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-2xl border border-orange-200 bg-orange-50 text-orange-700">↗</span>
+                        <h4 className="font-serif text-xl text-stone-800">{selectedBook.nativeTtsAvailable === true ? '這本書可用博客來官方 TTS' : '書櫃資料已連結，內文仍在博客來'}</h4>
                         <p className="mx-auto mt-3 max-w-md text-sm leading-7 text-stone-500">{selectedBook.nativeTtsAvailable === true ? '請從上方官方連結開啟博客來 App／閱讀器使用授權朗讀；StoryVoice 不會接收書籍正文。' : 'StoryVoice 不會抓取或解密受保護內容。要進行故事分析，請另外匯入你有權處理的無 DRM EPUB／TXT。'}</p>
-                        <a className="mt-5 inline-flex text-sm text-amber-200" href="#book-file">前往合法檔案匯入 ↑</a>
+                        <a className="mt-5 inline-flex text-sm text-amber-700" href="#book-file">前往合法檔案匯入 ↑</a>
                       </div>
                     </div>
                   )}
                   {selectedBook.chapters.map((chapter) => (
                     <details className="chapter-panel group" key={chapter.id}>
                       <summary className="flex cursor-pointer list-none items-center gap-4 px-4 py-4 text-left">
-                        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-amber-200/[.07] font-mono text-xs text-amber-200/70">{String(chapter.chapterNumber).padStart(2, '0')}</span>
-                        <span className="min-w-0 flex-1 truncate font-serif text-lg text-stone-200">{chapter.title}</span>
-                        <span className="text-stone-600 transition group-open:rotate-45">＋</span>
+                        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-amber-50 font-mono text-xs text-amber-700">{String(chapter.chapterNumber).padStart(2, '0')}</span>
+                        <span className="min-w-0 flex-1 truncate font-serif text-lg text-stone-800">{chapter.title}</span>
+                        <span className="text-stone-400 transition group-open:rotate-45">＋</span>
                       </summary>
                       <div className="reading-text">{chapter.originalText}</div>
                     </details>

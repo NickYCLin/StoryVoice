@@ -169,7 +169,7 @@ export function CollectionDetailPage() {
   if (detailState === 'error' || !collection) {
     return (
       <section className="relative z-10 mx-auto max-w-5xl px-6 py-12 lg:px-10">
-        <div className="library-state border-rose-400/20 text-rose-200">找不到這個書冊，或已被刪除。</div>
+        <div className="library-state border-rose-300 text-rose-700">找不到這個書冊，或已被刪除。</div>
         <button className="secondary-button mt-6" onClick={() => navigate('/collections')} type="button">回到書冊列表</button>
       </section>
     )
@@ -177,9 +177,9 @@ export function CollectionDetailPage() {
 
   return (
     <section className="relative z-10 mx-auto max-w-5xl px-6 py-12 lg:px-10">
-      <Link className="text-sm text-stone-500 transition hover:text-stone-300" to="/collections">← 回到書冊列表</Link>
+      <Link className="text-sm text-stone-500 transition hover:text-stone-800" to="/collections">← 回到書冊列表</Link>
 
-      <form className="mt-6 rounded-3xl border border-white/[.07] bg-white/[.018] p-5 sm:p-7" onSubmit={handleRename}>
+      <form className="mt-6 rounded-3xl border border-stone-200 bg-white p-5 sm:p-7" onSubmit={handleRename}>
         <label className="block text-xs text-stone-500">
           書冊名稱
           <input className="auth-input mt-2 font-serif text-2xl" maxLength={200} onChange={(event) => setName(event.target.value)} required value={name} />
@@ -194,21 +194,21 @@ export function CollectionDetailPage() {
         </div>
       </form>
 
-      <section className="mt-8 rounded-3xl border border-white/[.07] bg-white/[.018] p-5 sm:p-7" aria-label="書冊內書籍">
-        <h2 className="font-serif text-2xl text-stone-100">書冊內書籍</h2>
+      <section className="mt-8 rounded-3xl border border-stone-200 bg-white p-5 sm:p-7" aria-label="書冊內書籍">
+        <h2 className="font-serif text-2xl text-stone-900">書冊內書籍</h2>
         {collection.books.length === 0 && <p className="mt-3 text-sm text-stone-500">這個書冊還沒有書。</p>}
         <ul className="mt-4 space-y-2">
           {collection.books
             .slice()
             .sort((left, right) => left.sortOrder - right.sortOrder)
             .map((entry) => (
-              <li className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/[.06] bg-black/10 p-3" key={entry.id}>
+              <li className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-stone-200 bg-stone-50 p-3" key={entry.id}>
                 <div className="min-w-0">
-                  <p className="truncate text-sm text-stone-200">{entry.volumeLabel ? `${entry.volumeLabel} · ` : ''}{entry.bookTitle}</p>
-                  <p className="mt-1 text-xs text-stone-600">{entry.bookAuthor} · 排序 {entry.sortOrder}</p>
+                  <p className="truncate text-sm text-stone-800">{entry.volumeLabel ? `${entry.volumeLabel} · ` : ''}{entry.bookTitle}</p>
+                  <p className="mt-1 text-xs text-stone-400">{entry.bookAuthor} · 排序 {entry.sortOrder}</p>
                 </div>
                 <button
-                  className="text-xs text-rose-300/70 transition hover:text-rose-200"
+                  className="text-xs text-rose-500 transition hover:text-rose-700"
                   onClick={() => setPendingRemoval({ kind: 'book', id: entry.bookId, label: entry.bookTitle })}
                   type="button"
                 >
@@ -218,7 +218,7 @@ export function CollectionDetailPage() {
             ))}
         </ul>
 
-        <form className="mt-6 grid gap-3 border-t border-white/[.06] pt-6 sm:grid-cols-[minmax(0,1fr)_auto_auto_auto] sm:items-end" onSubmit={handleAddBook}>
+        <form className="mt-6 grid gap-3 border-t border-stone-200 pt-6 sm:grid-cols-[minmax(0,1fr)_auto_auto_auto] sm:items-end" onSubmit={handleAddBook}>
           <label className="text-xs text-stone-500">
             從書庫加入書籍
             <select className="auth-input mt-2" onChange={(event) => setAddBookId(event.target.value)} value={addBookId}>
@@ -236,21 +236,21 @@ export function CollectionDetailPage() {
           </label>
           <button className="secondary-button disabled:cursor-wait disabled:opacity-60" disabled={addBookState === 'loading' || !addBookId} type="submit">加入</button>
         </form>
-        {eligibleBooks.length === 0 && <p className="mt-2 text-xs text-amber-200/70">書庫裡沒有可加入的書；只能加入你自己上傳、含正文的書籍。</p>}
+        {eligibleBooks.length === 0 && <p className="mt-2 text-xs text-amber-700">書庫裡沒有可加入的書；只能加入你自己上傳、含正文的書籍。</p>}
         <StatusMessage className="mt-2" message={addBookMessage} status={addBookState} />
       </section>
 
-      <section className="mt-8 rounded-3xl border border-white/[.07] bg-white/[.018] p-5 sm:p-7" aria-label="唯讀分享">
-        <h2 className="font-serif text-2xl text-stone-100">分享給其他使用者（唯讀）</h2>
+      <section className="mt-8 rounded-3xl border border-stone-200 bg-white p-5 sm:p-7" aria-label="唯讀分享">
+        <h2 className="font-serif text-2xl text-stone-900">分享給其他使用者（唯讀）</h2>
         <p className="mt-2 text-sm text-stone-500">分享對象只能瀏覽書名、章節與正文，看不到你的閱讀筆記、摘要或朗讀音訊。</p>
 
         {collection.shares.length === 0 && <p className="mt-4 text-sm text-stone-500">還沒有分享給任何人。</p>}
         <ul className="mt-4 space-y-2">
           {collection.shares.map((share) => (
-            <li className="flex items-center justify-between gap-3 rounded-xl border border-white/[.06] bg-black/10 p-3" key={share.id}>
-              <span className="text-sm text-stone-300">{share.granteeEmail}</span>
+            <li className="flex items-center justify-between gap-3 rounded-xl border border-stone-200 bg-stone-50 p-3" key={share.id}>
+              <span className="text-sm text-stone-700">{share.granteeEmail}</span>
               <button
-                className="text-xs text-rose-300/70 transition hover:text-rose-200"
+                className="text-xs text-rose-500 transition hover:text-rose-700"
                 onClick={() => setPendingRemoval({ kind: 'share', id: share.id, label: share.granteeEmail })}
                 type="button"
               >
@@ -260,7 +260,7 @@ export function CollectionDetailPage() {
           ))}
         </ul>
 
-        <form className="mt-6 flex flex-col gap-3 border-t border-white/[.06] pt-6 sm:flex-row" onSubmit={handleAddShare}>
+        <form className="mt-6 flex flex-col gap-3 border-t border-stone-200 pt-6 sm:flex-row" onSubmit={handleAddShare}>
           <label className="flex-1 text-xs text-stone-500">
             對方的 StoryVoice 帳號 email
             <input className="auth-input mt-2" onChange={(event) => setShareEmail(event.target.value)} placeholder="friend@example.com" type="email" value={shareEmail} />

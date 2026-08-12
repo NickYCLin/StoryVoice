@@ -86,7 +86,7 @@ export default function LibraryStatusMatrix({ refreshKey }: Props) {
           {loading ? '更新中…' : '重新整理狀態'}
         </button>
       </div>
-      {error && <p className="form-message error">{error}</p>}
+      {error && <p className="px-1 text-xs text-rose-600">{error}</p>}
       {!loading && !error && items.length === 0 && (
         <p className="library-state">目前沒有可顯示的書籍。</p>
       )}

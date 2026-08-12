@@ -137,29 +137,29 @@ export function NarrationPanel({ book, csrfToken }: Props) {
   }
 
   return (
-    <section aria-label="AI 朗讀與有聲書" className="mt-5 rounded-2xl border border-amber-300/10 bg-amber-300/[.025] p-4">
+    <section aria-label="AI 朗讀與有聲書" className="mt-5 rounded-2xl border border-amber-100 bg-amber-50/60 p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-200/70">合法正文神經語音</p>
-          <h4 className="mt-1 font-serif text-lg text-stone-200">AI 朗讀與有聲書</h4>
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-700">合法正文神經語音</p>
+          <h4 className="mt-1 font-serif text-lg text-stone-800">AI 朗讀與有聲書</h4>
           <p className="mt-2 max-w-3xl text-xs leading-6 text-stone-500">
             StoryVoice 只處理你上傳或明確連結的合法 EPUB／TXT 正文。文字會送往 Microsoft Edge 神經語音服務，音訊完成後保存於你的私人 StoryVoice 帳號；這與博客來官方閱讀器的 TTS 標記是不同能力。
           </p>
         </div>
-        <span className="shrink-0 rounded-full border border-amber-300/20 bg-amber-300/10 px-3 py-1 text-xs text-amber-200">
+        <span className="shrink-0 rounded-full border border-amber-200 bg-amber-100 px-3 py-1 text-xs text-amber-800">
           {eligible ? '正文已就緒' : '等待合法正文'}
         </span>
       </div>
 
       {!eligible && (
-        <p className="mt-4 rounded-xl border border-white/[.06] bg-black/10 p-4 text-xs leading-6 text-stone-500">
+        <p className="mt-4 rounded-xl border border-stone-200 bg-white p-4 text-xs leading-6 text-stone-500">
           目前只有書目資料；先上傳你合法持有、無 DRM 的 EPUB／TXT，再於上方明確連結正文。博客來官方 TTS 標記不等於 StoryVoice 音訊。
         </p>
       )}
 
       {eligible && (
-        <div className="mt-4 rounded-xl border border-white/[.06] bg-black/10 p-4">
-          <p className="text-sm leading-6 text-stone-400">
+        <div className="mt-4 rounded-xl border border-stone-200 bg-white p-4">
+          <p className="text-sm leading-6 text-stone-600">
             新的合法正文一律透過多角色系列配音建立：固定旁白與角色聲線、逐章審核、全系列 staged rebuild，再由你人工啟用。既有單人音訊仍可在下方讀取、播放與取消。
           </p>
           <Link className="secondary-button mt-3 inline-flex" to="/series">前往多角色系列配音</Link>
@@ -170,13 +170,13 @@ export function NarrationPanel({ book, csrfToken }: Props) {
 
       <div className="mt-4 space-y-3">
         {jobs.map((job) => (
-          <article className="rounded-xl border border-white/[.06] bg-black/10 p-4" key={job.id}>
+          <article className="rounded-xl border border-stone-200 bg-white p-4" key={job.id}>
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <p className="font-semibold text-stone-200">{statusLabels[job.status]}</p>
+                <p className="font-semibold text-stone-800">{statusLabels[job.status]}</p>
                 <p className="mt-1 text-xs text-stone-500">{job.voice} · 語速 {job.rate} · 嘗試 {job.attempts}/3</p>
               </div>
-              <span className="rounded-full border border-white/[.08] px-3 py-1 text-xs text-stone-400">{job.progressPercent}%</span>
+              <span className="rounded-full border border-stone-200 px-3 py-1 text-xs text-stone-600">{job.progressPercent}%</span>
             </div>
             {job.status === 'Running' && <VoiceWave />}
             {(job.status === 'Queued' || job.status === 'Running') && (
@@ -186,11 +186,11 @@ export function NarrationPanel({ book, csrfToken }: Props) {
                   aria-valuemax={100}
                   aria-valuemin={0}
                   aria-valuenow={job.progressPercent}
-                  className="h-2 overflow-hidden rounded-full bg-white/[.08]"
+                  className="h-2 overflow-hidden rounded-full bg-stone-100"
                   role="progressbar"
                 >
                   <div
-                    className="h-full rounded-full bg-amber-300 transition-[width] duration-300 motion-reduce:transition-none"
+                    className="h-full rounded-full bg-amber-500 transition-[width] duration-300 motion-reduce:transition-none"
                     style={{ width: `${job.progressPercent}%` }}
                   />
                 </div>
@@ -214,7 +214,7 @@ export function NarrationPanel({ book, csrfToken }: Props) {
               </audio>
             )}
             {job.status === 'Failed' && (
-              <p className="mt-3 text-sm text-rose-300">語音服務未能完成這次工作（{job.errorCode ?? 'provider_failed'}）。重新確認授權後可再次建立。</p>
+              <p className="mt-3 text-sm text-rose-600">語音服務未能完成這次工作（{job.errorCode ?? 'provider_failed'}）。重新確認授權後可再次建立。</p>
             )}
           </article>
         ))}
