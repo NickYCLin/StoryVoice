@@ -83,6 +83,15 @@ public static class MultiCharacterTurnBuilder
                     throw new SpeechPlanIntegrityException(IntegrityMismatchReasonCode);
                 }
 
+                if (string.IsNullOrWhiteSpace(text))
+                {
+                    // A paragraph-break artifact from segmentation (e.g. a lone blank line) —
+                    // nothing audible to say, and the synthesis provider rejects blank turns.
+                    // Skipping it doesn't touch isFirstSegmentOfChapter, so the next real segment
+                    // still gets the chapter-boundary pause it would have gotten anyway.
+                    continue;
+                }
+
                 var contextStart = Math.Max(0, segment.StartOffset - 40);
                 var precedingContext = sourceText[contextStart..segment.StartOffset];
                 var (voice, rate, pitch, volume) = ResolveVoice(castRevision, segment, text, precedingContext);

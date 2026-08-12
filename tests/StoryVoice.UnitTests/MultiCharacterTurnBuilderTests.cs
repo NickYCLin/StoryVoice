@@ -139,6 +139,19 @@ public sealed class MultiCharacterTurnBuilderTests
     }
 
     [Fact]
+    public void A_blank_line_paragraph_break_never_becomes_its_own_turn()
+    {
+        var castRevision = BuildCastRevision(narratorVoice: "narrator-voice", aliceVoice: "alice-voice");
+        // A blank line between paragraphs makes the segmenter emit a lone "\n" narrator segment —
+        // that must never reach the synthesis provider, which rejects blank turn text outright.
+        var chapter = BuildConfirmedChapter(0, "序章", "風穿過長廊。\n\n吹熄了燈。", AliceId);
+
+        var turns = MultiCharacterTurnBuilder.BuildTurns(castRevision, [chapter]);
+
+        Assert.All(turns, turn => Assert.False(string.IsNullOrWhiteSpace(turn.Text)));
+    }
+
+    [Fact]
     public void Throws_integrity_exception_for_an_empty_chapter_plan_list()
     {
         var castRevision = BuildCastRevision(narratorVoice: "narrator-voice", aliceVoice: "alice-voice");
