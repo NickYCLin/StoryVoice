@@ -110,6 +110,60 @@ public sealed class MultiCharacterNarrationApiTests(ApiFactory factory) : IClass
     }
 
     [Fact]
+    public async Task A_3wa_series_can_stage_a_rebuild_mixing_an_edge_character_with_the_narrator()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var owner = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        var book = await ImportTextAsync(owner, "mixed provider synthetic text", cancellationToken);
+
+        using var seriesResponse = await owner.PostWithCsrfAsync(
+            "/api/series",
+            new
+            {
+                name = $"3wa 混用測試系列 {Guid.NewGuid():N}",
+                narratorProvider = "3wa-voxcpm2",
+                narratorVoice = "custom",
+                narratorRate = "-5%",
+                narratorPitch = "+0Hz",
+                narratorVolume = "+0%",
+                defaultSpeakerPauseMs = 350
+            },
+            cancellationToken);
+        var series = await seriesResponse.Content.ReadFromJsonAsync<StorySeriesDetailsResponse>(cancellationToken);
+        Assert.Equal(HttpStatusCode.Created, seriesResponse.StatusCode);
+        Assert.NotNull(series);
+
+        await AddBookAsync(owner, series.Id, book.Id, cancellationToken);
+
+        using var characterResponse = await owner.PostWithCsrfAsync(
+            $"/api/series/{series.Id}/characters",
+            new
+            {
+                canonicalName = "測試角色",
+                role = "Main",
+                voiceProvider = "edge",
+                voice = "zh-TW-HsiaoChenNeural",
+                rate = "+0%",
+                pitch = "+0Hz",
+                volume = "+0%",
+                notes = (string?)null
+            },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, characterResponse.StatusCode);
+
+        await ConfirmOnlyChapterPlanAsync(owner, series.Id, book, cancellationToken);
+
+        using var stageResponse = await owner.PostWithCsrfAsync(
+            $"/api/series/{series.Id}/narration-rebuilds",
+            new { rightsAttested = true },
+            cancellationToken);
+        var responseBody = await stageResponse.Content.ReadAsStringAsync(cancellationToken);
+        Assert.True(
+            stageResponse.StatusCode == HttpStatusCode.Created,
+            $"Unexpected response: {responseBody}");
+    }
+
+    [Fact]
     public async Task Terminal_replay_repairs_a_batch_whose_members_completed_before_its_ready_transition()
     {
         var cancellationToken = TestContext.Current.CancellationToken;

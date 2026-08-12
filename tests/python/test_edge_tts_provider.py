@@ -38,7 +38,7 @@ class EdgeTtsProviderTests(unittest.IsolatedAsyncioTestCase):
         attempts = {}
 
         class FakeCommunicate:
-            def __init__(self, text, voice, rate):
+            def __init__(self, text, voice, rate, pitch, volume):
                 self.text = text
 
             async def save(self, path):
@@ -74,7 +74,7 @@ class EdgeTtsProviderTests(unittest.IsolatedAsyncioTestCase):
         reports = []
 
         class FakeCommunicate:
-            def __init__(self, text, voice, rate):
+            def __init__(self, text, voice, rate, pitch, volume):
                 self.text = text
 
             async def save(self, path):
@@ -96,7 +96,7 @@ class EdgeTtsProviderTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_synthesize_text_does_not_publish_partial_audio_after_failure(self):
         class FailingCommunicate:
-            def __init__(self, text, voice, rate):
+            def __init__(self, text, voice, rate, pitch, volume):
                 pass
 
             async def save(self, path):

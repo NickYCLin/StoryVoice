@@ -45,6 +45,8 @@ async def synthesize_text(
     voice: str,
     rate: str,
     *,
+    pitch: str = "+0Hz",
+    volume: str = "+0%",
     max_chars: int = DEFAULT_MAX_CHARS,
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
     communicator_factory: Callable[..., Any] | None = None,
@@ -70,7 +72,7 @@ async def synthesize_text(
             for attempt in range(1, max_attempts + 1):
                 part.unlink(missing_ok=True)
                 try:
-                    communicate = factory(chunk, voice, rate=rate)
+                    communicate = factory(chunk, voice, rate=rate, pitch=pitch, volume=volume)
                     await communicate.save(str(part))
                     if not part.exists() or part.stat().st_size < 1:
                         raise RuntimeError("edge-tts returned empty audio")
@@ -101,6 +103,8 @@ async def main() -> None:
     parser.add_argument("--output", required=True)
     parser.add_argument("--voice", required=True)
     parser.add_argument("--rate", required=True)
+    parser.add_argument("--pitch", default="+0Hz")
+    parser.add_argument("--volume", default="+0%")
     args = parser.parse_args()
 
     text = sys.stdin.read()
@@ -109,6 +113,8 @@ async def main() -> None:
         args.output,
         args.voice,
         args.rate,
+        pitch=args.pitch,
+        volume=args.volume,
         progress_reporter=lambda completed, total: print(
             f"STORYVOICE_PROGRESS {completed}/{total}",
             file=sys.stderr,

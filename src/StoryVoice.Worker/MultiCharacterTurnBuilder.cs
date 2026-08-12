@@ -139,12 +139,6 @@ public static class MultiCharacterTurnBuilder
         return turns;
     }
 
-    /// <summary>The <see cref="NarrationCastAssignment.VoiceProvider"/> value that means "resolve
-    /// this character's voice through <see cref="CharacterVoiceProfile"/> lookups instead of the
-    /// fixed Edge-style rate/pitch/volume delta model" — the same string
-    /// <c>ThreeWaVoxCpm2NarrationProvider.ProviderName</c> registers under.</summary>
-    private const string CustomVoiceProviderName = "3wa-voxcpm2";
-
     private static (string Voice, string Rate, string Pitch, string Volume) ResolveVoice(
         NarrationCastRevision castRevision,
         ConfirmedSpeechSegment segment,
@@ -161,7 +155,7 @@ public static class MultiCharacterTurnBuilder
                 var emotion = DialogueEmotionClassifier.Classify(segmentText, precedingContext);
                 var isCustomVoiceProvider = string.Equals(
                     assignment.VoiceProvider,
-                    CustomVoiceProviderName,
+                    CharacterVoiceProviders.ThreeWaVoxCpm2,
                     StringComparison.OrdinalIgnoreCase);
 
                 if (isCustomVoiceProvider)

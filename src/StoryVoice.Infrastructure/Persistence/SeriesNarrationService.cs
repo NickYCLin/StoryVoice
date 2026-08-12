@@ -447,12 +447,22 @@ internal sealed class SeriesNarrationService(
 
     private static void EnsureSingleSynthesisProvider(StorySeries series)
     {
-        if (series.Characters.Any(character => !string.Equals(
-                character.VoiceProvider,
-                series.NarratorProvider,
-                StringComparison.OrdinalIgnoreCase)))
+        // The 3wa VoxCPM2 job dispatch provider also knows how to fall back to plain Edge voices
+        // turn-by-turn (narrator voice cloning isn't wired up yet — see
+        // ThreeWaVoxCpm2NarrationProvider), so a series staged on it may freely mix Edge-voiced
+        // characters alongside 3wa-cloned ones. Any other provider must still be uniform across
+        // the whole cast, since nothing else can route a mixed turn stream.
+        var allowsEdgeFallback = string.Equals(
+            series.NarratorProvider,
+            CharacterVoiceProviders.ThreeWaVoxCpm2,
+            StringComparison.OrdinalIgnoreCase);
+
+        if (series.Characters.Any(character =>
+            !string.Equals(character.VoiceProvider, series.NarratorProvider, StringComparison.OrdinalIgnoreCase)
+            && !(allowsEdgeFallback
+                && string.Equals(character.VoiceProvider, CharacterVoiceProviders.Edge, StringComparison.OrdinalIgnoreCase))))
         {
-            throw new InvalidOperationException("目前多聲線合成必須使用與旁白相同的語音 provider。");
+            throw new InvalidOperationException("目前多聲線合成必須使用與旁白相同的語音 provider（3wa 聲線系列除外，角色可混用 Edge 聲線）。");
         }
     }
 

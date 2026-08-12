@@ -1,25 +1,28 @@
 using System.Diagnostics;
+using StoryVoice.Domain.Narrations;
 using StoryVoice.Infrastructure.Narrations;
 
 namespace StoryVoice.Worker;
 
 /// <summary>
 /// Multi-character synthesis provider backed by the 3wa Cluster API's VoxCPM2 clone/design engine.
-/// Each <see cref="NarrationTurn.Voice"/> is an opaque reference produced by
-/// <c>MultiCharacterTurnBuilder.EncodeVoiceReference</c> — either <c>clone:&lt;task_id&gt;</c> (a
-/// confirmed <see cref="StoryVoice.Domain.Narrations.CharacterVoiceProfileMode.Clone"/> profile,
-/// replayed via its 3wa task id) or <c>design:&lt;prompt text&gt;</c> (a Design-mode profile, which
-/// never went through profile_prepare and is replayed by sending its prompt text on every call).
-/// Every turn is submitted, polled, downloaded, and locally re-encoded to mp3 one at a time, then
-/// concatenated with ffmpeg — the same concat-demuxer approach
+/// Each <see cref="NarrationTurn.Voice"/> is either an opaque reference produced by
+/// <c>MultiCharacterTurnBuilder.EncodeVoiceReference</c> — <c>clone:&lt;task_id&gt;</c> (a confirmed
+/// <see cref="CharacterVoiceProfileMode.Clone"/> profile, replayed via its 3wa task id) or
+/// <c>design:&lt;prompt text&gt;</c> (a Design-mode profile, replayed by sending its prompt text on
+/// every call) — or, for characters (and the narrator — voice cloning isn't wired up for the
+/// narrator yet, so it always stays on Edge; see <c>SeriesNarrationService.EnsureSingleSynthesisProvider</c>)
+/// that stayed on <c>edge</c>, a literal Edge voice id delegated to the same
+/// <c>edge_tts_provider.py</c> script the plain Edge provider uses. Every turn is synthesized one
+/// chunk at a time, then concatenated with ffmpeg — the same concat-demuxer approach
 /// <c>edge_tts_multi_voice_provider.py</c> uses, so downstream audio handling doesn't need to care
-/// which provider rendered a job.
+/// which provider (or mix of providers) rendered a job.
 /// </summary>
 public sealed class ThreeWaVoxCpm2NarrationProvider(
     IThreeWaSynthesisClient client,
     ILogger<ThreeWaVoxCpm2NarrationProvider> logger) : IMultiVoiceNarrationProvider
 {
-    public string ProviderName => "3wa-voxcpm2";
+    public string ProviderName => CharacterVoiceProviders.ThreeWaVoxCpm2;
 
     private const int MaxChars = 4_000;
     private const int PollIntervalMs = 2_000;
@@ -66,7 +69,7 @@ public sealed class ThreeWaVoxCpm2NarrationProvider(
             for (var turnIndex = 0; turnIndex < turnChunks.Length; turnIndex++)
             {
                 var (turn, chunks) = turnChunks[turnIndex];
-                var (mode, taskId, promptText) = ParseVoiceReference(turn.Voice);
+                var reference = ParseVoiceReference(turn.Voice);
 
                 if (turn.PauseBeforeMs > 0)
                 {
@@ -79,7 +82,7 @@ public sealed class ThreeWaVoxCpm2NarrationProvider(
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     var partPath = Path.Combine(workDirectory, $"{turnIndex:0000}-{chunkIndex:0000}.mp3");
-                    await SynthesizeChunkAsync(mode, taskId, promptText, chunks[chunkIndex], partPath, workDirectory, cancellationToken);
+                    await SynthesizeChunkAsync(reference, turn, chunks[chunkIndex], partPath, workDirectory, cancellationToken);
                     sequence.Add(partPath);
                     completed++;
                     if (progressCallback is not null)
@@ -106,16 +109,29 @@ public sealed class ThreeWaVoxCpm2NarrationProvider(
     }
 
     private async Task SynthesizeChunkAsync(
-        string mode,
-        string? taskId,
-        string? promptText,
+        ParsedVoiceReference reference,
+        NarrationTurn turn,
         string text,
         string outputPartPath,
         string workDirectory,
         CancellationToken cancellationToken)
     {
+        if (reference.Kind == VoiceReferenceKind.Edge)
+        {
+            await SynthesizeEdgeFallbackChunkAsync(
+                reference.EdgeVoice!,
+                turn.Rate,
+                turn.Pitch,
+                turn.Volume,
+                text,
+                outputPartPath,
+                cancellationToken);
+            return;
+        }
+
+        var mode = reference.Kind == VoiceReferenceKind.Clone ? "ultimate_clone" : "design";
         var handle = await client.SubmitAsync(
-            new ThreeWaSynthesisRequest(text, mode, taskId, promptText),
+            new ThreeWaSynthesisRequest(text, mode, reference.TaskId, reference.PromptText),
             cancellationToken);
 
         string status;
@@ -168,7 +184,22 @@ public sealed class ThreeWaVoxCpm2NarrationProvider(
         }
     }
 
-    private static (string Mode, string? TaskId, string? PromptText) ParseVoiceReference(string voiceReference)
+    private enum VoiceReferenceKind
+    {
+        Clone,
+        Design,
+        Edge,
+    }
+
+    private sealed record ParsedVoiceReference(VoiceReferenceKind Kind, string? TaskId, string? PromptText, string? EdgeVoice);
+
+    /// <summary>
+    /// A bare (unprefixed) voice reference is a literal Edge voice id — either a character that
+    /// stayed on <c>edge</c> while castmates use 3wa profiles, or the series narrator, whose own
+    /// voice cloning isn't wired up yet and so always resolves to <c>castRevision.NarratorVoice</c>
+    /// verbatim (see <c>MultiCharacterTurnBuilder.ResolveVoice</c>'s narrator fallback).
+    /// </summary>
+    private static ParsedVoiceReference ParseVoiceReference(string voiceReference)
     {
         if (voiceReference.StartsWith("clone:", StringComparison.Ordinal))
         {
@@ -178,7 +209,7 @@ public sealed class ThreeWaVoxCpm2NarrationProvider(
                 throw new InvalidOperationException("3wa 克隆聲線參照缺少 task id。");
             }
 
-            return ("ultimate_clone", taskId, null);
+            return new ParsedVoiceReference(VoiceReferenceKind.Clone, taskId, null, null);
         }
 
         if (voiceReference.StartsWith("design:", StringComparison.Ordinal))
@@ -189,10 +220,62 @@ public sealed class ThreeWaVoxCpm2NarrationProvider(
                 throw new InvalidOperationException("3wa 設計聲線參照缺少描述文字。");
             }
 
-            return ("design", null, promptText);
+            return new ParsedVoiceReference(VoiceReferenceKind.Design, null, promptText, null);
         }
 
-        throw new InvalidOperationException($"無法識別的 3wa 聲線參照格式：{voiceReference}。");
+        return new ParsedVoiceReference(VoiceReferenceKind.Edge, null, null, voiceReference);
+    }
+
+    private static async Task SynthesizeEdgeFallbackChunkAsync(
+        string voice,
+        string rate,
+        string pitch,
+        string volume,
+        string text,
+        string outputPath,
+        CancellationToken cancellationToken)
+    {
+        var scriptPath = Path.Combine(AppContext.BaseDirectory, "edge_tts_provider.py");
+        var startInfo = new ProcessStartInfo("python3")
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        startInfo.ArgumentList.Add(scriptPath);
+        startInfo.ArgumentList.Add("--output");
+        startInfo.ArgumentList.Add(outputPath);
+        startInfo.ArgumentList.Add("--voice");
+        startInfo.ArgumentList.Add(voice);
+        startInfo.ArgumentList.Add($"--rate={rate}");
+        startInfo.ArgumentList.Add($"--pitch={pitch}");
+        startInfo.ArgumentList.Add($"--volume={volume}");
+
+        using var process = new Process { StartInfo = startInfo };
+        if (!process.Start())
+        {
+            throw new InvalidOperationException("無法啟動 edge-tts 備援 provider。");
+        }
+
+        var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+        var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
+        await process.StandardInput.WriteAsync(text.AsMemory(), cancellationToken);
+        process.StandardInput.Close();
+        await process.WaitForExitAsync(cancellationToken);
+        var stderr = await stderrTask;
+        _ = await stdoutTask;
+
+        if (process.ExitCode != 0)
+        {
+            throw new InvalidOperationException($"edge-tts 備援 provider 執行失敗（結束碼 {process.ExitCode}）：{stderr}");
+        }
+
+        if (!File.Exists(outputPath) || new FileInfo(outputPath).Length < 1)
+        {
+            throw new InvalidOperationException("edge-tts 備援 provider 沒有產生音訊。");
+        }
     }
 
     private static bool IsTerminalStatus(string status) =>

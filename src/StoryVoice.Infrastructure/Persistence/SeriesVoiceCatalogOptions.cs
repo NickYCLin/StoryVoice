@@ -56,6 +56,18 @@ public sealed class SeriesVoiceCatalogOptions
             Voice = "zh-TW-HsiaoYuNeural",
             DisplayName = "曉雨（女聲）",
             Locale = "zh-TW"
+        },
+        new()
+        {
+            // The sentinel entry for the custom-voice provider — its actual per-character,
+            // per-emotion voice comes from CharacterVoiceProfile lookups at synthesis time (see
+            // MultiCharacterTurnBuilder), so "custom" here is just a placeholder that satisfies
+            // SeriesCharacter.Voice's NOT NULL/allow-listed constraint, not a real voice id. The
+            // provider name must stay in sync with ThreeWaVoxCpm2NarrationProvider.ProviderName.
+            Provider = "3wa-voxcpm2",
+            Voice = "custom",
+            DisplayName = "自訂聲線（角色聲線工作室）",
+            Locale = "zh-TW"
         }
     ];
 }
