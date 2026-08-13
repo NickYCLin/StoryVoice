@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import { apiUrl } from '../api'
@@ -48,7 +49,74 @@ const FEATURES: Feature[] = [
   },
 ]
 
+function BrowserFrameShot({ feature, onZoom }: { feature: Feature; onZoom: () => void }) {
+  return (
+    <button
+      aria-label={`放大檢視：${feature.imageAlt}`}
+      className="group block w-full overflow-hidden rounded-2xl border border-stone-300 bg-stone-800 text-left shadow-[0_24px_60px_rgba(41,30,10,.28)] transition hover:-translate-y-1 hover:shadow-[0_28px_70px_rgba(41,30,10,.36)]"
+      onClick={onZoom}
+      type="button"
+    >
+      <div className="flex items-center gap-1.5 px-4 py-2.5">
+        <span className="h-2.5 w-2.5 rounded-full bg-rose-400" />
+        <span className="h-2.5 w-2.5 rounded-full bg-amber-300" />
+        <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
+      </div>
+      <div className="relative bg-white">
+        <img
+          alt={feature.imageAlt}
+          className="h-72 w-full object-cover object-top sm:h-80"
+          loading="lazy"
+          src={apiUrl(feature.image)}
+        />
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-stone-900/0 transition group-hover:bg-stone-900/25">
+          <span className="rounded-full bg-white/95 px-4 py-2 text-xs font-semibold text-stone-800 opacity-0 shadow-lg transition group-hover:opacity-100">
+            點擊放大檢視
+          </span>
+        </div>
+      </div>
+    </button>
+  )
+}
+
+function ImageLightbox({ feature, onClose }: { feature: Feature; onClose: () => void }) {
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [onClose])
+
+  return (
+    <div
+      aria-label={feature.imageAlt}
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/80 p-4 backdrop-blur-sm sm:p-8"
+      onClick={onClose}
+      role="dialog"
+    >
+      <button
+        aria-label="關閉"
+        className="absolute right-4 top-4 rounded-full bg-white/10 px-4 py-2 text-sm text-white transition hover:bg-white/20 sm:right-8 sm:top-8"
+        onClick={onClose}
+        type="button"
+      >
+        關閉 ✕
+      </button>
+      <img
+        alt={feature.imageAlt}
+        className="max-h-full max-w-full cursor-zoom-out rounded-xl object-contain shadow-2xl"
+        onClick={(event) => event.stopPropagation()}
+        src={apiUrl(feature.image)}
+      />
+    </div>
+  )
+}
+
 export function LandingPage() {
+  const [zoomedFeature, setZoomedFeature] = useState<Feature | null>(null)
+
   return (
     <main className="relative z-10 mx-auto max-w-7xl px-6 py-12 lg:px-10">
       <section className="overflow-hidden rounded-3xl border border-amber-200 bg-gradient-to-br from-amber-50 via-white to-orange-50 p-8 text-center sm:p-14">
@@ -81,14 +149,7 @@ export function LandingPage() {
               <h2 className="mt-3 font-serif text-2xl text-stone-900 sm:text-3xl">{feature.title}</h2>
               <p className="mt-4 text-sm leading-7 text-stone-600 sm:text-base">{feature.description}</p>
             </div>
-            <div className="overflow-hidden rounded-2xl border border-stone-200 shadow-[0_20px_50px_rgba(96,70,30,.12)]">
-              <img
-                alt={feature.imageAlt}
-                className="h-72 w-full object-cover object-top sm:h-80"
-                loading="lazy"
-                src={apiUrl(feature.image)}
-              />
-            </div>
+            <BrowserFrameShot feature={feature} onZoom={() => setZoomedFeature(feature)} />
           </div>
         ))}
       </section>
@@ -102,6 +163,8 @@ export function LandingPage() {
           進入書庫
         </Link>
       </section>
+
+      {zoomedFeature && <ImageLightbox feature={zoomedFeature} onClose={() => setZoomedFeature(null)} />}
     </main>
   )
 }
