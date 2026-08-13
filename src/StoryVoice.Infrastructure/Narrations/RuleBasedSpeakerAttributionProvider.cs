@@ -20,12 +20,6 @@ public sealed class RuleBasedSpeakerAttributionProvider : ISpeakerAttributionPro
 {
     private const string FirstPersonPronoun = "我";
 
-    private static readonly string[] ReportingVerbs =
-    [
-        "笑著說", "低聲說", "輕聲說", "大聲說", "笑道", "喊道", "叫道", "應道", "回答",
-        "回應", "問道", "說道", "說", "問", "答", "喊", "道",
-    ];
-
     public Task<IReadOnlyList<SpeakerAttributionResult>> AttributeAsync(
         SpeakerAttributionRequest request,
         CancellationToken cancellationToken)
@@ -145,7 +139,7 @@ public sealed class RuleBasedSpeakerAttributionProvider : ISpeakerAttributionPro
         }
 
         var escapedName = Regex.Escape(normalizedName);
-        var verbPattern = string.Join('|', ReportingVerbs.Select(Regex.Escape));
+        var verbPattern = string.Join('|', ReportingVerbCatalog.Verbs.Select(Regex.Escape));
         // Name immediately followed (allowing a little punctuation) by a reporting verb, or a
         // reporting verb immediately followed by the name ("XX說" / "說話的是 XX").
         var pattern = $"{escapedName}[，,：:、]{{0,2}}(?:{verbPattern})|(?:{verbPattern})[的是]{{0,2}}{escapedName}";

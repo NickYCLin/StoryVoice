@@ -24,6 +24,13 @@ type ExtractiveBookSummary = {
   excerpts: SummaryExcerpt[]
 }
 
+type CharacterCandidate = {
+  name: string
+  occurrenceCount: number
+  sampleChapterTitle: string
+  sampleDialogue: string | null
+}
+
 type ReadingNote = {
   id: string
   bookId: string
@@ -57,6 +64,9 @@ export function BookInsightsPanel({ book, books, csrfToken, onBookUpdated }: Boo
   const [notesState, setNotesState] = useState<LoadState>('loading')
   const [noteDraft, setNoteDraft] = useState('')
   const [noteMessage, setNoteMessage] = useState('')
+  const [candidates, setCandidates] = useState<CharacterCandidate[]>([])
+  const [candidatesState, setCandidatesState] = useState<LoadState>('loading')
+  const [candidatesMessage, setCandidatesMessage] = useState('')
 
   const eligibleContentBooks = books.filter((candidate) => candidate.id !== book.id
     && candidate.authorizedTextAvailable)
@@ -73,6 +83,25 @@ export function BookInsightsPanel({ book, books, csrfToken, onBookUpdated }: Boo
     setNotesState('loading')
     setNoteDraft('')
     setNoteMessage('')
+    setCandidates([])
+    setCandidatesState('loading')
+    setCandidatesMessage('')
+
+    fetch(apiUrl(`/api/books/${book.id}/character-candidates`), {
+      credentials: 'same-origin',
+      signal: controller.signal,
+    }).then(async (response) => {
+      if (response.status === 409) return []
+      if (!response.ok) throw new Error(await responseProblem(response, '角色候選讀取失敗。'))
+      return response.json() as Promise<CharacterCandidate[]>
+    }).then((items) => {
+      setCandidates(items)
+      setCandidatesState('ready')
+    }).catch((error) => {
+      if (error instanceof DOMException && error.name === 'AbortError') return
+      setCandidatesState('error')
+      setCandidatesMessage(error instanceof Error ? error.message : '角色候選讀取失敗。')
+    })
 
     fetch(apiUrl(`/api/books/${book.id}/summary`), {
       credentials: 'same-origin',
@@ -178,6 +207,15 @@ export function BookInsightsPanel({ book, books, csrfToken, onBookUpdated }: Boo
     }
   }
 
+  async function handleCopyCandidateName(name: string) {
+    try {
+      await navigator.clipboard.writeText(name)
+      setCandidatesMessage(`已複製「${name}」；到「多角色系列配音」加入角色時可以直接貼上。`)
+    } catch {
+      setCandidatesMessage(`「${name}」：這個瀏覽器不支援自動複製，請手動選取文字。`)
+    }
+  }
+
   async function handleAddNote(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const body = noteDraft.trim()
@@ -276,6 +314,33 @@ export function BookInsightsPanel({ book, books, csrfToken, onBookUpdated }: Boo
           </ol>
         )}
         <p className={`mt-3 min-h-5 text-xs ${summaryState === 'error' ? 'text-rose-600' : 'text-stone-500'}`} role="status">{summaryState === 'loading' && !summaryMessage ? '正在讀取摘要…' : summaryMessage}</p>
+      </section>
+
+      <section className="rounded-2xl border border-rose-100 bg-rose-50/70 p-4" aria-label="偵測到的角色候選">
+        <h4 className="font-serif text-lg text-stone-800">偵測到的角色候選 <span className="text-xs font-sans text-rose-700">規則比對，非 AI 辨識</span></h4>
+        <p className="mt-2 text-xs leading-6 text-stone-500">找出「名字＋說／問／道」這類對白提示詞旁邊出現的名字，依出現次數排序；不會自動建立角色，只是提示你「這一冊大概有誰在說話」。可能漏掉只用代名詞或稱謂互相稱呼的角色，也可能誤收「老師」這類稱謂——請自行判斷再到系列配音手動加入角色。</p>
+        {!canGenerateSummary && <p className="mt-3 text-xs text-amber-700">等待合法正文：上傳 EPUB／TXT，並在外部書目上明確選擇連結。</p>}
+        {candidates.length > 0 && (
+          <ul className="mt-4 flex flex-wrap gap-2">
+            {candidates.map((candidate) => (
+              <li key={candidate.name}>
+                <button
+                  className="rounded-full border border-rose-200 bg-white px-3 py-1.5 text-left text-xs text-stone-600 transition hover:border-rose-400 hover:text-rose-700"
+                  onClick={() => handleCopyCandidateName(candidate.name)}
+                  title={candidate.sampleDialogue ? `${candidate.sampleChapterTitle}：${candidate.sampleDialogue}` : candidate.sampleChapterTitle}
+                  type="button"
+                >
+                  <span className="font-medium text-stone-800">{candidate.name}</span>
+                  <span className="ml-1.5 text-stone-400">× {candidate.occurrenceCount}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {canGenerateSummary && candidatesState === 'ready' && candidates.length === 0 && (
+          <p className="mt-3 text-xs text-stone-400">這一冊沒有偵測到明顯的角色對白提示詞，可能是純第一人稱敘事，或角色都只用代名詞互相稱呼。</p>
+        )}
+        <p className={`mt-3 min-h-5 text-xs ${candidatesState === 'error' ? 'text-rose-600' : 'text-stone-500'}`} role="status">{candidatesState === 'loading' && !candidatesMessage ? '正在掃描角色候選…' : candidatesMessage}</p>
       </section>
 
       <section className="rounded-2xl border border-violet-100 bg-violet-50/70 p-4" aria-label="我的閱讀筆記">

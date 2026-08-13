@@ -27,6 +27,15 @@ test('manual notes work independently from provider text and mutations carry CSR
   assert.ok(app.includes("headers: { 'X-CSRF-TOKEN': csrfToken }"))
 })
 
+test('character candidate detection is truthfully rule-based and never auto-creates a character', () => {
+  assert.ok(app.includes('偵測到的角色候選'))
+  assert.ok(app.includes('規則比對，非 AI 辨識'))
+  assert.ok(app.includes('不會自動建立角色'))
+  assert.ok(app.includes("/character-candidates`"))
+  assert.ok(app.includes('handleCopyCandidateName'))
+  assert.ok(app.includes('navigator.clipboard.writeText(name)'))
+})
+
 test('owner-scoped source metadata corrections cover title, author, cover, and reset', () => {
   assert.ok(app.includes('書名、作者與封面校正'))
   assert.ok(app.includes('/metadata-corrections`'))

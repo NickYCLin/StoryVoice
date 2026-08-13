@@ -297,6 +297,80 @@ public sealed class BookInsightsApiTests(ApiFactory factory) : IClassFixture<Api
         Assert.Equal(uploaded.Chapters[0].Id, notes[0].ChapterId);
     }
 
+    [Fact]
+    public async Task Character_candidates_are_extracted_owner_scoped_and_ranked_by_frequency()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var owner = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        using var other = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        var book = await ImportTextAsync(
+            owner,
+            """
+            第一章 起點
+            小華問道：「你要走了？」
+            小華問道：「真的嗎？」
+            小明說：「再見。」
+            """,
+            cancellationToken);
+
+        using var response = await owner.GetAsync(
+            $"/api/books/{book.Id}/character-candidates",
+            cancellationToken);
+        var candidates = await response.Content.ReadFromJsonAsync<CharacterCandidateResponse[]>(cancellationToken);
+
+        using var otherResponse = await other.GetAsync(
+            $"/api/books/{book.Id}/character-candidates",
+            cancellationToken);
+        using var missingResponse = await owner.GetAsync(
+            $"/api/books/{Guid.NewGuid()}/character-candidates",
+            cancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.NotNull(candidates);
+        Assert.Equal(2, candidates.Length);
+        Assert.Equal("小華", candidates[0].Name);
+        Assert.Equal(2, candidates[0].OccurrenceCount);
+        Assert.Equal("小明", candidates[1].Name);
+        Assert.Equal(1, candidates[1].OccurrenceCount);
+        Assert.Equal(HttpStatusCode.NotFound, otherResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, missingResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task Character_candidates_require_processable_authorized_text()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var sessionClient = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        using var companionClient = await CreateCompanionClientAsync(sessionClient, cancellationToken);
+        var linked = await ImportLinkedBookAsync(companionClient, cancellationToken);
+
+        using var response = await sessionClient.GetAsync(
+            $"/api/books/{linked.Id}/character-candidates",
+            cancellationToken);
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStreamAsync(cancellationToken));
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Equal(BookTextUnavailableException.StableCode, problem.RootElement.GetProperty("code").GetString());
+    }
+
+    private static async Task<BookDetailsResponse> ImportTextAsync(
+        HttpClient client,
+        string text,
+        CancellationToken cancellationToken)
+    {
+        using var content = new MultipartFormDataContent();
+        var file = new ByteArrayContent(Encoding.UTF8.GetBytes(text));
+        file.Headers.ContentType = new MediaTypeHeaderValue("text/plain");
+        content.Add(file, "file", $"authorized-{Guid.NewGuid():N}.txt");
+        using var response = await client.PostMultipartWithCsrfAsync(
+            "/api/books/import",
+            content,
+            cancellationToken);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<BookDetailsResponse>(cancellationToken)
+            ?? throw new InvalidOperationException("Import response did not contain a book.");
+    }
+
     private static async Task<BookDetailsResponse> ImportTextAsync(
         HttpClient client,
         CancellationToken cancellationToken)

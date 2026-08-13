@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using StoryVoice.Application.Authentication;
 using StoryVoice.Application.Books;
 using StoryVoice.Application.Insights;
+using StoryVoice.Application.Narrations.SpeechPlanning;
 using StoryVoice.Domain.Books;
 using StoryVoice.Domain.Insights;
 
@@ -141,6 +142,33 @@ internal sealed class BookInsightsService(
 
         await dbContext.SaveChangesAsync(cancellationToken);
         return ToResponse(summary);
+    }
+
+    public async Task<IReadOnlyList<CharacterCandidateResponse>?> ListCharacterCandidatesAsync(
+        Guid bookId,
+        CancellationToken cancellationToken)
+    {
+        var target = await OwnedBooks()
+            .Include(book => book.Chapters)
+            .SingleOrDefaultAsync(book => book.Id == bookId, cancellationToken);
+        if (target is null)
+        {
+            return null;
+        }
+
+        var content = target.ContentBookId is Guid contentBookId
+            ? await OwnedBooks().Include(book => book.Chapters)
+                .SingleOrDefaultAsync(book => book.Id == contentBookId, cancellationToken)
+            : target;
+        EnsureProcessable(content);
+
+        return CharacterCandidateExtractor.Extract(content!.Chapters)
+            .Select(candidate => new CharacterCandidateResponse(
+                candidate.Name,
+                candidate.OccurrenceCount,
+                candidate.SampleChapterTitle,
+                candidate.SampleDialogue))
+            .ToArray();
     }
 
     public async Task<IReadOnlyList<ReadingNoteResponse>?> ListNotesAsync(
