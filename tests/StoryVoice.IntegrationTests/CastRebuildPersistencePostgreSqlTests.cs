@@ -230,6 +230,28 @@ public sealed class CastRebuildPersistencePostgreSqlTests
 
         await using var db = CreateContext(graphA.ConnectionString);
         var now = graphA.CreatedAt.AddMinutes(5);
+
+        // UX_rebuild_batches_draft_cast allows only one batch per draft cast revision, so each
+        // throwaway batch created below (purely to exercise a different constraint) needs its own
+        // revision rather than reusing graphA.RevisionId, which graphA's own primary batch already
+        // claims as its draft.
+        var freshDraftRevisionCounter = 0;
+        async Task<Guid> FreshDraftRevisionAsync()
+        {
+            freshDraftRevisionCounter++;
+            var freshId = Guid.NewGuid();
+            await InsertRevisionAsync(
+                db,
+                freshId,
+                graphA.OwnerId,
+                graphA.SeriesId,
+                9100 + freshDraftRevisionCounter,
+                new string((char)('0' + freshDraftRevisionCounter), 64),
+                now,
+                cancellationToken);
+            return freshId;
+        }
+
         var legacyJobId = Guid.NewGuid();
         await InsertLegacyJobAsync(
             db,
@@ -246,16 +268,16 @@ public sealed class CastRebuildPersistencePostgreSqlTests
                 SET "StagedNarrationJobId" = {graphA.SiblingJobId}
                 WHERE "Id" = {graphA.MemberId};
                 """, cancellationToken),
-            PostgresErrorCodes.ForeignKeyViolation,
-            "FK_rebuild_members_staged_job");
+            PostgresErrorCodes.CheckViolation,
+            "CK_rebuild_artifact_membership");
         await AssertPostgresErrorAsync(
             () => db.Database.ExecuteSqlInterpolatedAsync($"""
                 UPDATE series_cast_rebuild_members
                 SET "StagedNarrationJobId" = {graphA.OtherBookJobId}
                 WHERE "Id" = {graphA.MemberId};
                 """, cancellationToken),
-            PostgresErrorCodes.ForeignKeyViolation,
-            "FK_rebuild_members_staged_job");
+            PostgresErrorCodes.CheckViolation,
+            "CK_rebuild_artifact_membership");
 
         await AssertPostgresErrorAsync(
             () => InsertRevisionAsync(db, Guid.NewGuid(), graphA.OwnerId, graphB.SeriesId, 100, new string('a', 64), now, cancellationToken),
@@ -273,8 +295,9 @@ public sealed class CastRebuildPersistencePostgreSqlTests
             () => InsertBatchAsync(db, Guid.NewGuid(), graphA.OwnerId, graphA.SeriesId, null, graphB.RevisionId, now, cancellationToken),
             PostgresErrorCodes.ForeignKeyViolation,
             "FK_rebuild_batches_draft_cast");
+        var baseCastFenceDraftRevisionId = await FreshDraftRevisionAsync();
         await AssertPostgresErrorAsync(
-            () => InsertBatchAsync(db, Guid.NewGuid(), graphA.OwnerId, graphA.SeriesId, graphB.RevisionId, graphA.RevisionId, now, cancellationToken),
+            () => InsertBatchAsync(db, Guid.NewGuid(), graphA.OwnerId, graphA.SeriesId, graphB.RevisionId, baseCastFenceDraftRevisionId, now, cancellationToken),
             PostgresErrorCodes.ForeignKeyViolation,
             "FK_rebuild_batches_base_cast");
         await AssertPostgresErrorAsync(
@@ -292,7 +315,7 @@ public sealed class CastRebuildPersistencePostgreSqlTests
             "FK_rebuild_members_batch_scope");
 
         var seriesBookFenceBatchId = Guid.NewGuid();
-        await InsertBatchAsync(db, seriesBookFenceBatchId, graphA.OwnerId, graphA.SeriesId, null, graphA.RevisionId, now, cancellationToken);
+        await InsertBatchAsync(db, seriesBookFenceBatchId, graphA.OwnerId, graphA.SeriesId, null, await FreshDraftRevisionAsync(), now, cancellationToken);
         await AssertPostgresErrorAsync(
             () => InsertMemberAsync(
                 db,
@@ -308,7 +331,7 @@ public sealed class CastRebuildPersistencePostgreSqlTests
             "FK_rebuild_members_series_book");
 
         var bookCoherenceBatchId = Guid.NewGuid();
-        await InsertBatchAsync(db, bookCoherenceBatchId, graphA.OwnerId, graphA.SeriesId, null, graphA.RevisionId, now, cancellationToken);
+        await InsertBatchAsync(db, bookCoherenceBatchId, graphA.OwnerId, graphA.SeriesId, null, await FreshDraftRevisionAsync(), now, cancellationToken);
         await AssertPostgresErrorAsync(
             () => InsertMemberAsync(
                 db,
@@ -344,7 +367,7 @@ public sealed class CastRebuildPersistencePostgreSqlTests
         }
 
         var previousPointerBatchId = Guid.NewGuid();
-        await InsertBatchAsync(db, previousPointerBatchId, graphA.OwnerId, graphA.SeriesId, null, graphA.RevisionId, now, cancellationToken);
+        await InsertBatchAsync(db, previousPointerBatchId, graphA.OwnerId, graphA.SeriesId, null, await FreshDraftRevisionAsync(), now, cancellationToken);
         await AssertPostgresErrorAsync(
             () => InsertMemberAsync(
                 db,
@@ -361,7 +384,8 @@ public sealed class CastRebuildPersistencePostgreSqlTests
 
         var jobFenceBatchId = Guid.NewGuid();
         var jobFenceMemberId = Guid.NewGuid();
-        await InsertBatchAsync(db, jobFenceBatchId, graphA.OwnerId, graphA.SeriesId, null, graphA.RevisionId, now, cancellationToken);
+        var jobFenceBatchDraftRevisionId = await FreshDraftRevisionAsync();
+        await InsertBatchAsync(db, jobFenceBatchId, graphA.OwnerId, graphA.SeriesId, null, jobFenceBatchDraftRevisionId, now, cancellationToken);
         await InsertMemberAsync(
             db,
             jobFenceMemberId,
@@ -405,7 +429,7 @@ public sealed class CastRebuildPersistencePostgreSqlTests
                 graphA.OwnerId,
                 graphA.BookId,
                 graphA.SeriesId,
-                graphA.RevisionId,
+                jobFenceBatchDraftRevisionId,
                 Guid.NewGuid(),
                 jobFenceBatchId,
                 Guid.NewGuid(),
@@ -537,6 +561,12 @@ public sealed class CastRebuildPersistencePostgreSqlTests
         await db.Database.ExecuteSqlInterpolatedAsync(
             $"UPDATE series_cast_rebuild_batches SET \"Status\" = 'ReadyToActivate', \"UpdatedAt\" = {now} WHERE \"Id\" = {graphA.BatchId}",
             cancellationToken);
+        // graphA's series has two series books (the pointer-candidate machinery earlier in this test
+        // needs the second one for cross-book FK checks), but graphA.BatchId only ever staged a
+        // member for the first book. assert_cast_epoch_integrity's CK_cast_epoch_full_cohort trigger
+        // now correctly rejects activating a batch that doesn't cover every current series book —
+        // exactly what a real PostgreSqlCastEpochActivationPublisher.ActivateOnceAsync call would
+        // also refuse. Assert that rejection instead of pretending a partial-cohort batch can go live.
         await using (var activation = await db.Database.BeginTransactionAsync(cancellationToken))
         {
             await db.Database.ExecuteSqlInterpolatedAsync(
@@ -545,30 +575,32 @@ public sealed class CastRebuildPersistencePostgreSqlTests
             await db.Database.ExecuteSqlInterpolatedAsync(
                 $"UPDATE series_cast_rebuild_batches SET \"Status\" = 'Activated', \"UpdatedAt\" = {now} WHERE \"Id\" = {graphA.BatchId}",
                 cancellationToken);
-            await activation.CommitAsync(cancellationToken);
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE series_books SET \"ActiveNarrationJobId\" = {graphA.PrimaryJobId!.Value} WHERE \"Id\" = {graphA.SeriesBookId}",
+                cancellationToken);
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE narration_cast_revisions SET \"Status\" = 'Active', \"EpochNumber\" = 1, \"ActivatedAt\" = {now} WHERE \"Id\" = {graphA.RevisionId}",
+                cancellationToken);
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE story_series SET \"ActiveCastRevisionId\" = {graphA.RevisionId}, \"UpdatedAt\" = {now} WHERE \"Id\" = {graphA.SeriesId}",
+                cancellationToken);
+            var exception = await Assert.ThrowsAsync<PostgresException>(
+                () => activation.CommitAsync(cancellationToken));
+            Assert.Equal(PostgresErrorCodes.CheckViolation, exception.SqlState);
+            Assert.Equal("CK_cast_epoch_full_cohort", exception.ConstraintName);
         }
 
         Assert.Equal(
-            NarrationArtifactVisibility.Published,
+            NarrationArtifactVisibility.Staged,
             await db.NarrationJobs
                 .Where(job => job.Id == graphA.PrimaryJobId.Value)
                 .Select(job => job.Visibility)
                 .SingleAsync(cancellationToken));
         Assert.Equal(
-            SeriesCastRebuildBatchStatus.Activated,
+            SeriesCastRebuildBatchStatus.ReadyToActivate,
             await db.SeriesCastRebuildBatches
                 .Where(batch => batch.Id == graphA.BatchId)
                 .Select(batch => batch.Status)
-                .SingleAsync(cancellationToken));
-
-        await db.Database.ExecuteSqlInterpolatedAsync(
-            $"UPDATE narration_jobs SET \"Visibility\" = 'Historical' WHERE \"Id\" = {graphA.PrimaryJobId.Value}",
-            cancellationToken);
-        Assert.Equal(
-            NarrationArtifactVisibility.Historical,
-            await db.NarrationJobs
-                .Where(job => job.Id == graphA.PrimaryJobId.Value)
-                .Select(job => job.Visibility)
                 .SingleAsync(cancellationToken));
     }
 
@@ -803,7 +835,7 @@ public sealed class CastRebuildPersistencePostgreSqlTests
                 siblingRevisionId,
                 ownerId,
                 series.Id,
-                8,
+                9008,
                 "synthetic-provider",
                 "provider-v1",
                 "synthetic-narrator",
@@ -835,7 +867,7 @@ public sealed class CastRebuildPersistencePostgreSqlTests
                 otherBookRevisionId,
                 ownerId,
                 series.Id,
-                9,
+                9009,
                 "synthetic-provider",
                 "provider-v1",
                 "synthetic-narrator",
