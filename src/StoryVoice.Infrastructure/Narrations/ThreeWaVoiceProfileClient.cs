@@ -63,7 +63,8 @@ public sealed class ThreeWaVoiceProfileClient(HttpClient httpClient, IOptions<Th
         return new VoiceProfileStatusResult(
             body.TaskStatus ?? "unknown",
             body.TranscriptConfirmed,
-            body.PromptText);
+            body.PromptText,
+            string.Equals(body.TranscriptionStatus, "failed", StringComparison.OrdinalIgnoreCase));
     }
 
     public async Task ConfirmAsync(string taskId, string transcript, CancellationToken cancellationToken)
@@ -122,7 +123,8 @@ public sealed class ThreeWaVoiceProfileClient(HttpClient httpClient, IOptions<Th
         [property: JsonPropertyName("ok")] bool Ok,
         [property: JsonPropertyName("task_status")] string? TaskStatus,
         [property: JsonPropertyName("transcript_confirmed")] bool TranscriptConfirmed,
-        [property: JsonPropertyName("prompt_text")] string? PromptText);
+        [property: JsonPropertyName("prompt_text")] string? PromptText,
+        [property: JsonPropertyName("transcription_status")] string? TranscriptionStatus);
 
     private sealed record ConfirmResponseBody([property: JsonPropertyName("ok")] bool Ok);
 }

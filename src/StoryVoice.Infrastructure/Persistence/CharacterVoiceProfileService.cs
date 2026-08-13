@@ -164,7 +164,7 @@ internal sealed class CharacterVoiceProfileService(
 
         var status = await threeWaClient.GetStatusAsync(profile.VoiceProfileTaskId!, cancellationToken);
         var now = DateTimeOffset.UtcNow;
-        if (string.Equals(status.TaskStatus, "failed", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(status.TaskStatus, "failed", StringComparison.OrdinalIgnoreCase) || status.TranscriptionFailed)
         {
             profile.MarkFailed(now);
         }

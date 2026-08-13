@@ -5,7 +5,8 @@ public sealed record VoiceProfilePrepareResult(string TaskId, string? DraftTrans
 public sealed record VoiceProfileStatusResult(
     string TaskStatus,
     bool TranscriptConfirmed,
-    string? DraftTranscript);
+    string? DraftTranscript,
+    bool TranscriptionFailed);
 
 /// <summary>
 /// The Application-layer half of talking to the 3wa Cluster API's <c>voice_generate</c> mode:
