@@ -145,11 +145,6 @@ public sealed class Book
         string? author,
         string? coverImageUrl)
     {
-        if (SourceProvider is null || ExternalSourceId is null)
-        {
-            throw new InvalidOperationException("只有外部來源書目可以套用人工 metadata 校正。");
-        }
-
         var normalizedTitle = NormalizeCorrection(title, 500, nameof(title));
         var normalizedAuthor = NormalizeCorrection(author, 300, nameof(author));
         var normalizedCover = NormalizeCorrection(coverImageUrl, 2_000, nameof(coverImageUrl));

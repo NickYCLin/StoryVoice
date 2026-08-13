@@ -43,11 +43,13 @@ public sealed class BookMetadataCorrectionTests
     }
 
     [Fact]
-    public void Uploaded_books_cannot_receive_provider_metadata_corrections()
+    public void Uploaded_books_can_receive_manual_cover_corrections()
     {
         var book = Book.Create(Guid.NewGuid(), "書名", "作者", "zh-TW", "book.txt");
 
-        Assert.Throws<InvalidOperationException>(() =>
-            book.SetMetadataCorrections("替代書名", null, null));
+        book.SetMetadataCorrections(null, null, "https://example.test/cover.jpg");
+
+        Assert.Null(book.CoverImageUrl);
+        Assert.Equal("https://example.test/cover.jpg", book.CoverImageUrlCorrection);
     }
 }

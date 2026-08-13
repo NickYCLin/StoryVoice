@@ -171,7 +171,7 @@ public sealed class BookInsightsApiTests(ApiFactory factory) : IClassFixture<Api
     }
 
     [Fact]
-    public async Task Uploaded_book_rejects_provider_metadata_corrections()
+    public async Task Uploaded_book_accepts_manual_cover_correction()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
@@ -180,10 +180,13 @@ public sealed class BookInsightsApiTests(ApiFactory factory) : IClassFixture<Api
         using var response = await PutWithCsrfAsync(
             client,
             $"/api/books/{uploaded.Id}/metadata-corrections",
-            new UpdateBookMetadataCorrectionsRequest("不應接受", null, null),
+            new UpdateBookMetadataCorrectionsRequest(null, null, "https://example.test/corrected-cover.jpg"),
             cancellationToken);
+        var corrected = await response.Content.ReadFromJsonAsync<BookDetailsResponse>(cancellationToken);
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.NotNull(corrected);
+        Assert.Equal("https://example.test/corrected-cover.jpg", corrected.CoverImageUrl);
     }
 
     [Fact]
