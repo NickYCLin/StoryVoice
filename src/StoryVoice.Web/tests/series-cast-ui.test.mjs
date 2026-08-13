@@ -41,10 +41,10 @@ test('系列配音控制台每個角色都可以展開自訂聲線工作室', ()
   assert.match(panel, /自訂聲線/)
 })
 
-test('自訂聲線工作室固定使用 owner-scoped 角色庫 voice-profiles API，涵蓋基礎與五種情境聲線', () => {
+test('自訂聲線工作室固定使用 owner-scoped 角色庫 voice-profiles API，涵蓋基礎與四種情境聲線', () => {
   assert.match(voiceProfilesPanel, /\/api\/character-profiles\/\$\{characterProfileId\}\/voice-profiles/)
   assert.doesNotMatch(voiceProfilesPanel, /\/api\/series\/.*\/characters\/.*\/voice-profiles/)
-  assert.match(voiceProfilesPanel, /sceneCode: 'neutral'/)
+  assert.doesNotMatch(voiceProfilesPanel, /sceneCode: 'neutral'/)
   assert.match(voiceProfilesPanel, /sceneCode: 'nervous'/)
   assert.match(voiceProfilesPanel, /sceneCode: 'happy'/)
   assert.match(voiceProfilesPanel, /sceneCode: 'angry'/)

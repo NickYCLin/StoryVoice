@@ -21,8 +21,7 @@ type VoiceProfile = {
 type Slot = { sceneCode: string | null; label: string; description: string }
 
 const SLOTS: Slot[] = [
-  { sceneCode: null, label: '基礎聲線', description: '沒有更精確情境時的預設聲音' },
-  { sceneCode: 'neutral', label: '平常', description: '日常對話狀態' },
+  { sceneCode: null, label: '基礎聲線', description: '沒有更精確情境時的預設聲音，也是日常對話狀態使用的聲音' },
   { sceneCode: 'nervous', label: '緊張', description: '感到緊張或不安時' },
   { sceneCode: 'happy', label: '開心', description: '開心、興奮時' },
   { sceneCode: 'angry', label: '生氣', description: '生氣、提高音量時' },

@@ -438,7 +438,7 @@ export function CharacterLibraryPage() {
                   </div>
                   <div className="rounded-xl border border-stone-200 bg-stone-50 p-3">
                     <p className="text-[11px] text-stone-500">情境聲線數量</p>
-                    <p className="mt-1 text-sm font-medium text-stone-800">{sceneProfilesReady} / 5 已建立</p>
+                    <p className="mt-1 text-sm font-medium text-stone-800">{sceneProfilesReady} / 4 已建立</p>
                   </div>
                   <div className="rounded-xl border border-stone-200 bg-stone-50 p-3">
                     <p className="text-[11px] text-stone-500">樣本語料時數</p>
