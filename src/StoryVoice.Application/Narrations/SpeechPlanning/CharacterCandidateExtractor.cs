@@ -15,10 +15,19 @@ public sealed record CharacterCandidate(
 /// it at any name-like token instead of only already-registered characters, so a newly imported book
 /// can surface "who shows up here" before a single cast member has been typed in.
 ///
-/// Deliberately noisy in known ways: a name must be 2+ Han characters (this alone screens out nearly
-/// every third-person pronoun, which in Chinese is a single character) or a capitalized Latin word,
-/// and a title used as a stand-in name ("老師說：") will still surface — the caller is expected to
-/// let a person pick real characters out of the ranked list, not trust it blindly.
+/// Only scans the short connector text immediately touching a dialogue quote — never a whole
+/// narrator paragraph — and within that connector keeps only the match closest to the quote
+/// boundary. Chinese has no word spacing, and reporting-verb characters ("說"/"道"/"答"/"問") are
+/// also common substrings of everyday vocabulary unrelated to speech ("不知道", "應該說", "回答不
+/// 出"); scanning whole paragraphs previously surfaced those as "candidates". Anchoring to the
+/// actual reporting-clause position (right before/after a quote, closest match wins) is what makes
+/// this precise enough to be useful instead of dominated by ordinary prose.
+///
+/// Still deliberately noisy in known, acceptable ways: a name must be 2+ Han characters (this alone
+/// screens out nearly every third-person pronoun, which in Chinese is a single character) or a
+/// capitalized Latin word, and a title used as a stand-in name ("老師說：") will still surface — the
+/// caller is expected to let a person pick real characters out of the ranked list, not trust it
+/// blindly.
 /// </summary>
 public static class CharacterCandidateExtractor
 {
@@ -71,14 +80,30 @@ public static class CharacterCandidateExtractor
                     continue;
                 }
 
-                var narratorText = body.Substring(segment.StartOffset, segment.Length);
-                foreach (var name in FindCandidateNames(narratorText))
+                var precedesDialogue = position < plan.BodySegments.Count - 1
+                    && plan.BodySegments[position + 1].Kind == SpeechSegmentKind.Dialogue;
+                var followsDialogue = position > 0
+                    && plan.BodySegments[position - 1].Kind == SpeechSegmentKind.Dialogue;
+                if (!precedesDialogue && !followsDialogue)
                 {
-                    counts[name] = counts.GetValueOrDefault(name) + 1;
-                    if (!samples.ContainsKey(name))
-                    {
-                        samples[name] = (chapter.Title, FindAdjacentDialogue(body, plan.BodySegments, position));
-                    }
+                    // Ordinary narrative prose, not touching any dialogue quote — never a reporting
+                    // clause, and full of incidental "說"/"道"/"答" substrings if scanned anyway.
+                    continue;
+                }
+
+                var narratorText = body.Substring(segment.StartOffset, segment.Length);
+                var name = precedesDialogue
+                    ? FindClosestName(narratorText, preferLast: true)
+                    : FindClosestName(narratorText, preferLast: false);
+                if (name is null)
+                {
+                    continue;
+                }
+
+                counts[name] = counts.GetValueOrDefault(name) + 1;
+                if (!samples.ContainsKey(name))
+                {
+                    samples[name] = (chapter.Title, FindAdjacentDialogue(body, plan.BodySegments, position));
                 }
             }
         }
@@ -95,17 +120,28 @@ public static class CharacterCandidateExtractor
             .ToArray();
     }
 
-    private static IEnumerable<string> FindCandidateNames(string narratorText)
+    /// <summary>
+    /// Among every name+verb match in this (short, dialogue-adjacent) connector text, keeps only
+    /// the one closest to the quote boundary: the last match when the segment precedes the dialogue
+    /// ("…剛剛才說：「…"), the first match when it follows ("…」他說，然後…"). A connector can contain
+    /// an earlier, unrelated verb-shaped phrase; only the boundary-nearest one is the actual
+    /// reporting-clause tag for this particular line of dialogue.
+    /// </summary>
+    private static string? FindClosestName(string narratorText, bool preferLast)
     {
-        foreach (Match match in NameBeforeVerb.Matches(narratorText))
+        var matches = NameBeforeVerb.Matches(narratorText)
+            .Concat(NameAfterVerb.Matches(narratorText))
+            .Where(match => match.Success)
+            .ToArray();
+        if (matches.Length == 0)
         {
-            yield return match.Groups["name"].Value;
+            return null;
         }
 
-        foreach (Match match in NameAfterVerb.Matches(narratorText))
-        {
-            yield return match.Groups["name"].Value;
-        }
+        var chosen = preferLast
+            ? matches.OrderByDescending(match => match.Index + match.Length).First()
+            : matches.OrderBy(match => match.Index).First();
+        return chosen.Groups["name"].Value;
     }
 
     private static string? FindAdjacentDialogue(
