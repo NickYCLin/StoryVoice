@@ -23,7 +23,7 @@
 - 書冊（`BookCollection`）：與角色配音系列(`StorySeries`)各自獨立的單純書本分類收藏，可調整成員書籍排序與冊次標籤。
 - 書冊唯讀分享：owner 可依 email 把書冊分享給其他已註冊帳號，被分享者只能唯讀瀏覽書名與章節正文，看不到閱讀筆記、摘要或朗讀音訊；owner 可隨時撤銷。
 - 前端已改為 React Router 多頁面架構（`/library`、`/collections`、`/shared` 等），不再是單一長頁面；`NarrationPanel` 已統一為深色主題。
-- 受限說話者辨識：規則引擎只在明確 reporting clause 才自動確認，其餘一律待審核；安全層只接受已知角色 ID、逾時／例外／未知 ID 一律安全退回。系列可另外指定「視角角色」（第一人稱敘事者）：指定後「我＋reporting verb」比照具名角色的相同規則與競爭名稱歧義判定，解析為該角色；未指定時「我」維持原本無法確認的行為，不影響既有系列。
+- 受限說話者辨識：規則引擎只在明確 reporting clause 才自動確認，其餘一律待審核；安全層只接受已知角色 ID、逾時／例外／未知 ID 一律安全退回。系列可另外指定「視角角色」（第一人稱敘事者）：指定後「我＋reporting verb」比照具名角色的相同規則與競爭名稱歧義判定，解析為該角色；未指定時「我」維持原本無法確認的行為，不影響既有系列。沒有 reporting verb 時退回較弱的訊號：前後敘述文字裡「唯一」出現的已知角色（不論在做什麼動作，不需要說話動詞）給待審核等級的猜測；同一段文字出現兩個以上已知角色一律不猜、退回 Unknown。這個規則取代了舊版「延續上一位確認過的角色」機制。
 - 逐章劇本審核 API：草稿建立／重建、逐片段確認或拒絕、確認為不可變 `ConfirmedSpeechPlanRevision`（含 canonical fingerprint），私人正文不進回應。
 - 多聲線 Edge TTS provider：以 JSON manifest 透過 stdin 傳入每個 turn 的文字／聲線／停頓，ffmpeg concat + ffprobe 驗證後才原子發布；provider registry／dispatcher 讓未來新增供應商不用動到既有系列角色 ID。
 - Worker 已能實際 claim 並處理 `MultiCharacter` 朗讀工作：從鎖定的 speech plan 與 cast revision 組出 turn 序列（相鄰同聲線合併、章界／換人有界停頓），送出合成前重算 fingerprint 與逐片段文字雜湊，任一不符永久失敗為 `speech_plan_integrity_mismatch`。

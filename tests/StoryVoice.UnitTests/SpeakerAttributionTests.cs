@@ -171,14 +171,14 @@ public sealed class SpeakerAttributionTests
     }
 
     [Fact]
-    public async Task Adjacent_turn_continuation_is_only_ever_a_suggestion_never_a_confirmation()
+    public async Task Sole_named_actor_in_connector_text_is_only_ever_a_suggestion_never_a_confirmation()
     {
         var provider = new RuleBasedSpeakerAttributionProvider();
         var request = new SpeakerAttributionRequest(Cast,
         [
             new SpeechSegmentAttributionInput(0, SpeechSegmentKind.Dialogue, "「你回來了？」"),
             new SpeechSegmentAttributionInput(1, SpeechSegmentKind.Narrator, "艾莉絲說。"),
-            new SpeechSegmentAttributionInput(2, SpeechSegmentKind.Narrator, "她頓了頓。"),
+            new SpeechSegmentAttributionInput(2, SpeechSegmentKind.Narrator, "艾莉絲頓了頓。"),
             new SpeechSegmentAttributionInput(3, SpeechSegmentKind.Dialogue, "「我等你很久了。」"),
         ]);
 
@@ -190,12 +190,36 @@ public sealed class SpeakerAttributionTests
         Assert.Equal(SpeakerAttributionOutcome.Confirmed, first.Outcome);
         Assert.Equal(AliceId, second.CharacterId);
         Assert.Equal(SpeakerAttributionOutcome.Suggested, second.Outcome);
-        Assert.Equal("adjacent_turn_continuation", second.ReasonCode);
+        Assert.Equal("narrator_sole_named_actor", second.ReasonCode);
         Assert.True(second.Confidence < first.Confidence);
     }
 
     [Fact]
-    public async Task Continuation_stops_as_soon_as_a_competing_name_appears_in_between()
+    public async Task Sole_named_actor_needs_no_reporting_verb_and_attributes_both_surrounding_dialogue_lines()
+    {
+        // The motivating case: a connector sentence describes what someone is doing (not that
+        // they're speaking), with no reporting verb at all. Both the dialogue line before and
+        // after that connector should still be attributed to the one person named in it.
+        var provider = new RuleBasedSpeakerAttributionProvider();
+        var request = new SpeakerAttributionRequest(Cast,
+        [
+            new SpeechSegmentAttributionInput(0, SpeechSegmentKind.Dialogue, "「這樣喔，我聽說中縣有間學校工科感覺還不錯。」"),
+            new SpeechSegmentAttributionInput(1, SpeechSegmentKind.Narrator, "艾莉絲乾脆把椅子轉過來，拿了原子筆就畫圈圈，"),
+            new SpeechSegmentAttributionInput(2, SpeechSegmentKind.Dialogue, "「如果你也申請能過，我們還可以再當三年同學哩。」"),
+        ]);
+
+        var results = await provider.AttributeAsync(request, CancellationToken.None);
+
+        Assert.All(results, result =>
+        {
+            Assert.Equal(AliceId, result.CharacterId);
+            Assert.Equal(SpeakerAttributionOutcome.Suggested, result.Outcome);
+            Assert.Equal("narrator_sole_named_actor", result.ReasonCode);
+        });
+    }
+
+    [Fact]
+    public async Task Sole_named_actor_switches_to_whichever_character_is_newly_named_in_between()
     {
         var provider = new RuleBasedSpeakerAttributionProvider();
         var request = new SpeakerAttributionRequest(Cast,
@@ -209,8 +233,26 @@ public sealed class SpeakerAttributionTests
         var results = await provider.AttributeAsync(request, CancellationToken.None);
 
         var second = results.Single(candidate => candidate.SegmentIndex == 3);
-        Assert.Equal(SpeakerAttributionOutcome.Unknown, second.Outcome);
-        Assert.Null(second.CharacterId);
+        Assert.Equal(BobId, second.CharacterId);
+        Assert.Equal(SpeakerAttributionOutcome.Suggested, second.Outcome);
+        Assert.Equal("narrator_sole_named_actor", second.ReasonCode);
+    }
+
+    [Fact]
+    public async Task Sole_named_actor_stays_unknown_when_two_known_characters_share_the_connector_text()
+    {
+        var provider = new RuleBasedSpeakerAttributionProvider();
+        var request = new SpeakerAttributionRequest(Cast,
+        [
+            new SpeechSegmentAttributionInput(0, SpeechSegmentKind.Narrator, "艾莉絲拍了拍鮑伯的肩膀，"),
+            new SpeechSegmentAttributionInput(1, SpeechSegmentKind.Dialogue, "「走吧。」"),
+        ]);
+
+        var results = await provider.AttributeAsync(request, CancellationToken.None);
+
+        var result = Assert.Single(results);
+        Assert.Null(result.CharacterId);
+        Assert.Equal(SpeakerAttributionOutcome.Unknown, result.Outcome);
     }
 
     [Fact]

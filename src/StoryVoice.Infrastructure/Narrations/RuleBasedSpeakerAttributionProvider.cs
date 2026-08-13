@@ -6,15 +6,20 @@ namespace StoryVoice.Infrastructure.Narrations;
 /// <summary>
 /// Deterministic, explainable speaker attribution: only confirms a speaker when a known
 /// character's canonical name or alias sits directly next to a reporting verb ("陳大文說：") in
-/// an adjacent Narrator segment, and only suggests turn continuation when the immediately
-/// preceding dialogue turn was itself confirmed with no competing name in between. Everything
-/// else resolves to Unknown — this provider never guesses a new character into existence.
+/// an adjacent Narrator segment. When no reporting verb is present, it falls back to a weaker
+/// signal — a known character is simply the only one named anywhere in the adjacent Narrator
+/// text ("陳大文轉過身，撿起筆"), which is common when a connector sentence describes what
+/// someone is doing rather than explicitly saying they spoke; this only ever produces a
+/// Suggested-confidence guess, never a Confirmed one, and stays silent (Unknown) the moment more
+/// than one known name shows up in that same text, exactly like the reporting-clause rule does.
+/// Everything else resolves to Unknown — this provider never guesses a new character into
+/// existence.
 ///
 /// First-person narrated books never name their narrator next to a reporting verb ("我說：",
 /// never "陳大文說：" about themselves), so a series can name one cast member as the
 /// <see cref="SpeakerAttributionRequest.PointOfViewCharacterId"/>: the literal pronoun "我" is
-/// then treated exactly like that character's own name for reporting-clause matching, subject to
-/// the same ambiguity rule as any other name.
+/// then treated exactly like that character's own name for both rules above, subject to the same
+/// ambiguity guard as any other name.
 /// </summary>
 public sealed class RuleBasedSpeakerAttributionProvider : ISpeakerAttributionProvider
 {
@@ -26,20 +31,12 @@ public sealed class RuleBasedSpeakerAttributionProvider : ISpeakerAttributionPro
     {
         ArgumentNullException.ThrowIfNull(request);
         var results = new List<SpeakerAttributionResult>();
-        Guid? lastConfirmedCharacterId = null;
-        var sawCompetingNameSinceLastConfirmed = false;
 
         foreach (var segment in request.Segments)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (segment.Kind != SpeechSegmentKind.Dialogue)
             {
-                if (segment.Kind == SpeechSegmentKind.Narrator
-                    && ContainsAnyOtherKnownName(segment.Text, request.KnownCharacters, lastConfirmedCharacterId))
-                {
-                    sawCompetingNameSinceLastConfirmed = true;
-                }
-
                 continue;
             }
 
@@ -53,20 +50,19 @@ public sealed class RuleBasedSpeakerAttributionProvider : ISpeakerAttributionPro
                     92,
                     SpeakerAttributionDecisionSource.Rule,
                     reportingMatch.Value.ReasonCode));
-                lastConfirmedCharacterId = reportingMatch.Value.CharacterId;
-                sawCompetingNameSinceLastConfirmed = false;
                 continue;
             }
 
-            if (lastConfirmedCharacterId is Guid continuation && !sawCompetingNameSinceLastConfirmed)
+            var soleActorMatch = FindSoleNamedActorSpeaker(request, segment);
+            if (soleActorMatch is not null)
             {
                 results.Add(new SpeakerAttributionResult(
                     segment.Index,
-                    continuation,
+                    soleActorMatch.Value.CharacterId,
                     SpeakerAttributionOutcome.Suggested,
                     55,
                     SpeakerAttributionDecisionSource.Rule,
-                    "adjacent_turn_continuation"));
+                    soleActorMatch.Value.ReasonCode));
                 continue;
             }
 
@@ -131,6 +127,57 @@ public sealed class RuleBasedSpeakerAttributionProvider : ISpeakerAttributionPro
         return candidate is Guid resolved ? (resolved, reasonCode) : null;
     }
 
+    /// <summary>
+    /// Weaker fallback for when no reporting verb is present: a known character (or the POV
+    /// pronoun) is the only one mentioned anywhere in the adjacent Narrator text, regardless of
+    /// what they're doing there. Two different known names in that same text means the text isn't
+    /// unambiguously about one person — do not guess.
+    /// </summary>
+    private static (Guid CharacterId, string ReasonCode)? FindSoleNamedActorSpeaker(
+        SpeakerAttributionRequest request,
+        SpeechSegmentAttributionInput dialogueSegment)
+    {
+        var neighborText = FindAdjacentNarratorText(request.Segments, dialogueSegment.Index);
+        if (neighborText is null)
+        {
+            return null;
+        }
+
+        Guid? candidate = null;
+        var reasonCode = "narrator_sole_named_actor";
+        foreach (var character in request.KnownCharacters)
+        {
+            if (!Names(character).Any(name =>
+                !string.IsNullOrEmpty(name) && neighborText.Contains(name, StringComparison.Ordinal)))
+            {
+                continue;
+            }
+
+            if (candidate is not null && candidate != character.CharacterId)
+            {
+                // Two different known characters are both mentioned in the same connector text:
+                // ambiguous, do not guess who it's actually about.
+                return null;
+            }
+
+            candidate = character.CharacterId;
+        }
+
+        if (request.PointOfViewCharacterId is Guid povCharacterId
+            && neighborText.Contains(FirstPersonPronoun, StringComparison.Ordinal))
+        {
+            if (candidate is not null && candidate != povCharacterId)
+            {
+                return null;
+            }
+
+            candidate = povCharacterId;
+            reasonCode = "narrator_sole_named_actor_first_person_pov";
+        }
+
+        return candidate is Guid resolved ? (resolved, reasonCode) : null;
+    }
+
     private static bool HasReportingClauseFor(string narratorText, string normalizedName)
     {
         if (string.IsNullOrEmpty(normalizedName))
@@ -172,15 +219,6 @@ public sealed class RuleBasedSpeakerAttributionProvider : ISpeakerAttributionPro
         if (after?.Kind == SpeechSegmentKind.Narrator) texts.Add(after.Text);
         return texts.Count == 0 ? null : string.Join('\n', texts);
     }
-
-    private static bool ContainsAnyOtherKnownName(
-        string narratorText,
-        IReadOnlyList<KnownCharacterIdentity> knownCharacters,
-        Guid? excludingCharacterId) =>
-        knownCharacters
-            .Where(character => character.CharacterId != excludingCharacterId)
-            .Any(character => Names(character).Any(name =>
-                !string.IsNullOrEmpty(name) && narratorText.Contains(name, StringComparison.Ordinal)));
 
     private static IEnumerable<string> Names(KnownCharacterIdentity character)
     {
