@@ -54,7 +54,7 @@ export function AuthScreen({ csrfToken, onAuthenticated }: AuthScreenProps) {
     <main className="relative grid min-h-screen place-items-center overflow-hidden bg-[#faf6ee] px-5 py-12 text-[#332a1f]">
       <div className="ambient ambient-one" aria-hidden="true" />
       <div className="ambient ambient-two" aria-hidden="true" />
-      <section className="relative z-10 grid w-full max-w-5xl overflow-hidden rounded-[2rem] border border-stone-200 bg-white/90 shadow-2xl shadow-stone-400/20 backdrop-blur-xl lg:grid-cols-[1.05fr_.95fr]">
+      <section className="relative z-10 grid w-full max-w-5xl grid-cols-1 overflow-hidden rounded-[2rem] border border-stone-200 bg-white/90 shadow-2xl shadow-stone-400/20 backdrop-blur-xl lg:grid-cols-[1.05fr_.95fr]">
         <div className="border-b border-stone-200 bg-gradient-to-br from-amber-50/70 to-transparent p-8 sm:p-12 lg:border-b-0 lg:border-r">
           <div className="flex items-center gap-3">
             <span className="grid h-12 w-12 place-items-center rounded-2xl border border-amber-300 bg-amber-50 font-serif text-lg text-amber-800">SV</span>

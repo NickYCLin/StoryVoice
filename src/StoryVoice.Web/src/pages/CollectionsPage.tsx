@@ -79,7 +79,7 @@ export function CollectionsPage() {
 
       <form className="mb-10 overflow-hidden rounded-3xl border border-amber-200 bg-gradient-to-br from-amber-50 via-white to-orange-50 p-5 sm:p-7" onSubmit={handleCreate}>
         <h2 className="font-serif text-2xl text-stone-900">建立新書冊</h2>
-        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
           <label className="text-xs text-stone-500">
             書冊名稱
             <input className="auth-input mt-2" maxLength={200} onChange={(event) => setName(event.target.value)} required value={name} />
@@ -106,7 +106,7 @@ export function CollectionsPage() {
         </div>
       )}
       {listState === 'ready' && collections.length > 0 && (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {collections.map((collection) => (
             <div className="book-card flex-col items-start gap-3" key={collection.id}>
               <Link className="block w-full" to={`/collections/${collection.id}`}>

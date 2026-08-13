@@ -243,7 +243,7 @@ export function CharacterVoiceProfilesPanel({ characterProfileId, characterName,
       <p className="text-sm text-stone-500">
         {characterName} 的自訂聲線 — 基礎聲線之外，可以替緊張／開心／生氣／難過各自設計或克隆一組聲線；找不到的情境會自動退回基礎聲線。
       </p>
-      <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {SLOTS.map((slot) => {
           const slotKey = `${characterProfileId}:${slot.sceneCode ?? 'base'}`
           const profile = profileFor(slot.sceneCode)

@@ -45,7 +45,7 @@ export function SharedWithMePage() {
         </div>
       )}
       {state === 'ready' && collections.length > 0 && (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {collections.map((collection) => (
             <Link className="book-card flex-col items-start gap-3" key={collection.id} to={`/shared/${collection.id}`}>
               <p className="font-serif text-xl text-stone-900">{collection.name}</p>

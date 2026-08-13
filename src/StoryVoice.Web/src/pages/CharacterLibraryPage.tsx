@@ -332,7 +332,7 @@ export function CharacterLibraryPage() {
         </p>
       </section>
 
-      <section className="mt-6 grid gap-6 lg:grid-cols-[20rem_minmax(0,1fr)]">
+      <section className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[20rem_minmax(0,1fr)]">
         <aside className="rounded-3xl border border-stone-200 bg-white p-4">
           <h2 className="font-serif text-xl text-stone-900">我的角色</h2>
 
@@ -370,7 +370,7 @@ export function CharacterLibraryPage() {
                     {character.canonicalName.slice(0, 1)}
                   </span>
                 )}
-                <span className="truncate">{character.canonicalName}</span>
+                <span className="min-w-0 flex-1 truncate">{character.canonicalName}</span>
                 {!character.isActive && <span className="ml-auto shrink-0 text-[10px] text-stone-400">已停用</span>}
               </button>
             ))}
@@ -429,7 +429,7 @@ export function CharacterLibraryPage() {
                   </div>
                 </div>
 
-                <div className="mt-5 grid gap-3 border-t border-stone-200 pt-5 sm:grid-cols-4">
+                <div className="mt-5 grid grid-cols-1 gap-3 border-t border-stone-200 pt-5 sm:grid-cols-4">
                   <div className="rounded-xl border border-stone-200 bg-stone-50 p-3">
                     <p className="text-[11px] text-stone-500">基礎聲線狀態</p>
                     <p className={`mt-1 text-sm font-medium ${baseProfile?.status === 'Ready' ? 'text-emerald-700' : 'text-stone-600'}`}>
@@ -466,7 +466,7 @@ export function CharacterLibraryPage() {
                 </div>
 
                 {activeTab === 'basic' && (
-                  <form className="mt-6 grid gap-4 border-t border-stone-200 pt-5 sm:grid-cols-2" onSubmit={saveCharacter}>
+                  <form className="mt-6 grid grid-cols-1 gap-4 border-t border-stone-200 pt-5 sm:grid-cols-2" onSubmit={saveCharacter}>
                     <label className="text-xs text-stone-500 sm:col-span-2">
                       角色名稱
                       <input

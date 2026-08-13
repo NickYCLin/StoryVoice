@@ -218,7 +218,7 @@ export function CollectionDetailPage() {
             ))}
         </ul>
 
-        <form className="mt-6 grid gap-3 border-t border-stone-200 pt-6 sm:grid-cols-[minmax(0,1fr)_auto_auto_auto] sm:items-end" onSubmit={handleAddBook}>
+        <form className="mt-6 grid grid-cols-1 gap-3 border-t border-stone-200 pt-6 sm:grid-cols-[minmax(0,1fr)_auto_auto_auto] sm:items-end" onSubmit={handleAddBook}>
           <label className="text-xs text-stone-500">
             從書庫加入書籍
             <select className="auth-input mt-2" onChange={(event) => setAddBookId(event.target.value)} value={addBookId}>

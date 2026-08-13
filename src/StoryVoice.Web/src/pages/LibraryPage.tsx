@@ -304,7 +304,7 @@ export function LibraryPage() {
       </div>
 
       <form className="mb-6 overflow-hidden rounded-3xl border border-amber-200 bg-gradient-to-br from-amber-50 via-white to-orange-50 p-5 sm:p-7" onSubmit={handleUpload}>
-        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
           <div className="min-w-0">
             <span className="inline-flex rounded-full border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">推薦方式</span>
             <label className="mt-4 block font-serif text-2xl text-stone-900" htmlFor="book-file">選擇 EPUB 或 TXT</label>
@@ -332,10 +332,10 @@ export function LibraryPage() {
           <span><strong className="font-semibold text-stone-800">進階：同步博客來書櫃書目</strong><span className="ml-2 text-stone-400">不含受保護內文</span></span>
           <span className="text-stone-400 transition group-open:rotate-45">＋</span>
         </summary>
-        <div className="grid gap-6 border-t border-stone-200 px-5 py-6 sm:px-6 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
+        <div className="grid grid-cols-1 gap-6 border-t border-stone-200 px-5 py-6 sm:px-6 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
           <div className="min-w-0">
             <p className="text-sm leading-7 text-stone-600">這條路只同步書名、作者、封面、官方閱讀連結，以及頁面明確標示的版型／官方 TTS 狀態；不會把電子書內文匯入 StoryVoice。</p>
-            <ol className="mt-4 grid gap-2 text-xs text-stone-500 sm:grid-cols-3">
+            <ol className="mt-4 grid grid-cols-1 gap-2 text-xs text-stone-500 sm:grid-cols-3">
               <li><span className="mr-2 text-orange-600">01</span>登入博客來官方書櫃</li>
               <li><span className="mr-2 text-orange-600">02</span>建立金鑰並貼到 Companion</li>
               <li><span className="mr-2 text-orange-600">03</span>勾選同步後重新整理</li>
@@ -372,7 +372,7 @@ export function LibraryPage() {
               <p className={`mt-2 min-h-5 text-xs ${companionTokenState === 'error' ? 'text-rose-600' : 'text-stone-500'}`} role="status">{companionTokenMessage || '金鑰只會在建立當下顯示；請貼到 Companion 後再同步。'}</p>
             </div>
           </div>
-          <div className="grid gap-3 sm:grid-cols-3 lg:w-52 lg:grid-cols-1">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 lg:w-52 lg:grid-cols-1">
             <a className="primary-button text-center" download href={companionDownloadUrl}>下載 Companion ZIP</a>
             <a className="secondary-button text-center" href="https://viewer-ebook.books.com.tw/viewer/index.html?readlist=all" rel="noreferrer" target="_blank">開啟官方書櫃 ↗</a>
             <button className="secondary-button disabled:cursor-wait disabled:opacity-60" disabled={libraryState === 'loading'} onClick={() => void loadLibrary()} type="button">
@@ -390,7 +390,7 @@ export function LibraryPage() {
 
       {libraryState === 'ready' && books.length > 0 && (
         <section aria-label="書庫整理工具" className="mb-6 rounded-3xl border border-stone-200 bg-white p-5 sm:p-6">
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <label className="text-xs text-stone-500 sm:col-span-2 lg:col-span-1">
               搜尋書名、作者、書籍 ID 或標籤
               <input
@@ -478,7 +478,7 @@ export function LibraryPage() {
         </div>
       )}
       {libraryState === 'ready' && visibleBooks.length > 0 && (
-        <div className="grid gap-6 lg:grid-cols-[minmax(0,.82fr)_minmax(0,1.18fr)]">
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,.82fr)_minmax(0,1.18fr)]">
           <div className="space-y-3">
             {visibleBooks.map((book) => (
               <button

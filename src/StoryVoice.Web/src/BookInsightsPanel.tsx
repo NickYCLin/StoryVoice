@@ -228,7 +228,7 @@ export function BookInsightsPanel({ book, books, csrfToken, onBookUpdated }: Boo
         <section className="rounded-2xl border border-sky-100 bg-sky-50/70 p-4" aria-label="作者與封面校正">
           <h4 className="font-serif text-lg text-stone-800">書名、作者與封面校正</h4>
           <p className="mt-2 text-xs leading-6 text-stone-500">人工校正只影響你的 StoryVoice 書庫顯示；博客來同步資料仍保留，重新同步也不會覆蓋校正。</p>
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
             <label className="text-xs text-stone-500">顯示書名<input className="auth-input mt-2" maxLength={500} onChange={(event) => setMetadataTitle(event.target.value)} value={metadataTitle} /></label>
             <label className="text-xs text-stone-500">顯示作者<input className="auth-input mt-2" maxLength={300} onChange={(event) => setMetadataAuthor(event.target.value)} value={metadataAuthor} /></label>
             <label className="text-xs text-stone-500 sm:col-span-2">封面圖片網址<input className="auth-input mt-2" maxLength={2000} onChange={(event) => setMetadataCover(event.target.value)} placeholder="https://…" type="url" value={metadataCover} /></label>
