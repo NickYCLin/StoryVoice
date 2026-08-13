@@ -46,6 +46,19 @@ test('sorts deterministically by title, author, latest sync, and creation time',
   assert.deepEqual(filterAndSortBooks(baseBooks, defaults, tags).map(book => book.id), ['b-1', 'b-2', 'b-3'])
 })
 
+test('title sort understands Chinese-numeral volume markers, not just Arabic digits', () => {
+  const volumes = [
+    { id: 'v11', title: '特殊傳說第十一部：黑館的秘密', author: '護玄', createdAt: '2026-08-10T00:00:00Z', sourceProvider: null, externalSourceId: null, nativeTtsAvailable: null, ebookLayout: null, sourceSyncedAt: null },
+    { id: 'v2', title: '特殊傳說第二部：生存遊戲開始', author: '護玄', createdAt: '2026-08-10T00:00:00Z', sourceProvider: null, externalSourceId: null, nativeTtsAvailable: null, ebookLayout: null, sourceSyncedAt: null },
+    { id: 'v1', title: '特殊傳說第一部：不存在的學園', author: '護玄', createdAt: '2026-08-10T00:00:00Z', sourceProvider: null, externalSourceId: null, nativeTtsAvailable: null, ebookLayout: null, sourceSyncedAt: null },
+    { id: 'v10', title: '特殊傳說第十部：水之妖精族', author: '護玄', createdAt: '2026-08-10T00:00:00Z', sourceProvider: null, externalSourceId: null, nativeTtsAvailable: null, ebookLayout: null, sourceSyncedAt: null },
+  ]
+  assert.deepEqual(
+    filterAndSortBooks(volumes, { ...defaults, sort: 'title' }, {}).map(book => book.id),
+    ['v1', 'v2', 'v10', 'v11'],
+  )
+})
+
 test('normalizes local device tags and rejects unusable labels', () => {
   assert.equal(normalizeDeviceTag('  待  讀  '), '待 讀')
   assert.equal(normalizeDeviceTag('x'.repeat(25)), null)
