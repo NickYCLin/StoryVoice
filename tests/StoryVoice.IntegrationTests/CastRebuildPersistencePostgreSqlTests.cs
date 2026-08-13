@@ -623,7 +623,8 @@ public sealed class CastRebuildPersistencePostgreSqlTests
             Guid.NewGuid(),
             "cast-down",
             includePointerCandidates: false,
-            cancellationToken);
+            cancellationToken,
+            targetMigration: CurrentMigration);
         var legacyJobId = Guid.NewGuid();
 
         await using (var db = CreateContext(graph.ConnectionString))
@@ -693,7 +694,8 @@ public sealed class CastRebuildPersistencePostgreSqlTests
         Guid ownerId,
         string prefix,
         bool includePointerCandidates,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? targetMigration = null)
     {
         var utcNow = DateTimeOffset.UtcNow;
         var createdAt = new DateTimeOffset(utcNow.Ticks - (utcNow.Ticks % 10), utcNow.Offset);
@@ -776,8 +778,77 @@ public sealed class CastRebuildPersistencePostgreSqlTests
         Guid? otherBookMemberId = null;
         SeriesCastRebuildBatch? siblingBatch = null;
         SeriesCastRebuildBatch? otherBookBatch = null;
+        NarrationCastRevision? siblingRevision = null;
+        NarrationCastRevision? otherBookRevision = null;
         if (includePointerCandidates)
         {
+            // UX_rebuild_batches_draft_cast enforces one batch per (OwnerId, SeriesId,
+            // DraftCastRevisionId), so each pointer-candidate batch needs its own revision
+            // rather than reusing the primary `revision`.
+            var siblingRevisionId = Guid.NewGuid();
+            var siblingAssignment = NarrationCastAssignment.Create(
+                Guid.NewGuid(),
+                ownerId,
+                series.Id,
+                siblingRevisionId,
+                character.Id,
+                character.CanonicalName,
+                "synthetic-provider",
+                "provider-v1",
+                "synthetic-hero-voice",
+                "+5%",
+                "+1Hz",
+                "-2%");
+            siblingRevision = NarrationCastRevision.Create(
+                siblingRevisionId,
+                ownerId,
+                series.Id,
+                8,
+                "synthetic-provider",
+                "provider-v1",
+                "synthetic-narrator",
+                "+1%",
+                "+0Hz",
+                "+0%",
+                250,
+                500,
+                "composition-v1",
+                "mp3-128k",
+                createdAt,
+                [siblingAssignment]);
+
+            var otherBookRevisionId = Guid.NewGuid();
+            var otherBookAssignment = NarrationCastAssignment.Create(
+                Guid.NewGuid(),
+                ownerId,
+                series.Id,
+                otherBookRevisionId,
+                character.Id,
+                character.CanonicalName,
+                "synthetic-provider",
+                "provider-v1",
+                "synthetic-hero-voice",
+                "+5%",
+                "+1Hz",
+                "-2%");
+            otherBookRevision = NarrationCastRevision.Create(
+                otherBookRevisionId,
+                ownerId,
+                series.Id,
+                9,
+                "synthetic-provider",
+                "provider-v1",
+                "synthetic-narrator",
+                "+2%",
+                "+0Hz",
+                "+0%",
+                250,
+                500,
+                "composition-v1",
+                "mp3-128k",
+                createdAt,
+                [otherBookAssignment]);
+
             siblingBatchId = Guid.NewGuid();
             siblingMemberId = Guid.NewGuid();
             var siblingMember = SeriesCastRebuildMember.Create(
@@ -794,7 +865,7 @@ public sealed class CastRebuildPersistencePostgreSqlTests
                 ownerId,
                 series.Id,
                 null,
-                revision.Id,
+                siblingRevisionId,
                 firstMembership.MembershipRevision,
                 createdAt,
                 [siblingMember]);
@@ -815,20 +886,30 @@ public sealed class CastRebuildPersistencePostgreSqlTests
                 ownerId,
                 series.Id,
                 null,
-                revision.Id,
+                otherBookRevisionId,
                 secondMembership.MembershipRevision,
                 createdAt,
                 [otherBookMember]);
         }
 
         await using var db = CreateContext(connectionString);
-        await db.GetService<IMigrator>().MigrateAsync(CurrentMigration, cancellationToken);
+        await db.GetService<IMigrator>().MigrateAsync(targetMigration, cancellationToken);
         db.Users.Add(CreateUser(ownerId, prefix));
         db.Books.AddRange(firstBook, secondBook);
         await db.SaveChangesAsync(cancellationToken);
         db.StorySeries.Add(series);
         db.NarrationCastRevisions.Add(revision);
         db.SeriesCastRebuildBatches.Add(batch);
+        if (siblingRevision is not null)
+        {
+            db.NarrationCastRevisions.Add(siblingRevision);
+        }
+
+        if (otherBookRevision is not null)
+        {
+            db.NarrationCastRevisions.Add(otherBookRevision);
+        }
+
         if (siblingBatch is not null)
         {
             db.SeriesCastRebuildBatches.Add(siblingBatch);
@@ -888,7 +969,7 @@ public sealed class CastRebuildPersistencePostgreSqlTests
                 graph.OwnerId,
                 member.BookId,
                 graph.SeriesId,
-                graph.RevisionId,
+                batch.DraftCastRevisionId,
                 Guid.NewGuid(),
                 batch.Id,
                 member.Id,
