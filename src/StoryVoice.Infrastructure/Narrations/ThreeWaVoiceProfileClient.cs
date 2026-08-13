@@ -96,7 +96,9 @@ public sealed class ThreeWaVoiceProfileClient(HttpClient httpClient, IOptions<Th
         var response = await httpClient.SendAsync(request, cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
-            throw new ThreeWaAiHubException($"3wa Cluster API 回傳 {(int)response.StatusCode}。");
+            var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+            throw new ThreeWaAiHubException(
+                $"3wa Cluster API 回傳 {(int)response.StatusCode}：{Truncate(errorBody, 500)}");
         }
 
         return response;
@@ -107,6 +109,9 @@ public sealed class ThreeWaVoiceProfileClient(HttpClient httpClient, IOptions<Th
         var body = await response.Content.ReadFromJsonAsync<T>(SerializerOptions, cancellationToken);
         return body ?? throw new ThreeWaAiHubException("3wa Cluster API 回應內容無法解析。");
     }
+
+    private static string Truncate(string value, int maxLength) =>
+        value.Length <= maxLength ? value : value[..maxLength] + "…";
 
     private sealed record PrepareResponseBody(
         [property: JsonPropertyName("ok")] bool Ok,
