@@ -11,6 +11,11 @@ test('劇本審核只以 owner 取得的章節正文切片呈現，並標示低�
   assert.match(review, /確認這段角色/)
 })
 
+test('已確認的對白段也會顯示判定到的角色名字，不只是待審核段落', () => {
+  assert.match(review, /segment\.characterName/)
+  assert.match(review, /無法判定/)
+})
+
 test('計畫未確認時禁止建立 staged 多角色工作，並顯示缺口數', () => {
   assert.match(review, /confirmedGapCount/)
   assert.match(review, /disabled=\{confirmedGapCount > 0/)

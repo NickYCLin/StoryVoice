@@ -188,6 +188,7 @@ export function SpeechPlanReview({
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <p className="min-w-0 flex-1 text-sm leading-6 text-stone-700">{segmentText(entry.chapter, segment)}</p>
                         <span className={`shrink-0 text-xs ${segment.reviewStatus === 'Confirmed' ? 'text-emerald-700' : 'text-amber-700'}`}>
+                          {segment.kind === 'Dialogue' && `${segment.characterName ?? '無法判定'} · `}
                           {segment.reviewStatus === 'Confirmed' ? '已確認' : `待審核 · 信心 ${segment.confidence}%`}
                         </span>
                       </div>
