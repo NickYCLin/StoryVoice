@@ -1,5 +1,7 @@
 import { Link } from 'react-router-dom'
 
+import { apiUrl } from '../api'
+
 type Feature = {
   eyebrow: string
   title: string
@@ -84,7 +86,7 @@ export function LandingPage() {
                 alt={feature.imageAlt}
                 className="h-72 w-full object-cover object-top sm:h-80"
                 loading="lazy"
-                src={feature.image}
+                src={apiUrl(feature.image)}
               />
             </div>
           </div>
