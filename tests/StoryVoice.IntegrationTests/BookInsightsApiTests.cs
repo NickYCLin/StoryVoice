@@ -307,11 +307,15 @@ public sealed class BookInsightsApiTests(ApiFactory factory) : IClassFixture<Api
             owner,
             """
             第一章 起點
-            小華問道：「你要走了？」
-            小華問道：「真的嗎？」
-            小華問道：「你確定？」
-            小明說：「再見。」
-            小明說：「保重。」
+            我叫李小華。
+            我叫王小明。
+            「李小華，請先等等。」
+            李小華問道：「你要走了？」
+            李小華問道：「真的嗎？」
+            李小華問道：「你確定？」
+            「王小明，先別走。」
+            王小明說：「再見。」
+            王小明說：「保重。」
             """,
             cancellationToken);
 
@@ -330,12 +334,125 @@ public sealed class BookInsightsApiTests(ApiFactory factory) : IClassFixture<Api
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.NotNull(candidates);
         Assert.Equal(2, candidates.Length);
-        Assert.Equal("小華", candidates[0].Name);
+        Assert.Equal("李小華", candidates[0].Name);
         Assert.Equal(3, candidates[0].OccurrenceCount);
-        Assert.Equal("小明", candidates[1].Name);
+        Assert.Equal("王小明", candidates[1].Name);
         Assert.Equal(2, candidates[1].OccurrenceCount);
         Assert.Equal(HttpStatusCode.NotFound, otherResponse.StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, missingResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task Character_candidates_exclude_homographic_prose_and_generic_roles()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var owner = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        var book = await ImportTextAsync(
+            owner,
+            """
+            第一章 候選精度
+            「前句。」天知道，「後句。」
+            「前句。」天知道，「後句。」
+            「前句。」說實話，「後句。」
+            「前句。」說實話，「後句。」
+            「前句。」等到學長說，「後句。」
+            「前句。」等到學長說，「後句。」
+            「前句。」男生說，「後句。」
+            「前句。」男生說，「後句。」
+            「前句。」經知道，「後句。」
+            「前句。」經知道，「後句。」
+            出口說：「前句。」
+            出口說：「後句。」
+            出口處說：「前句。」
+            出口處說：「後句。」
+            成績單說：「前句。」
+            成績單說：「後句。」
+            恐怖說：「前句。」
+            恐怖說：「後句。」
+            所謂說：「前句。」
+            所謂說：「後句。」
+            時候說：「前句。」
+            時候說：「後句。」
+            話題說：「前句。」
+            話題說：「後句。」
+            「前句。」說小心，「後句。」
+            「前句。」說小心，「後句。」
+            「小心，快跑。」
+            小心說：「前句。」
+            小心說：「後句。」
+            「慢慢，快一點。」
+            「慢慢，別停。」
+            「慢慢，繼續走。」
+            慢慢這樣說：「前句。」
+            慢慢這樣說：「後句。」
+            白色說：「前句。」
+            白色說：「後句。」
+            小學生說：「前句。」
+            小學生說：「後句。」
+            「高中同學，請先等等。」
+            高中同學說：「前句。」
+            高中同學說：「後句。」
+            高中生說：「前句。」
+            高中生說：「後句。」
+            「慢慢，快一點。」
+            慢慢這樣說：「前句。」
+
+            第二章 慢慢對抗語料
+            「慢慢，別停。」
+            「慢慢，繼續走。」
+            慢慢這樣說：「後句。」
+            我叫王小明。
+            「王小明，這才是人名。」
+            王小明說：「這才是人名。」
+            王小明說：「不要把一般詞當角色。」
+            """,
+            cancellationToken);
+
+        using var response = await owner.GetAsync(
+            $"/api/books/{book.Id}/character-candidates",
+            cancellationToken);
+        var candidates = await response.Content.ReadFromJsonAsync<CharacterCandidateResponse[]>(cancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var candidate = Assert.Single(candidates!);
+        Assert.Equal("王小明", candidate.Name);
+        Assert.Equal(2, candidate.OccurrenceCount);
+    }
+
+    [Fact]
+    public async Task Character_candidates_retain_conventional_names_and_a_sole_bridge_actor_while_unverified_aliases_remain_out()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var owner = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        var book = await ImportTextAsync(
+            owner,
+            """
+            第一章 正向候選
+            我叫千冬歲。
+            千冬歲說：「先走。」
+            千冬歲說：「等等我。」
+            「喵喵，先過來。」
+            喵喵這樣問道：「要吃飯嗎？」
+            「這樣喔。」幸運同學把椅子轉過來，「那就這麼辦。」
+
+            第二章 別名證據
+            「喵喵，等等我。」
+            「喵喵，先坐下。」
+            喵喵則問道：「還是要喝茶？」
+            """,
+            cancellationToken);
+
+        using var response = await owner.GetAsync(
+            $"/api/books/{book.Id}/character-candidates",
+            cancellationToken);
+        var candidates = await response.Content.ReadFromJsonAsync<CharacterCandidateResponse[]>(cancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.NotNull(candidates);
+        Assert.Equal(2, candidates.Length);
+        Assert.Equal(2, candidates.Single(candidate => candidate.Name == "千冬歲").OccurrenceCount);
+        Assert.Equal(2, candidates.Single(candidate => candidate.Name == "幸運同學").OccurrenceCount);
+        Assert.DoesNotContain(candidates, candidate => candidate.Name == "喵喵");
     }
 
     [Fact]

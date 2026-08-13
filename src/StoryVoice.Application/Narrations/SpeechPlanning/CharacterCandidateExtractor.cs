@@ -25,17 +25,20 @@ public sealed record CharacterCandidate(
 /// actual reporting-clause position (right before/after a quote, closest match wins) is what makes
 /// this precise enough to be useful instead of dominated by ordinary prose.
 ///
-/// A name must also recur at least <see cref="MinimumOccurrenceCount"/> times: a real character
-/// gets named next to their dialogue repeatedly, while a stray function-word mismatch from this
-/// heuristic almost never lands on the exact same text twice — this catches most remaining noise
-/// without needing to enumerate every possible non-name phrase.
-///
-/// Still deliberately imprecise in known, acceptable ways: a name must be 2+ Han characters (this
-/// alone screens out nearly every third-person pronoun, which in Chinese is a single character) or
-/// a capitalized Latin word, and a title used as a stand-in name ("老師說：") will still surface —
-/// the caller is expected to let a person pick real characters out of the ranked list, not trust it
-/// blindly. Characters who are only ever addressed by pronoun or through the POV "我" won't surface
-/// at all — this is a hint, not an exhaustive cast list.
+/// A name must also recur at least <see cref="MinimumOccurrenceCount"/> times. Recurrence alone is
+/// not enough: Chinese prose can make ordinary words look like a name followed by a one-character
+/// reporting verb (for example 「天知道」). The reverse shape (「說」 followed by arbitrary Han text)
+/// is deliberately not used, because it cannot distinguish 「說小心」 from a person's name. Therefore
+/// an unregistered Han candidate needs positive person evidence: a conventional name shape plus an
+/// explicit self-identification, or a named title. A quote-opening phrase can directly address an
+/// object as easily as a person, so it is deliberately not enough for a bare Han name. A repeated
+/// two-character alias alone is also intentionally not enough: even cross-chapter quote and
+/// reporting patterns cannot safely distinguish a real nickname from ordinary reduplicated prose.
+/// Bare two-character names are therefore omitted because they are too easily indistinguishable from ordinary Chinese words.
+/// Generic roles such as 「學長」 and ordinary nouns such as 「男生」 are deliberately omitted.
+/// Characters who are
+/// only ever addressed by pronoun or through the POV 「我」 may not surface at all — this is a high-
+/// precision hint for a human to confirm, not an exhaustive cast list.
 /// </summary>
 public static class CharacterCandidateExtractor
 {
@@ -78,6 +81,42 @@ public static class CharacterCandidateExtractor
         "繼續",
     ];
 
+    // These denote a class of person, relationship, or role but do not name an individual. They
+    // can occur frequently beside dialogue in school stories, which made them visually dominate
+    // the candidate list despite giving an editor nothing actionable to add to a cast.
+    private static readonly string[] GenericRoleWords =
+    [
+        "學長", "學姐", "老師", "先生", "小姐", "太太", "教授", "醫師", "醫生", "主任",
+        "老闆", "師傅", "大人", "同事", "同學", "男生", "女生", "學生", "少年", "少女",
+        "孩子", "小孩", "朋友", "客人", "女人", "男人", "女孩", "家人", "父親", "母親",
+        "爸爸", "媽媽", "哥哥", "姐姐", "弟弟", "妹妹", "新生", "老生",
+    ];
+
+    // A school-year, age, or gender modifier still denotes a group rather than an individual:
+    // 「高中生」、「小學生」 and 「高中同學」 must not gain person evidence merely because their
+    // first character can also be a surname. This structural rule takes precedence over every
+    // positive-evidence path, so even dialogue such as 「高中同學，請回答」 does not turn the generic
+    // role into a cast member.
+    private static readonly string[] GenericRolePrefixes =
+    [
+        "小學", "國小", "國中", "高中", "高職", "大學", "研究",
+    ];
+    private static readonly string[] GenericRoleSuffixes =
+    [
+        "生", "學生", "同學",
+    ];
+
+    // Bare Han strings have no reliable word boundary. A conventional three-character personal-name
+    // shape is necessary but not sufficient: it must also have an explicit 「我叫…」 self-identification.
+    // A direct address can name an object as easily as a person, so it cannot promote a bare Han
+    // string. This keeps ordinary recurring prose such as 「成績單說」 out while retaining a named
+    // person such as 千冬歲. Two-character strings such as 「小心」 or 「白色」 are too easily ordinary
+    // prose even when they occur after a dialogue quote.
+    private const string PersonalNameInitials =
+        "趙錢孫李周吳鄭王馮陳褚衛蔣沈韓楊朱秦許何呂施張孔曹嚴華金魏陶姜戚謝鄒喻柏竇章雲蘇潘葛范彭郎魯韋昌馬苗鳳花方俞任袁柳鮑史唐費岑薛雷賀倪湯滕殷羅畢郝鄔安常於傅皮卞齊康伍余元顧孟平黃和穆蕭尹姚邵湛汪祁毛禹狄米貝臧伏成戴宋茅龐熊紀舒屈項祝董梁杜阮藍閔席季麻賈路江童顏郭梅盛林鍾徐邱駱高夏蔡田樊胡凌霍虞萬柯管盧莫房解應宗丁宣鄧洪包左石崔吉龔程裴陸榮翁荀惠甄段富巫焦巴牧谷車侯全班仲伊宮寧仇甘武劉景詹龍葉幸司黎白蒲古易廖歐千小萊";
+
+    private sealed record PersonEvidence(ISet<string> SelfIdentifiedNames);
+
     // A dialogue bridge can identify an otherwise-unregistered speaker without a reporting verb:
     // 「…」幸運同學把椅子轉過來，「…」. It treats explicit forms of address as actor references,
     // but only returns one that has a compact name-like modifier. This lets a bare 「老師」 make a
@@ -106,8 +145,8 @@ public static class CharacterCandidateExtractor
     // The suffix is the evidence: without it this must never accept a free-form CJK run, because
     // prose verbs (for example 「繼續」) look just as name-like to a regular expression. The speaker
     // candidate itself must begin the bridge and have a 2–4-character modifier: this accepts
-    // 「小明同學」 and 「幸運同學」 but deliberately leaves weak forms such as 「王老師」 or bare
-    // 「同學」 unknown. We still enumerate the rest of the bridge below, so another named actor
+    // 「幸運同學」 but deliberately leaves a less reliable short-modifier form such as 「小明同學」
+    // unknown. We still enumerate the rest of the bridge below, so another named actor
     // (「幸運同學把紙遞給小美同學」) makes the attribution ambiguous instead of silently becoming
     // evidence for the first one. Missing a weak signal is safer than creating a generic person.
     private static readonly Regex LeadingTitleBearingActor = new(
@@ -129,24 +168,71 @@ public static class CharacterCandidateExtractor
     private static readonly Regex NameBeforeVerb = new(
         $@"(?<name>{NameBeforeVerbPattern})[，,：:、]{{0,2}}(?:{VerbPattern})",
         RegexOptions.CultureInvariant | RegexOptions.Compiled);
-
-    // Also lazy, and deliberately NOT extended to consume a whole run the way the before-verb side
-    // is: nothing mandatory follows the name here, so an unbounded/greedy run has nothing to anchor
-    // its true end against and tends to swallow several unrelated words into one long "name"
-    // ("什麼時候到達" instead of stopping). A short, sometimes-truncated 2-character guess ("為什"
-    // instead of "為什麼") is the safer failure mode of the two.
-    private static readonly string CjkNameAfterVerb = $"{CjkNameCharacter}{{2,{MaximumNameLength}}}?";
-    private static readonly string NameAfterVerbPattern = $"(?:{CjkNameAfterVerb}|{LatinName})";
-    private static readonly Regex NameAfterVerb = new(
-        $@"(?:{VerbPattern})[的是]{{0,2}}(?<name>{NameAfterVerbPattern})",
+    private static readonly Regex SelfIdentification = new(
+        $@"(?<!\p{{IsCJKUnifiedIdeographs}})我叫(?<name>{CjkNameCharacter}{{2,{MaximumNameLength}}})(?=[，,、：:！!？?。』」”\x22])",
         RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly Regex LatinNamePattern = new(
+        $@"^{LatinName}$",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    private static bool HasPositivePersonEvidence(
+        string name,
+        PersonEvidence personEvidence)
+    {
+        if (BlockedNameWords.Any(word => name.Contains(word, StringComparison.Ordinal))
+            || IsGenericRole(name))
+        {
+            return false;
+        }
+
+        if (LatinNamePattern.IsMatch(name))
+        {
+            return true;
+        }
+
+        if (TrySplitNamedTitle(name, out var modifier))
+        {
+            return HasNamedTitleModifierEvidence(modifier);
+        }
+
+        return HasBareConventionalHanNameShape(name)
+            && personEvidence.SelfIdentifiedNames.Contains(name);
+    }
+
+    private static bool IsGenericRole(string name) =>
+        GenericRoleWords.Contains(name, StringComparer.Ordinal)
+        || GenericRoleSuffixes.Any(suffix => name.EndsWith(suffix, StringComparison.Ordinal)
+            && GenericRolePrefixes.Any(prefix => name.StartsWith(prefix, StringComparison.Ordinal)));
+
+    private static bool HasBareConventionalHanNameShape(string name) =>
+        name.Length == 3 && name[0] != '小' && PersonalNameInitials.Contains(name[0]);
+
+    private static bool HasNamedTitleModifierEvidence(string modifier) =>
+        modifier.Length is 2 or 3
+        && modifier[0] != '小'
+        && PersonalNameInitials.Contains(modifier[0]);
+
+    private static bool TrySplitNamedTitle(string name, out string modifier)
+    {
+        var title = CharacterTitleSuffixes.FirstOrDefault(name.EndsWith);
+        if (title is null)
+        {
+            modifier = string.Empty;
+            return false;
+        }
+
+        modifier = name[..^title.Length];
+        return modifier.Length >= 2;
+    }
 
     public static IReadOnlyList<CharacterCandidate> Extract(IEnumerable<Chapter> chapters)
     {
+        var orderedChapters = chapters.OrderBy(chapter => chapter.SortOrder).ToArray();
+        var personEvidence = FindPersonEvidence(orderedChapters);
         var counts = new Dictionary<string, int>(StringComparer.Ordinal);
         var samples = new Dictionary<string, (string ChapterTitle, string? Dialogue)>(StringComparer.Ordinal);
 
-        foreach (var chapter in chapters.OrderBy(chapter => chapter.SortOrder))
+        foreach (var chapter in orderedChapters)
         {
             var body = chapter.OriginalText;
             var plan = new ChineseSpeechSegmenter().Segment(chapter.Title, body);
@@ -171,15 +257,15 @@ public static class CharacterCandidateExtractor
 
                 var narratorText = body.Substring(segment.StartOffset, segment.Length);
                 var name = precedesDialogue
-                    ? FindClosestName(narratorText, preferLast: true)
-                    : FindClosestName(narratorText, preferLast: false);
+                    ? FindClosestName(narratorText, preferLast: true, personEvidence)
+                    : FindClosestName(narratorText, preferLast: false, personEvidence);
                 var occurrenceCount = 1;
                 if (name is null && precedesDialogue && followsDialogue)
                 {
                     // One clearly identified actor in the bridge is evidence for both the dialogue
                     // line before it and the line after it. Count the two actual utterances, not
                     // merely the one narrator segment that links them.
-                    name = FindSoleTitleBearingActor(narratorText);
+                    name = FindSoleTitleBearingActor(narratorText, personEvidence);
                     occurrenceCount = name is null ? 0 : 2;
                 }
 
@@ -209,6 +295,21 @@ public static class CharacterCandidateExtractor
             .ToArray();
     }
 
+    private static PersonEvidence FindPersonEvidence(IEnumerable<Chapter> chapters)
+    {
+        var selfIdentifiedNames = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var chapter in chapters)
+        {
+            foreach (Match match in SelfIdentification.Matches(chapter.OriginalText))
+            {
+                selfIdentifiedNames.Add(match.Groups["name"].Value);
+            }
+        }
+
+        return new PersonEvidence(selfIdentifiedNames);
+    }
+
+
     /// <summary>
     /// Among every name+verb match in this (short, dialogue-adjacent) connector text, keeps only
     /// the one closest to the quote boundary: the last match when the segment precedes the dialogue
@@ -216,12 +317,14 @@ public static class CharacterCandidateExtractor
     /// an earlier, unrelated verb-shaped phrase; only the boundary-nearest one is the actual
     /// reporting-clause tag for this particular line of dialogue.
     /// </summary>
-    private static string? FindClosestName(string narratorText, bool preferLast)
+    private static string? FindClosestName(
+        string narratorText,
+        bool preferLast,
+        PersonEvidence personEvidence)
     {
         var matches = NameBeforeVerb.Matches(narratorText)
-            .Concat(NameAfterVerb.Matches(narratorText))
-            .Where(match => match.Success
-                && !BlockedNameWords.Any(word => match.Groups["name"].Value.Contains(word, StringComparison.Ordinal)))
+            .Select(match => (Match: match, Name: ResolveReportingName(match.Groups["name"].Value, personEvidence)))
+            .Where(result => result.Match.Success && result.Name is not null)
             .ToArray();
         if (matches.Length == 0)
         {
@@ -229,12 +332,26 @@ public static class CharacterCandidateExtractor
         }
 
         var chosen = preferLast
-            ? matches.OrderByDescending(match => match.Index + match.Length).First()
-            : matches.OrderBy(match => match.Index).First();
-        return chosen.Groups["name"].Value;
+            ? matches.OrderByDescending(result => result.Match.Index + result.Match.Length).First()
+            : matches.OrderBy(result => result.Match.Index).First();
+        return chosen.Name;
     }
 
-    private static string? FindSoleTitleBearingActor(string narratorText)
+    private static string? ResolveReportingName(
+        string rawName,
+        PersonEvidence personEvidence)
+    {
+        if (HasPositivePersonEvidence(rawName, personEvidence))
+        {
+            return rawName;
+        }
+
+        return null;
+    }
+
+    private static string? FindSoleTitleBearingActor(
+        string narratorText,
+        PersonEvidence personEvidence)
     {
         // The potential speaker has to start the bridge. A title-bearing person mentioned only
         // later in a narration clause is not reliable evidence that either surrounding quote is
@@ -246,14 +363,14 @@ public static class CharacterCandidateExtractor
         }
 
         var leadingName = leadingActor.Groups["name"].Value;
-        if (BlockedNameWords.Any(word => leadingName.Contains(word, StringComparison.Ordinal)))
+        if (!HasPositivePersonEvidence(leadingName, personEvidence))
         {
             return null;
         }
 
         var namedActors = TitleBearingActor.Matches(narratorText)
             .Select(match => match.Groups["name"].Value)
-            .Where(name => !BlockedNameWords.Any(word => name.Contains(word, StringComparison.Ordinal)))
+            .Where(name => HasPositivePersonEvidence(name, personEvidence))
             .Distinct(StringComparer.Ordinal)
             .Take(2)
             .ToArray();

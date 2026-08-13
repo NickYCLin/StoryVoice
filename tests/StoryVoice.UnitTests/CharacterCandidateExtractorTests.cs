@@ -12,16 +12,16 @@ public sealed class CharacterCandidateExtractorTests
         book.AddChapter(
             1,
             "第一章",
-            "小明說：「你好。」\n小華問道：「怎麼了？」\n小明說：「還好嗎？」\n小華問道：「真的嗎？」\n小明說：「早安。」");
+            "我叫王小明。\n我叫李小華。\n「王小明，等等。」\n「李小華，先看這裡。」\n王小明說：「你好。」\n李小華問道：「怎麼了？」\n王小明說：「還好嗎？」\n李小華問道：「真的嗎？」\n王小明說：「早安。」");
 
         var candidates = CharacterCandidateExtractor.Extract(book.Chapters);
 
         Assert.Equal(2, candidates.Count);
-        Assert.Equal("小明", candidates[0].Name);
+        Assert.Equal("王小明", candidates[0].Name);
         Assert.Equal(3, candidates[0].OccurrenceCount);
         Assert.Equal("「你好。」", candidates[0].SampleDialogue);
         Assert.Equal("第一章", candidates[0].SampleChapterTitle);
-        Assert.Equal("小華", candidates[1].Name);
+        Assert.Equal("李小華", candidates[1].Name);
         Assert.Equal(2, candidates[1].OccurrenceCount);
         Assert.Equal("「怎麼了？」", candidates[1].SampleDialogue);
     }
@@ -33,7 +33,7 @@ public sealed class CharacterCandidateExtractorTests
         // once is treated as too weak a signal to surface, even though it otherwise matches the
         // reporting-clause pattern cleanly — this is what keeps one-off regex noise off the list.
         var book = Book.Create(Guid.NewGuid(), "單次出現測試", "作者", "zh-TW", "story.txt");
-        book.AddChapter(1, "第一章", "小明說：「你好。」");
+        book.AddChapter(1, "第一章", "我叫王小明。\n王小明說：「你好。」");
 
         var candidates = CharacterCandidateExtractor.Extract(book.Chapters);
 
@@ -55,11 +55,11 @@ public sealed class CharacterCandidateExtractorTests
     }
 
     [Fact]
-    public void Ordinary_prose_containing_reporting_verb_characters_never_surfaces_as_a_candidate()
+    public void Ordinary_prose_and_bare_titles_never_surface_as_candidates()
     {
-        // Regression: scanning whole narrator paragraphs (instead of only the connector text right
-        // next to a quote) previously turned everyday vocabulary that happens to contain a
-        // reporting-verb character — 不知道／應該說／回答不出— into bogus high-frequency "candidates".
+        // Generic roles such as 學長 are not names. The candidate list is for a human to confirm
+        // people, so it must prefer omitting an unnamed speaker over filling the UI with roles or
+        // prose that happens to contain reporting-verb characters.
         var book = Book.Create(Guid.NewGuid(), "敘述文字測試", "作者", "zh-TW", "story.txt");
         book.AddChapter(
             1,
@@ -71,9 +71,112 @@ public sealed class CharacterCandidateExtractorTests
 
         var candidates = CharacterCandidateExtractor.Extract(book.Chapters);
 
-        var candidate = Assert.Single(candidates);
-        Assert.Equal("學長", candidate.Name);
-        Assert.Equal(2, candidate.OccurrenceCount);
+        Assert.Empty(candidates);
+    }
+
+    [Fact]
+    public void Homographic_prose_and_generic_people_never_surface_as_candidates()
+    {
+        // These are the structural false positives found in the actual candidate screen:
+        // 天知道 was split as 天知 + 道, 說實話 was read backwards as 實話, and a role phrase such
+        // as 等到學長說 was swallowed as a name. Repeat each shape so the minimum-count filter
+        // cannot hide a broken matcher.
+        var book = Book.Create(Guid.NewGuid(), "同音詞與泛稱測試", "作者", "zh-TW", "story.txt");
+        book.AddChapter(
+            1,
+            "第一章",
+            "「前句。」天知道，「後句。」\n" +
+            "「前句。」天知道，「後句。」\n" +
+            "「前句。」說實話，「後句。」\n" +
+            "「前句。」說實話，「後句。」\n" +
+            "「前句。」等到學長說，「後句。」\n" +
+            "「前句。」等到學長說，「後句。」\n" +
+            "「前句。」男生說，「後句。」\n" +
+            "「前句。」男生說，「後句。」\n" +
+            "「前句。」說小心，「後句。」\n" +
+            "「前句。」說小心，「後句。」\n" +
+            "「小心，快跑。」\n" +
+            "小心說：「前句。」\n" +
+            "小心說：「後句。」\n" +
+            "「慢慢，快一點。」\n" +
+            "「慢慢，別停。」\n" +
+            "「慢慢，繼續走。」\n" +
+            "慢慢這樣說：「前句。」\n" +
+            "慢慢這樣說：「後句。」\n" +
+            "白色說：「前句。」\n" +
+            "白色說：「後句。」\n" +
+            "「前句。」經知道，「後句。」\n" +
+            "「前句。」經知道，「後句。」\n" +
+            "出口說：「前句。」\n" +
+            "出口說：「後句。」\n" +
+            "出口處說：「前句。」\n" +
+            "出口處說：「後句。」\n" +
+            "成績單說：「前句。」\n" +
+            "成績單說：「後句。」\n" +
+            "恐怖說：「前句。」\n" +
+            "恐怖說：「後句。」\n" +
+            "所謂說：「前句。」\n" +
+            "所謂說：「後句。」\n" +
+            "時候說：「前句。」\n" +
+            "時候說：「後句。」\n" +
+            "話題說：「前句。」\n" +
+            "話題說：「後句。」\n" +
+            "小學生說：「前句。」\n" +
+            "小學生說：「後句。」\n" +
+            "「高中同學，請先等等。」\n" +
+            "高中同學說：「前句。」\n" +
+            "高中同學說：「後句。」\n" +
+            "高中生說：「前句。」\n" +
+            "高中生說：「後句。」\n" +
+            "「慢慢，快一點。」\n" +
+            "慢慢這樣說：「前句。」");
+        book.AddChapter(
+            2,
+            "第二章",
+            "「慢慢，別停。」\n" +
+            "「慢慢，繼續走。」\n" +
+            "慢慢這樣說：「後句。」");
+
+        var candidates = CharacterCandidateExtractor.Extract(book.Chapters);
+
+        Assert.Empty(candidates);
+    }
+
+    [Fact]
+    public void Conventional_names_and_named_titles_survive_the_precision_filter_while_unverified_aliases_remain_out()
+    {
+        var book = Book.Create(Guid.NewGuid(), "正向人名證據測試", "作者", "zh-TW", "story.txt");
+        book.AddChapter(
+            1,
+            "第一章",
+            "我叫千冬歲。\n" +
+            "千冬歲說：「先走。」\n" +
+            "千冬歲說：「等等我。」\n" +
+            "「喵喵，先過來。」\n" +
+            "喵喵這樣問道：「要吃飯嗎？」\n" +
+            "「這樣喔。」幸運同學把椅子轉過來，「那就這麼辦。」");
+        book.AddChapter(
+            2,
+            "第二章",
+            "「喵喵，等等我。」\n" +
+            "「喵喵，先坐下。」\n" +
+            "喵喵則問道：「還是要喝茶？」");
+
+        var candidates = CharacterCandidateExtractor.Extract(book.Chapters);
+
+        Assert.Collection(
+            candidates,
+            candidate =>
+            {
+                Assert.Equal("千冬歲", candidate.Name);
+                Assert.Equal(2, candidate.OccurrenceCount);
+            },
+            candidate =>
+            {
+                Assert.Equal("幸運同學", candidate.Name);
+                Assert.Equal(2, candidate.OccurrenceCount);
+            });
+        Assert.DoesNotContain(candidates, candidate => candidate.Name == "喵喵");
     }
 
     [Fact]
@@ -83,13 +186,15 @@ public sealed class CharacterCandidateExtractorTests
         book.AddChapter(
             1,
             "第一章",
-            "「你要走了？」他心想這應該說得通，過了一會兒，小華問道：「真的嗎？」\n" +
-            "「你確定？」他心想這應該說得通，過了一會兒，小華問道：「當然。」");
+            "我叫李小華。\n" +
+            "「李小華，先聽我說。」\n" +
+            "「你要走了？」他心想這應該說得通，過了一會兒，李小華問道：「真的嗎？」\n" +
+            "「你確定？」他心想這應該說得通，過了一會兒，李小華問道：「當然。」");
 
         var candidates = CharacterCandidateExtractor.Extract(book.Chapters);
 
         var candidate = Assert.Single(candidates);
-        Assert.Equal("小華", candidate.Name);
+        Assert.Equal("李小華", candidate.Name);
         Assert.Equal(2, candidate.OccurrenceCount);
     }
 
@@ -175,12 +280,14 @@ public sealed class CharacterCandidateExtractorTests
         book.AddChapter(
             1,
             "第一章",
-            "小明說道，這樣說好嗎，「你確定？」\n小明說道，這樣說好嗎，「別鬧了。」");
+            "我叫王小明。\n" +
+            "「王小明，先等等。」\n" +
+            "王小明說道，這樣說好嗎，「你確定？」\n王小明說道，這樣說好嗎，「別鬧了。」");
 
         var candidates = CharacterCandidateExtractor.Extract(book.Chapters);
 
         var candidate = Assert.Single(candidates);
-        Assert.Equal("小明", candidate.Name);
+        Assert.Equal("王小明", candidate.Name);
         Assert.Equal(2, candidate.OccurrenceCount);
     }
 
@@ -200,18 +307,19 @@ public sealed class CharacterCandidateExtractorTests
     public void Extraction_is_stable_across_multiple_chapters_in_reading_order()
     {
         var book = Book.Create(Guid.NewGuid(), "跨章節測試", "作者", "zh-TW", "story.txt");
-        book.AddChapter(1, "第一章", "小明說：「你好。」");
+        book.AddChapter(1, "第一章", "「王小明，等等。」\n「李小華，先看這裡。」\n王小明說：「你好。」");
         book.AddChapter(
             2,
             "第二章",
-            "小明說：「再見。」\n小華問道：「你要走了？」\n小華問道：「真的嗎？」\n小華問道：「你確定？」");
+            "我叫王小明。\n我叫李小華。\n" +
+            "王小明說：「再見。」\n李小華問道：「你要走了？」\n李小華問道：「真的嗎？」\n李小華問道：「你確定？」");
 
         var candidates = CharacterCandidateExtractor.Extract(book.Chapters);
 
         Assert.Equal(2, candidates.Count);
-        Assert.Equal("小華", candidates[0].Name);
+        Assert.Equal("李小華", candidates[0].Name);
         Assert.Equal(3, candidates[0].OccurrenceCount);
-        Assert.Equal("小明", candidates[1].Name);
+        Assert.Equal("王小明", candidates[1].Name);
         Assert.Equal(2, candidates[1].OccurrenceCount);
         Assert.Equal("第一章", candidates[1].SampleChapterTitle);
     }
