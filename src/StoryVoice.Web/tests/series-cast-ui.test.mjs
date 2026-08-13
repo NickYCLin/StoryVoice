@@ -86,6 +86,13 @@ test('聲線卡片顯示字數與時長，並提供即時播放試講', () => {
   assert.match(voiceProfilesPanel, /new Audio\(url\)/)
 })
 
+test('系列配音控制台可以設定視角角色，讓第一人稱自述對白自動歸給主角', () => {
+  assert.match(panel, /\/api\/series\/\$\{details\.id\}\/point-of-view-character/)
+  assert.match(panel, /視角角色（第一人稱敘事者）/)
+  assert.match(panel, /pointOfViewCharacterId/)
+  assert.match(panel, /method: 'PUT'/)
+})
+
 test('角色管理頁面提供啟用狀態切換、摘要卡片、重設按鈕、試講與任務紀錄分頁', () => {
   assert.match(characterLibraryPage, /isActive/)
   assert.match(characterLibraryPage, /'activate'/)

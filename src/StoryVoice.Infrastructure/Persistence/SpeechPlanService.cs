@@ -40,7 +40,8 @@ internal sealed class SpeechPlanService(
             ? await attributionProvider.AttributeAsync(
                 new SpeakerAttributionRequest(
                     knownCharacters,
-                    BuildFullSegmentContext(plan.BodySegments, chapter.OriginalText)),
+                    BuildFullSegmentContext(plan.BodySegments, chapter.OriginalText),
+                    await LoadPointOfViewCharacterIdAsync(ownerId, seriesId, cancellationToken)),
                 cancellationToken)
             : [];
         var attributionByIndex = attributionResults.ToDictionary(result => result.SegmentIndex);
@@ -261,6 +262,16 @@ internal sealed class SpeechPlanService(
             cancellationToken);
         return bookOwned ? chapter : null;
     }
+
+    private async Task<Guid?> LoadPointOfViewCharacterIdAsync(
+        Guid ownerId,
+        Guid seriesId,
+        CancellationToken cancellationToken) =>
+        await dbContext.StorySeries
+            .AsNoTracking()
+            .Where(series => series.OwnerId == ownerId && series.Id == seriesId)
+            .Select(series => series.PointOfViewCharacterId)
+            .SingleOrDefaultAsync(cancellationToken);
 
     private async Task<IReadOnlyList<KnownCharacterIdentity>> LoadKnownCharactersAsync(
         Guid ownerId,

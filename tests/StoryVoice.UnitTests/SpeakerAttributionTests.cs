@@ -66,6 +66,59 @@ public sealed class SpeakerAttributionTests
     }
 
     [Fact]
+    public async Task First_person_reporting_clause_confirms_the_configured_point_of_view_character()
+    {
+        var provider = new RuleBasedSpeakerAttributionProvider();
+        var request = new SpeakerAttributionRequest(Cast,
+        [
+            new SpeechSegmentAttributionInput(0, SpeechSegmentKind.Dialogue, "「這裡就是新學校了。」"),
+            new SpeechSegmentAttributionInput(1, SpeechSegmentKind.Narrator, "我說。"),
+        ], AliceId);
+
+        var results = await provider.AttributeAsync(request, CancellationToken.None);
+
+        var result = Assert.Single(results);
+        Assert.Equal(AliceId, result.CharacterId);
+        Assert.Equal(SpeakerAttributionOutcome.Confirmed, result.Outcome);
+        Assert.Equal("reporting_clause_first_person_pov", result.ReasonCode);
+        Assert.True(result.Confidence >= 90);
+    }
+
+    [Fact]
+    public async Task First_person_pronoun_without_a_configured_point_of_view_character_resolves_unknown()
+    {
+        var provider = new RuleBasedSpeakerAttributionProvider();
+        var request = new SpeakerAttributionRequest(Cast,
+        [
+            new SpeechSegmentAttributionInput(0, SpeechSegmentKind.Dialogue, "「這裡就是新學校了。」"),
+            new SpeechSegmentAttributionInput(1, SpeechSegmentKind.Narrator, "我說。"),
+        ]);
+
+        var results = await provider.AttributeAsync(request, CancellationToken.None);
+
+        var result = Assert.Single(results);
+        Assert.Null(result.CharacterId);
+        Assert.Equal(SpeakerAttributionOutcome.Unknown, result.Outcome);
+    }
+
+    [Fact]
+    public async Task Point_of_view_pronoun_competing_with_a_named_character_in_the_same_clause_is_ambiguous()
+    {
+        var provider = new RuleBasedSpeakerAttributionProvider();
+        var request = new SpeakerAttributionRequest(Cast,
+        [
+            new SpeechSegmentAttributionInput(0, SpeechSegmentKind.Dialogue, "「小心！」"),
+            new SpeechSegmentAttributionInput(1, SpeechSegmentKind.Narrator, "我說：鮑伯說："),
+        ], AliceId);
+
+        var results = await provider.AttributeAsync(request, CancellationToken.None);
+
+        var result = Assert.Single(results);
+        Assert.Null(result.CharacterId);
+        Assert.Equal(SpeakerAttributionOutcome.Unknown, result.Outcome);
+    }
+
+    [Fact]
     public async Task Ambiguous_pronoun_without_a_reporting_clause_resolves_unknown()
     {
         var provider = new RuleBasedSpeakerAttributionProvider();

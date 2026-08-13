@@ -195,6 +195,24 @@ internal sealed class SeriesService(
         return await ToDetailsAsync(series, cancellationToken);
     }
 
+    public async Task<StorySeriesDetailsResponse?> SetPointOfViewCharacterAsync(
+        Guid seriesId,
+        SetSeriesPointOfViewCharacterRequest request,
+        CancellationToken cancellationToken)
+    {
+        EnsureId(seriesId, nameof(seriesId));
+        ArgumentNullException.ThrowIfNull(request);
+        var series = await repository.GetForMutationAsync(seriesId, cancellationToken);
+        if (series is null)
+        {
+            return null;
+        }
+
+        series.SetPointOfViewCharacter(request.CharacterId);
+        await SaveChangesAsync(cancellationToken);
+        return await ToDetailsAsync(series, cancellationToken);
+    }
+
     public IReadOnlyList<SeriesVoiceOptionResponse> ListVoiceOptions() =>
         _voiceCatalog
             .OrderBy(voice => voice.Locale, StringComparer.Ordinal)
@@ -258,6 +276,7 @@ internal sealed class SeriesService(
             series.NarratorVolume,
             series.DefaultSpeakerPauseMs,
             series.ActiveCastRevisionId,
+            series.PointOfViewCharacterId,
             series.Books
                 .OrderBy(book => book.SortOrder)
                 .Select(book => new StorySeriesBookResponse(

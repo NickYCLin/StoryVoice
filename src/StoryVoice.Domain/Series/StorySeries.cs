@@ -79,6 +79,7 @@ public sealed class StorySeries
     public string NarratorVolume { get; private set; } = string.Empty;
     public int DefaultSpeakerPauseMs { get; private set; }
     public Guid? ActiveCastRevisionId { get; private set; }
+    public Guid? PointOfViewCharacterId { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
     public Guid ConcurrencyStamp { get; private set; }
@@ -294,6 +295,23 @@ public sealed class StorySeries
             now);
         canonicalKey.RenameCanonical(character.CanonicalName);
         Touch(now);
+    }
+
+    /// <summary>
+    /// Names the character whose narration voice is the story's first-person "我" — lets speaker
+    /// attribution resolve self-referential reporting clauses ("我說：") to a real cast member
+    /// instead of leaving every line the narrator speaks about themselves stuck at Unknown.
+    /// </summary>
+    public void SetPointOfViewCharacter(Guid? characterId)
+    {
+        EnsureMutationAggregateComplete();
+        if (characterId is Guid id && _characters.All(character => character.Id != id))
+        {
+            throw new InvalidOperationException("視角角色必須是這個系列裡已經存在的角色。");
+        }
+
+        PointOfViewCharacterId = characterId;
+        Touch();
     }
 
     internal void SwitchActiveCastRevision(

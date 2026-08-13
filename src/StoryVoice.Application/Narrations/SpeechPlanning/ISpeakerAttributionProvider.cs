@@ -34,7 +34,8 @@ public sealed record SpeechSegmentAttributionInput(
 
 public sealed record SpeakerAttributionRequest(
     IReadOnlyList<KnownCharacterIdentity> KnownCharacters,
-    IReadOnlyList<SpeechSegmentAttributionInput> Segments);
+    IReadOnlyList<SpeechSegmentAttributionInput> Segments,
+    Guid? PointOfViewCharacterId = null);
 
 public sealed record SpeakerAttributionResult(
     int SegmentIndex,

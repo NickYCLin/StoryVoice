@@ -697,6 +697,28 @@ public sealed class StorySeriesTests
             () => InvokeInternal(membership, "SwitchActiveNarrationJob", [firstJobId, firstJobId]));
     }
 
+    [Fact]
+    public void Point_of_view_character_must_belong_to_the_series_and_can_be_cleared()
+    {
+        var ownerId = Guid.NewGuid();
+        var series = CreateSeries(ownerId, "系列");
+        var character = series.AddCharacter(
+            "褚冥漾", SeriesCharacterRole.Main, "edge", "voice-a", "+0%", "+0Hz", "+0%", null);
+        var otherSeries = CreateSeries(ownerId, "另一個系列");
+        var foreignCharacter = otherSeries.AddCharacter(
+            "外人", SeriesCharacterRole.Main, "edge", "voice-b", "+0%", "+0Hz", "+0%", null);
+
+        Assert.Throws<InvalidOperationException>(
+            () => series.SetPointOfViewCharacter(foreignCharacter.Id));
+        Assert.Null(series.PointOfViewCharacterId);
+
+        series.SetPointOfViewCharacter(character.Id);
+        Assert.Equal(character.Id, series.PointOfViewCharacterId);
+
+        series.SetPointOfViewCharacter(null);
+        Assert.Null(series.PointOfViewCharacterId);
+    }
+
     private static StorySeries CreateSeries(Guid ownerId, string name) =>
         StorySeries.Create(
             ownerId,

@@ -85,6 +85,18 @@ public static class SeriesEndpoints
         .AddEndpointFilter<AntiforgeryEndpointFilter>()
         .WithName("UpdateStorySeriesCharacter");
 
+        group.MapPut("/{seriesId:guid}/point-of-view-character", async (
+            Guid seriesId,
+            SetSeriesPointOfViewCharacterRequest request,
+            ISeriesService service,
+            CancellationToken cancellationToken) =>
+        {
+            var series = await service.SetPointOfViewCharacterAsync(seriesId, request, cancellationToken);
+            return series is null ? Results.NotFound() : Results.Ok(series);
+        })
+        .AddEndpointFilter<AntiforgeryEndpointFilter>()
+        .WithName("SetStorySeriesPointOfViewCharacter");
+
         group.MapPost("/{seriesId:guid}/characters/{characterId:guid}/aliases", async (
             Guid seriesId,
             Guid characterId,

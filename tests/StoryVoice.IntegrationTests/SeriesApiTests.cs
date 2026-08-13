@@ -186,6 +186,66 @@ public sealed class SeriesApiTests(ApiFactory factory) : IClassFixture<ApiFactor
     }
 
     [Fact]
+    public async Task Point_of_view_character_can_be_set_cleared_and_is_owner_scoped()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var ownerAClient = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        using var ownerBClient = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        var series = await CreateSeriesAsync(ownerAClient, "視角角色系列", cancellationToken);
+
+        using var addCharacterResponse = await ownerAClient.PostWithCsrfAsync(
+            $"/api/series/{series.Id}/characters",
+            new
+            {
+                canonicalName = "褚冥漾",
+                role = "Main",
+                voiceProvider = "edge",
+                voice = "zh-TW-YunJheNeural",
+                rate = "+0%",
+                pitch = "+0Hz",
+                volume = "+0%",
+                notes = (string?)null
+            },
+            cancellationToken);
+        var withCharacter = await addCharacterResponse.Content
+            .ReadFromJsonAsync<StorySeriesDetailsResponse>(cancellationToken);
+        Assert.NotNull(withCharacter);
+        var character = Assert.Single(withCharacter.Characters);
+
+        using var setResponse = await ownerAClient.PutWithCsrfAsync(
+            $"/api/series/{series.Id}/point-of-view-character",
+            new { characterId = character.Id },
+            cancellationToken);
+        var withPov = await setResponse.Content.ReadFromJsonAsync<StorySeriesDetailsResponse>(
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, setResponse.StatusCode);
+        Assert.NotNull(withPov);
+        Assert.Equal(character.Id, withPov.PointOfViewCharacterId);
+
+        using var clearResponse = await ownerAClient.PutWithCsrfAsync(
+            $"/api/series/{series.Id}/point-of-view-character",
+            new { characterId = (Guid?)null },
+            cancellationToken);
+        var cleared = await clearResponse.Content.ReadFromJsonAsync<StorySeriesDetailsResponse>(
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, clearResponse.StatusCode);
+        Assert.NotNull(cleared);
+        Assert.Null(cleared.PointOfViewCharacterId);
+
+        using var foreignCharacterResponse = await ownerAClient.PutWithCsrfAsync(
+            $"/api/series/{series.Id}/point-of-view-character",
+            new { characterId = Guid.NewGuid() },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, foreignCharacterResponse.StatusCode);
+
+        using var ownerBResponse = await ownerBClient.PutWithCsrfAsync(
+            $"/api/series/{series.Id}/point-of-view-character",
+            new { characterId = character.Id },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.NotFound, ownerBResponse.StatusCode);
+    }
+
+    [Fact]
     public async Task Non_owner_cannot_attach_books_or_mutate_another_users_series()
     {
         var cancellationToken = TestContext.Current.CancellationToken;

@@ -9,9 +9,17 @@ namespace StoryVoice.Infrastructure.Narrations;
 /// an adjacent Narrator segment, and only suggests turn continuation when the immediately
 /// preceding dialogue turn was itself confirmed with no competing name in between. Everything
 /// else resolves to Unknown — this provider never guesses a new character into existence.
+///
+/// First-person narrated books never name their narrator next to a reporting verb ("我說：",
+/// never "陳大文說：" about themselves), so a series can name one cast member as the
+/// <see cref="SpeakerAttributionRequest.PointOfViewCharacterId"/>: the literal pronoun "我" is
+/// then treated exactly like that character's own name for reporting-clause matching, subject to
+/// the same ambiguity rule as any other name.
 /// </summary>
 public sealed class RuleBasedSpeakerAttributionProvider : ISpeakerAttributionProvider
 {
+    private const string FirstPersonPronoun = "我";
+
     private static readonly string[] ReportingVerbs =
     [
         "笑著說", "低聲說", "輕聲說", "大聲說", "笑道", "喊道", "叫道", "應道", "回答",
@@ -46,12 +54,12 @@ public sealed class RuleBasedSpeakerAttributionProvider : ISpeakerAttributionPro
             {
                 results.Add(new SpeakerAttributionResult(
                     segment.Index,
-                    reportingMatch,
+                    reportingMatch.Value.CharacterId,
                     SpeakerAttributionOutcome.Confirmed,
                     92,
                     SpeakerAttributionDecisionSource.Rule,
-                    "reporting_clause_exact_alias"));
-                lastConfirmedCharacterId = reportingMatch;
+                    reportingMatch.Value.ReasonCode));
+                lastConfirmedCharacterId = reportingMatch.Value.CharacterId;
                 sawCompetingNameSinceLastConfirmed = false;
                 continue;
             }
@@ -80,7 +88,7 @@ public sealed class RuleBasedSpeakerAttributionProvider : ISpeakerAttributionPro
         return Task.FromResult<IReadOnlyList<SpeakerAttributionResult>>(results);
     }
 
-    private static Guid? FindReportingClauseSpeaker(
+    private static (Guid CharacterId, string ReasonCode)? FindReportingClauseSpeaker(
         SpeakerAttributionRequest request,
         SpeechSegmentAttributionInput dialogueSegment)
     {
@@ -91,6 +99,7 @@ public sealed class RuleBasedSpeakerAttributionProvider : ISpeakerAttributionPro
         }
 
         Guid? candidate = null;
+        var reasonCode = "reporting_clause_exact_alias";
         foreach (var character in request.KnownCharacters)
         {
             foreach (var name in Names(character))
@@ -111,7 +120,21 @@ public sealed class RuleBasedSpeakerAttributionProvider : ISpeakerAttributionPro
             }
         }
 
-        return candidate;
+        if (request.PointOfViewCharacterId is Guid povCharacterId
+            && HasReportingClauseFor(neighborText, FirstPersonPronoun))
+        {
+            if (candidate is not null && candidate != povCharacterId)
+            {
+                // A named cast member and the first-person narrator both look like reporting
+                // clauses in the same narrator text: ambiguous, do not guess.
+                return null;
+            }
+
+            candidate = povCharacterId;
+            reasonCode = "reporting_clause_first_person_pov";
+        }
+
+        return candidate is Guid resolved ? (resolved, reasonCode) : null;
     }
 
     private static bool HasReportingClauseFor(string narratorText, string normalizedName)

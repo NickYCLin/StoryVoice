@@ -64,6 +64,7 @@ type SeriesDetails = {
   narratorVolume: string
   defaultSpeakerPauseMs: number
   activeCastRevisionId: string | null
+  pointOfViewCharacterId: string | null
   books: SeriesBook[]
   characters: SeriesCharacter[]
 }
@@ -333,6 +334,24 @@ export function SeriesCastPanel() {
     }
   }
 
+  async function setPointOfViewCharacter(characterId: string) {
+    if (!details) return
+    setFormState('loading')
+    try {
+      const updated = await fetchJson<SeriesDetails>(`/api/series/${details.id}/point-of-view-character`, {
+        method: 'PUT',
+        csrfToken,
+        body: { characterId: characterId || null },
+      })
+      setDetails(updated)
+      setMessage(characterId ? '已設定視角角色；這個角色以「我」開頭的自述對白將自動歸給他。' : '已取消視角角色設定。')
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '設定視角角色失敗。')
+    } finally {
+      setFormState('idle')
+    }
+  }
+
   async function addAlias(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!details || !aliasCharacterId || !alias.trim()) return
@@ -413,6 +432,19 @@ export function SeriesCastPanel() {
                 </section>
 
                 <section className="mt-7 border-t border-stone-200 pt-5" aria-label="固定角色聲線"><h3 className="font-serif text-xl text-stone-900">固定角色聲線</h3><p className="mt-1 text-sm text-stone-500">角色與別名都限制在這個 owner 的系列；跨角色 alias 衝突會直接拒絕。角色也可以直接從<Link className="text-amber-700 underline" to="/characters">角色庫</Link>選入，跨系列共用同一組自訂聲線。</p>
+                  <label className="mt-4 block max-w-sm text-xs text-stone-500">
+                    視角角色（第一人稱敘事者）
+                    <select
+                      className="auth-input mt-2 disabled:opacity-60"
+                      disabled={formState === 'loading' || details.characters.length === 0}
+                      onChange={(event) => void setPointOfViewCharacter(event.target.value)}
+                      value={details.pointOfViewCharacterId ?? ''}
+                    >
+                      <option value="">不設定（不影響「我」的對白判斷）</option>
+                      {details.characters.map((character) => <option key={character.id} value={character.id}>{character.canonicalName}</option>)}
+                    </select>
+                  </label>
+                  <p className="mt-1 max-w-sm text-xs text-stone-400">設定後，全書「我＋說／問／道」等第一人稱自述對白會自動歸給這個角色，適合第一人稱主角敘事的書。</p>
                   <div className="mt-3 space-y-2">
                     {details.characters.map((character) => (
                       <div className="rounded-xl border border-stone-200 bg-stone-50 p-3" key={character.id}>

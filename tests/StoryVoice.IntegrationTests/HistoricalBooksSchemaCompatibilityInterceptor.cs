@@ -44,6 +44,17 @@ internal sealed class HistoricalBooksSchemaCompatibilityInterceptor : SaveChange
                         ALTER TABLE series_characters
                         ADD COLUMN "CharacterProfileId" uuid NULL;
                     END IF;
+                    IF to_regclass('public.story_series') IS NOT NULL
+                        AND NOT EXISTS (
+                            SELECT 1
+                            FROM information_schema.columns
+                            WHERE table_schema = 'public'
+                                AND table_name = 'story_series'
+                                AND column_name = 'PointOfViewCharacterId')
+                    THEN
+                        ALTER TABLE story_series
+                        ADD COLUMN "PointOfViewCharacterId" uuid NULL;
+                    END IF;
                 END
                 $compat$;
                 """,

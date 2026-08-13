@@ -45,6 +45,12 @@ internal sealed class StorySeriesConfiguration : IEntityTypeConfiguration<StoryS
             .WithMany()
             .HasForeignKey(series => series.OwnerId)
             .OnDelete(DeleteBehavior.Cascade);
+        builder.HasOne<SeriesCharacter>()
+            .WithMany()
+            .HasForeignKey(series => series.PointOfViewCharacterId)
+            .HasPrincipalKey(character => character.Id)
+            .OnDelete(DeleteBehavior.SetNull)
+            .HasConstraintName("FK_story_series_point_of_view_character");
         builder.HasMany(series => series.Books)
             .WithOne()
             .HasForeignKey(book => new { book.OwnerId, book.SeriesId })

@@ -1,6 +1,6 @@
 # StoryVoice 開發進度
 
-最後更新：2026-08-12（角色管理頁面補齊啟用狀態／試講／任務紀錄）
+最後更新：2026-08-13（系列可設定視角角色，解決第一人稱主角自述對白判不出來的問題）
 
 本文件記錄已由程式碼與測試證實的能力，以及接下來可直接實作的項目。
 產品方向與長期資料模型仍以
@@ -22,7 +22,7 @@
 - 書冊（`BookCollection`）：與角色配音系列(`StorySeries`)各自獨立的單純書本分類收藏，可調整成員書籍排序與冊次標籤。
 - 書冊唯讀分享：owner 可依 email 把書冊分享給其他已註冊帳號，被分享者只能唯讀瀏覽書名與章節正文，看不到閱讀筆記、摘要或朗讀音訊；owner 可隨時撤銷。
 - 前端已改為 React Router 多頁面架構（`/library`、`/collections`、`/shared` 等），不再是單一長頁面；`NarrationPanel` 已統一為深色主題。
-- 受限說話者辨識：規則引擎只在明確 reporting clause 才自動確認，其餘一律待審核；安全層只接受已知角色 ID、逾時／例外／未知 ID 一律安全退回。
+- 受限說話者辨識：規則引擎只在明確 reporting clause 才自動確認，其餘一律待審核；安全層只接受已知角色 ID、逾時／例外／未知 ID 一律安全退回。系列可另外指定「視角角色」（第一人稱敘事者）：指定後「我＋reporting verb」比照具名角色的相同規則與競爭名稱歧義判定，解析為該角色；未指定時「我」維持原本無法確認的行為，不影響既有系列。
 - 逐章劇本審核 API：草稿建立／重建、逐片段確認或拒絕、確認為不可變 `ConfirmedSpeechPlanRevision`（含 canonical fingerprint），私人正文不進回應。
 - 多聲線 Edge TTS provider：以 JSON manifest 透過 stdin 傳入每個 turn 的文字／聲線／停頓，ffmpeg concat + ffprobe 驗證後才原子發布；provider registry／dispatcher 讓未來新增供應商不用動到既有系列角色 ID。
 - Worker 已能實際 claim 並處理 `MultiCharacter` 朗讀工作：從鎖定的 speech plan 與 cast revision 組出 turn 序列（相鄰同聲線合併、章界／換人有界停頓），送出合成前重算 fingerprint 與逐片段文字雜湊，任一不符永久失敗為 `speech_plan_integrity_mismatch`。

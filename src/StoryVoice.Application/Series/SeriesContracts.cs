@@ -40,6 +40,8 @@ public sealed record UpdateSeriesCharacterRequest(
 
 public sealed record AddSeriesCharacterAliasRequest(string Alias);
 
+public sealed record SetSeriesPointOfViewCharacterRequest(Guid? CharacterId);
+
 public sealed record SeriesVoiceOptionResponse(
     string Provider,
     string Voice,
@@ -93,6 +95,7 @@ public sealed record StorySeriesDetailsResponse(
     string NarratorVolume,
     int DefaultSpeakerPauseMs,
     Guid? ActiveCastRevisionId,
+    Guid? PointOfViewCharacterId,
     IReadOnlyList<StorySeriesBookResponse> Books,
     IReadOnlyList<StorySeriesCharacterResponse> Characters,
     DateTimeOffset CreatedAt,
