@@ -309,7 +309,9 @@ public sealed class BookInsightsApiTests(ApiFactory factory) : IClassFixture<Api
             第一章 起點
             小華問道：「你要走了？」
             小華問道：「真的嗎？」
+            小華問道：「你確定？」
             小明說：「再見。」
+            小明說：「保重。」
             """,
             cancellationToken);
 
@@ -329,9 +331,9 @@ public sealed class BookInsightsApiTests(ApiFactory factory) : IClassFixture<Api
         Assert.NotNull(candidates);
         Assert.Equal(2, candidates.Length);
         Assert.Equal("小華", candidates[0].Name);
-        Assert.Equal(2, candidates[0].OccurrenceCount);
+        Assert.Equal(3, candidates[0].OccurrenceCount);
         Assert.Equal("小明", candidates[1].Name);
-        Assert.Equal(1, candidates[1].OccurrenceCount);
+        Assert.Equal(2, candidates[1].OccurrenceCount);
         Assert.Equal(HttpStatusCode.NotFound, otherResponse.StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, missingResponse.StatusCode);
     }
