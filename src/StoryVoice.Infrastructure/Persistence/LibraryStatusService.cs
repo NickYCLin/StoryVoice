@@ -15,12 +15,13 @@ public sealed class LibraryStatusService(
     {
         var books = await dbContext.Books
             .AsNoTracking()
-            .Where(book => book.OwnerId == currentUser.UserId)
+            .Where(book => book.OwnerId == currentUser.UserId && !book.IsArchived)
             .ToListAsync(cancellationToken);
         var bookIds = books.Select(book => book.Id).ToArray();
         var processableIds = (await dbContext.Books
             .AsNoTracking()
             .Where(book => book.OwnerId == currentUser.UserId
+                && !book.IsArchived
                 && book.Status == BookStatus.Uploaded
                 && book.SourceProvider == null
                 && book.StoragePath != null

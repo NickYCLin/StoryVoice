@@ -6,6 +6,7 @@ public static class AuthorizedTextPolicy
 {
     public static bool IsProcessable(Book? book) =>
         book is not null
+        && !book.IsArchived
         && book.Status == BookStatus.Uploaded
         && book.SourceProvider is null
         && !string.IsNullOrWhiteSpace(book.StoragePath)

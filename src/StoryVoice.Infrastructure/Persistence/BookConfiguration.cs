@@ -29,6 +29,7 @@ internal sealed class BookConfiguration : IEntityTypeConfiguration<Book>
         builder.Property(book => book.NativeTtsAvailable);
         builder.Property(book => book.EbookLayout).HasConversion<string>().HasMaxLength(20);
         builder.Property(book => book.SourceSyncedAt);
+        builder.Property(book => book.IsArchived).HasDefaultValue(false);
         builder.Property(book => book.Status).HasConversion<string>().HasMaxLength(40).IsRequired();
         builder.Property(book => book.CreatedAt).IsRequired();
         builder.HasIndex(book => new { book.OwnerId, book.SourceProvider, book.ExternalSourceId })
@@ -37,6 +38,8 @@ internal sealed class BookConfiguration : IEntityTypeConfiguration<Book>
         builder.HasIndex(book => new { book.OwnerId, book.Id })
             .HasDatabaseName("UX_books_owner_id")
             .IsUnique();
+        builder.HasIndex(book => new { book.OwnerId, book.IsArchived, book.CreatedAt })
+            .HasDatabaseName("IX_books_owner_archive_created");
         builder.HasOne<ApplicationUser>()
             .WithMany()
             .HasForeignKey(book => book.OwnerId)

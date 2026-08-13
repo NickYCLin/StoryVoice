@@ -1,6 +1,9 @@
 using System.Net;
 using System.Net.Http.Json;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using StoryVoice.Application.Books;
+using StoryVoice.Infrastructure.Persistence;
 
 namespace StoryVoice.IntegrationTests;
 
@@ -49,6 +52,44 @@ public sealed class BooksApiTests(ApiFactory factory) : IClassFixture<ApiFactory
             TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Archived_book_is_hidden_from_library_but_recoverable_by_direct_id()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        using var createResponse = await client.PostWithCsrfAsync(
+            "/api/books",
+            new CreateBookRequest(
+                "收進庫房的舊分冊",
+                "StoryVoice",
+                "zh-TW",
+                "archived.txt",
+                [new CreateChapterRequest(1, "序章", "仍應保留，但不應出現在一般書櫃。")]),
+            cancellationToken);
+        var created = await createResponse.Content.ReadFromJsonAsync<BookDetailsResponse>(cancellationToken);
+
+        Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
+        Assert.NotNull(created);
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+            var book = await db.Books.SingleAsync(book => book.Id == created.Id, cancellationToken);
+            book.Archive();
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        var listed = await client.GetFromJsonAsync<BookSummaryResponse[]>("/api/books", cancellationToken);
+        using var directResponse = await client.GetAsync($"/api/books/{created.Id}", cancellationToken);
+        var direct = await directResponse.Content.ReadFromJsonAsync<BookDetailsResponse>(cancellationToken);
+
+        Assert.NotNull(listed);
+        Assert.DoesNotContain(listed, book => book.Id == created.Id);
+        Assert.Equal(HttpStatusCode.OK, directResponse.StatusCode);
+        Assert.NotNull(direct);
+        Assert.Single(direct.Chapters);
+        Assert.False(direct.AuthorizedTextAvailable);
     }
 
     [Fact]

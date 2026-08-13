@@ -102,7 +102,7 @@ internal sealed class SeriesService(
         var book = await dbContext.Books.SingleOrDefaultAsync(
             candidate => candidate.Id == request.BookId && candidate.OwnerId == ownerId,
             cancellationToken);
-        if (book is null || book.Status == BookStatus.Linked)
+        if (book is null || book.Status == BookStatus.Linked || book.IsArchived)
         {
             return null;
         }

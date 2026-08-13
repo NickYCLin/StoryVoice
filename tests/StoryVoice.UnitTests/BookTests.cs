@@ -1,4 +1,4 @@
-using StoryVoice.Domain.Books;
+﻿using StoryVoice.Domain.Books;
 
 namespace StoryVoice.UnitTests;
 
@@ -29,6 +29,24 @@ public sealed class BookTests
             book.AddChapter(1, "重複", "第二段"));
 
         Assert.Contains("已存在", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Archive_keeps_the_original_import_recoverable()
+    {
+        var book = Book.Create(
+            Guid.NewGuid(),
+            "月下故事",
+            "比比工程師",
+            "zh-TW",
+            "story.txt");
+        book.AddChapter(1, "序章", "這份文字必須保留。");
+
+        book.Archive();
+
+        Assert.True(book.IsArchived);
+        Assert.Single(book.Chapters);
+        Assert.Equal(BookStatus.Uploaded, book.Status);
     }
 
     [Fact]

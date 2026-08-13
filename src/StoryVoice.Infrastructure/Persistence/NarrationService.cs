@@ -54,7 +54,11 @@ internal sealed class NarrationService(
             var job = await dbContext.NarrationJobs.SingleOrDefaultAsync(
                 item => item.Id == jobId
                     && item.OwnerId == currentUser.UserId
-                    && item.Visibility == NarrationArtifactVisibility.Published,
+                    && item.Visibility == NarrationArtifactVisibility.Published
+                    && dbContext.Books.Any(book =>
+                        book.Id == item.BookId
+                        && book.OwnerId == currentUser.UserId
+                        && !book.IsArchived),
                 cancellationToken);
             if (job is null)
             {
@@ -117,7 +121,11 @@ internal sealed class NarrationService(
             var job = await dbContext.NarrationJobs.SingleOrDefaultAsync(
                 item => item.Id == jobId
                     && item.OwnerId == currentUser.UserId
-                    && item.Visibility == NarrationArtifactVisibility.Published,
+                    && item.Visibility == NarrationArtifactVisibility.Published
+                    && dbContext.Books.Any(book =>
+                        book.Id == item.BookId
+                        && book.OwnerId == currentUser.UserId
+                        && !book.IsArchived),
                 cancellationToken);
             if (job is null)
             {

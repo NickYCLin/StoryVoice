@@ -24,6 +24,7 @@ public sealed class NarrationModePostgreSqlMigrationTests
 
         var options = new DbContextOptionsBuilder<StoryVoiceDbContext>()
             .UseNpgsql(postgres.GetConnectionString())
+            .AddInterceptors(new HistoricalBooksSchemaCompatibilityInterceptor())
             .Options;
         await using var db = new StoryVoiceDbContext(options);
         var migrator = db.GetService<IMigrator>();

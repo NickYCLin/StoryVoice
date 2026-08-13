@@ -1960,6 +1960,7 @@ public sealed class CastEpochActivationPublisherPostgreSqlTests
     {
         var options = new DbContextOptionsBuilder<StoryVoiceDbContext>()
             .UseNpgsql(connectionString);
+        options.AddInterceptors(new HistoricalBooksSchemaCompatibilityInterceptor());
         if (interceptor is not null)
         {
             options.AddInterceptors(interceptor);

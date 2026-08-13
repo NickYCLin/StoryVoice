@@ -64,6 +64,12 @@ public sealed class Book
 
     public DateTimeOffset? SourceSyncedAt { get; private set; }
 
+    /// <summary>
+    /// Keeps a retained import out of ordinary library discovery without destroying its
+    /// provenance, completed narration history, or any metadata needed for recovery.
+    /// </summary>
+    public bool IsArchived { get; private set; }
+
     public BookStatus Status { get; private set; }
 
     public DateTimeOffset CreatedAt { get; private set; }
@@ -139,6 +145,8 @@ public sealed class Book
     }
 
     public void UnlinkAuthorizedContent() => ContentBookId = null;
+
+    public void Archive() => IsArchived = true;
 
     public void SetMetadataCorrections(
         string? title,

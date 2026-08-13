@@ -35,7 +35,7 @@ internal sealed class BookRepository(
     public async Task<IReadOnlyList<Book>> ListAsync(CancellationToken cancellationToken) =>
         await dbContext.Books
             .AsNoTracking()
-            .Where(book => book.OwnerId == currentUser.UserId)
+            .Where(book => book.OwnerId == currentUser.UserId && !book.IsArchived)
             .Include(book => book.Chapters)
             .OrderByDescending(book => book.CreatedAt)
             .ToListAsync(cancellationToken);

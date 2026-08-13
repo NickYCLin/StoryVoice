@@ -1089,6 +1089,7 @@ public sealed class CastRebuildPersistencePostgreSqlTests
     {
         var options = new DbContextOptionsBuilder<StoryVoiceDbContext>()
             .UseNpgsql(connectionString)
+            .AddInterceptors(new HistoricalBooksSchemaCompatibilityInterceptor())
             .Options;
         return new StoryVoiceDbContext(options);
     }
