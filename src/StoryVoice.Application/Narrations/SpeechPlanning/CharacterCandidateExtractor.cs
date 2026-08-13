@@ -10,10 +10,12 @@ public sealed record CharacterCandidate(
     string? SampleDialogue);
 
 /// <summary>
-/// Suggests character names for a human to confirm — never assigns anyone as a speaker. Reuses the
-/// same reporting-clause shape as <c>RuleBasedSpeakerAttributionProvider</c> ("XX說："), but points
-/// it at any name-like token instead of only already-registered characters, so a newly imported book
-/// can surface "who shows up here" before a single cast member has been typed in.
+/// Suggests character names for a human to confirm — never assigns anyone as a speaker. It primarily
+/// reuses the same reporting-clause shape as <c>RuleBasedSpeakerAttributionProvider</c> ("XX說："),
+/// but can also use one explicit title-bearing actor in the narrator bridge between two dialogue
+/// lines ("…」幸運同學把椅子轉過來，「…"). It points those narrow signals at any name-like token
+/// instead of only already-registered characters, so a newly imported book can surface "who shows
+/// up here" before a single cast member has been typed in.
 ///
 /// Only scans the short connector text immediately touching a dialogue quote — never a whole
 /// narrator paragraph — and within that connector keeps only the match closest to the quote
@@ -73,7 +75,22 @@ public static class CharacterCandidateExtractor
         "不是", "不過", "其實", "另外", "應該", "不知", "些什", "知道", "不出",
         "可是", "但是", "不用", "不會", "不能", "不要", "回來", "這個", "那個",
         "出來", "起來", "過來", "進來", "下去", "上去", "回去", "過去", "出去",
+        "繼續",
     ];
+
+    // A dialogue bridge can identify an otherwise-unregistered speaker without a reporting verb:
+    // 「…」幸運同學把椅子轉過來，「…」. It treats explicit forms of address as actor references,
+    // but only returns one that has a compact name-like modifier. This lets a bare 「老師」 make a
+    // bridge ambiguous without ever turning that generic title into a candidate, and never accepts
+    // arbitrary 2–4-character CJK runs that could turn ordinary verbs such as 「繼續」 into people.
+    private static readonly string[] CharacterTitleSuffixes =
+    [
+        "同學", "學長", "學姐", "老師", "先生", "小姐", "太太", "教授", "醫師", "醫生",
+        "主任", "老闆", "師傅", "大人", "同事",
+    ];
+    private static readonly string CharacterTitleSuffixPattern = string.Join(
+        '|',
+        CharacterTitleSuffixes.OrderByDescending(title => title.Length).Select(Regex.Escape));
 
     private const string LatinName = @"[A-Z][A-Za-z]{1,19}";
     private static readonly string VerbPattern = string.Join(
@@ -85,6 +102,23 @@ public static class CharacterCandidateExtractor
     // verb or a boundary late — several words strung together — more often fails to match at all
     // instead of getting captured whole as one long garbled "name".
     private const int MaximumNameLength = 4;
+
+    // The suffix is the evidence: without it this must never accept a free-form CJK run, because
+    // prose verbs (for example 「繼續」) look just as name-like to a regular expression. The speaker
+    // candidate itself must begin the bridge and have a 2–4-character modifier: this accepts
+    // 「小明同學」 and 「幸運同學」 but deliberately leaves weak forms such as 「王老師」 or bare
+    // 「同學」 unknown. We still enumerate the rest of the bridge below, so another named actor
+    // (「幸運同學把紙遞給小美同學」) makes the attribution ambiguous instead of silently becoming
+    // evidence for the first one. Missing a weak signal is safer than creating a generic person.
+    private static readonly Regex LeadingTitleBearingActor = new(
+        $@"^\s*(?<name>{CjkNameCharacter}{{2,{MaximumNameLength}}}?(?:{CharacterTitleSuffixPattern}))",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly Regex TitleBearingActor = new(
+        $@"(?<name>{CjkNameCharacter}{{2,{MaximumNameLength}}}?(?:{CharacterTitleSuffixPattern}))",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly Regex CharacterTitleMention = new(
+        $@"(?:{CharacterTitleSuffixPattern})",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     // Lazy: prefer the shortest CJK run that still lets a verb match immediately follow, so
     // "小華問道" resolves as name="小華" + verb="問道" instead of name="小華問" + verb="道". Correct
@@ -139,12 +173,22 @@ public static class CharacterCandidateExtractor
                 var name = precedesDialogue
                     ? FindClosestName(narratorText, preferLast: true)
                     : FindClosestName(narratorText, preferLast: false);
+                var occurrenceCount = 1;
+                if (name is null && precedesDialogue && followsDialogue)
+                {
+                    // One clearly identified actor in the bridge is evidence for both the dialogue
+                    // line before it and the line after it. Count the two actual utterances, not
+                    // merely the one narrator segment that links them.
+                    name = FindSoleTitleBearingActor(narratorText);
+                    occurrenceCount = name is null ? 0 : 2;
+                }
+
                 if (name is null)
                 {
                     continue;
                 }
 
-                counts[name] = counts.GetValueOrDefault(name) + 1;
+                counts[name] = counts.GetValueOrDefault(name) + occurrenceCount;
                 if (!samples.ContainsKey(name))
                 {
                     samples[name] = (chapter.Title, FindAdjacentDialogue(body, plan.BodySegments, position));
@@ -188,6 +232,43 @@ public static class CharacterCandidateExtractor
             ? matches.OrderByDescending(match => match.Index + match.Length).First()
             : matches.OrderBy(match => match.Index).First();
         return chosen.Groups["name"].Value;
+    }
+
+    private static string? FindSoleTitleBearingActor(string narratorText)
+    {
+        // The potential speaker has to start the bridge. A title-bearing person mentioned only
+        // later in a narration clause is not reliable evidence that either surrounding quote is
+        // theirs.
+        var leadingActor = LeadingTitleBearingActor.Match(narratorText);
+        if (!leadingActor.Success)
+        {
+            return null;
+        }
+
+        var leadingName = leadingActor.Groups["name"].Value;
+        if (BlockedNameWords.Any(word => leadingName.Contains(word, StringComparison.Ordinal)))
+        {
+            return null;
+        }
+
+        var namedActors = TitleBearingActor.Matches(narratorText)
+            .Select(match => match.Groups["name"].Value)
+            .Where(name => !BlockedNameWords.Any(word => name.Contains(word, StringComparison.Ordinal)))
+            .Distinct(StringComparer.Ordinal)
+            .Take(2)
+            .ToArray();
+        if (namedActors.Length != 1 || !StringComparer.Ordinal.Equals(namedActors[0], leadingName))
+        {
+            return null;
+        }
+
+        // Any additional title occurrence makes this bridge ambiguous. Count occurrences rather
+        // than distinct title text: 「幸運同學…另一位同學」 still names two people even though the
+        // suffix is the same. Repeatedly naming the same actor is conservatively left unknown too;
+        // missing a weak suggestion is safer than assigning the surrounding dialogue to the wrong
+        // person.
+        var titleMentionCount = CharacterTitleMention.Matches(narratorText).Count;
+        return titleMentionCount == 1 ? leadingName : null;
     }
 
     private static string? FindAdjacentDialogue(

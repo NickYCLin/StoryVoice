@@ -94,6 +94,64 @@ public sealed class CharacterCandidateExtractorTests
     }
 
     [Fact]
+    public void A_sole_title_bearing_actor_between_two_dialogues_surfaces_while_a_grammar_token_does_not()
+    {
+        // Regression: a dialogue bridge can identify its actor without a reporting verb. Here the
+        // same title-bearing actor performs the only action between both pairs of quoted lines, so
+        // 「幸運同學」 is a useful candidate. Conversely, 「繼續說」 is ordinary grammar, not a name;
+        // repeating it must never turn 「繼續」 into a candidate.
+        var book = Book.Create(Guid.NewGuid(), "對白橋接角色測試", "作者", "zh-TW", "story.txt");
+        book.AddChapter(
+            1,
+            "第一章",
+            "「這樣喔，我聽說中縣有間學校工科感覺還不錯。」幸運同學乾脆把椅子轉過來，拿了原子筆就在我的單子空白處畫圈圈，「如果你也申請能過，我們還可以再當三年同學哩。」\n" +
+            "「你先忙。」繼續說了一會兒，「嗯。」\n" +
+            "「我走了。」繼續說了一會兒，「路上小心。」");
+
+        var candidates = CharacterCandidateExtractor.Extract(book.Chapters);
+
+        var candidate = Assert.Single(candidates);
+        Assert.Equal("幸運同學", candidate.Name);
+        Assert.Equal(2, candidate.OccurrenceCount);
+        Assert.DoesNotContain(candidates, item => item.Name == "繼續");
+    }
+
+    [Fact]
+    public void A_bridge_with_multiple_title_bearing_actors_remains_unknown()
+    {
+        // The bridge identifies a speaker only when it has one actor. Naming 幸運同學 and a bare
+        // 老師 still describes an interaction, not enough evidence that either adjacent quote belongs
+        // to one of them, so surfacing the named actor would be a false attribution hint.
+        var book = Book.Create(Guid.NewGuid(), "多人對白橋接測試", "作者", "zh-TW", "story.txt");
+        book.AddChapter(
+            1,
+            "第一章",
+            "「你看這個。」幸運同學把紙遞給老師，「我晚點再來。」\n" +
+            "「這題不會。」幸運同學看向老師，「明天再問。」");
+
+        var candidates = CharacterCandidateExtractor.Extract(book.Chapters);
+
+        Assert.Empty(candidates);
+    }
+
+    [Fact]
+    public void A_bridge_with_two_named_people_sharing_the_same_title_remains_unknown()
+    {
+        // The second person has the same title suffix, so counting distinct suffix text would miss
+        // the ambiguity. Both people are explicitly named and either could own either quote.
+        var book = Book.Create(Guid.NewGuid(), "同稱謂多人對白橋接測試", "作者", "zh-TW", "story.txt");
+        book.AddChapter(
+            1,
+            "第一章",
+            "「你看這個。」幸運同學把紙遞給小美同學，「我晚點再來。」\n" +
+            "「這題不會。」幸運同學看向小美同學，「明天再問。」");
+
+        var candidates = CharacterCandidateExtractor.Extract(book.Chapters);
+
+        Assert.Empty(candidates);
+    }
+
+    [Fact]
     public void Common_interrogatives_and_demonstratives_never_surface_as_candidates()
     {
         // Regression: "說什麼" ("say what") sits directly next to the quote boundary as ordinary

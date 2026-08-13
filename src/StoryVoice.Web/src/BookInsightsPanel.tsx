@@ -318,7 +318,7 @@ export function BookInsightsPanel({ book, books, csrfToken, onBookUpdated }: Boo
 
       <section className="rounded-2xl border border-rose-100 bg-rose-50/70 p-4" aria-label="偵測到的角色候選">
         <h4 className="font-serif text-lg text-stone-800">偵測到的角色候選 <span className="text-xs font-sans text-rose-700">規則比對，非 AI 辨識</span></h4>
-        <p className="mt-2 text-xs leading-6 text-stone-500">找出「名字＋說／問／道」這類對白提示詞旁邊出現的名字，依出現次數排序；不會自動建立角色，只是提示你「這一冊大概有誰在說話」。可能漏掉只用代名詞或稱謂互相稱呼的角色，也可能誤收「老師」這類稱謂——請自行判斷再到系列配音手動加入角色。</p>
+        <p className="mt-2 text-xs leading-6 text-stone-500">找出「名字＋說／問／道」這類對白提示詞，或夾在兩句對白之間、唯一明確出現且帶名稱的稱謂型人物（例如「幸運同學把椅子轉過來」），依對白出現次數排序；不會自動建立角色，只是提示你「這一冊大概有誰在說話」。寧可漏掉只用代名詞或稱謂互相稱呼的角色，也會優先排除一般敘述詞；請自行判斷再到系列配音手動加入角色。</p>
         {!canGenerateSummary && <p className="mt-3 text-xs text-amber-700">等待合法正文：上傳 EPUB／TXT，並在外部書目上明確選擇連結。</p>}
         {candidates.length > 0 && (
           <ul className="mt-4 flex flex-wrap gap-2">

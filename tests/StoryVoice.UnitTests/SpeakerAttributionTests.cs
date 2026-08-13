@@ -219,6 +219,30 @@ public sealed class SpeakerAttributionTests
     }
 
     [Fact]
+    public async Task Title_bearing_named_actor_in_a_dialogue_bridge_suggests_both_surrounding_lines()
+    {
+        var luckyClassmateId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+        var provider = new RuleBasedSpeakerAttributionProvider();
+        var request = new SpeakerAttributionRequest(
+            [new KnownCharacterIdentity(luckyClassmateId, "幸運同學", [])],
+            [
+                new SpeechSegmentAttributionInput(0, SpeechSegmentKind.Dialogue, "「這樣喔，我聽說中縣有間學校工科感覺還不錯。」"),
+                new SpeechSegmentAttributionInput(1, SpeechSegmentKind.Narrator, "幸運同學乾脆把椅子轉過來，拿了原子筆就在我的單子空白處畫圈圈，"),
+                new SpeechSegmentAttributionInput(2, SpeechSegmentKind.Dialogue, "「如果你也申請能過，我們還可以再當三年同學哩。」"),
+            ]);
+
+        var results = await provider.AttributeAsync(request, CancellationToken.None);
+
+        Assert.Equal(2, results.Count);
+        Assert.All(results, result =>
+        {
+            Assert.Equal(luckyClassmateId, result.CharacterId);
+            Assert.Equal(SpeakerAttributionOutcome.Suggested, result.Outcome);
+            Assert.Equal("narrator_sole_named_actor", result.ReasonCode);
+        });
+    }
+
+    [Fact]
     public async Task Sole_named_actor_switches_to_whichever_character_is_newly_named_in_between()
     {
         var provider = new RuleBasedSpeakerAttributionProvider();

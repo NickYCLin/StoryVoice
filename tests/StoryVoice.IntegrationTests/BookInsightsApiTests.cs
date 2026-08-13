@@ -339,6 +339,34 @@ public sealed class BookInsightsApiTests(ApiFactory factory) : IClassFixture<Api
     }
 
     [Fact]
+    public async Task Character_candidates_recognize_a_sole_title_bearing_actor_in_a_dialogue_bridge_without_adding_grammar_as_people()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var owner = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        var book = await ImportTextAsync(
+            owner,
+            """
+            第一章 相約
+            「這樣喔，我聽說中縣有間學校工科感覺還不錯。」幸運同學乾脆把椅子轉過來，拿了原子筆就畫圈圈，「如果你也申請能過，我們還可以再當三年同學哩。」
+            「你先忙。」繼續說了一會兒，「嗯。」
+            「我走了。」繼續說了一會兒，「路上小心。」
+            """,
+            cancellationToken);
+
+        using var response = await owner.GetAsync(
+            $"/api/books/{book.Id}/character-candidates",
+            cancellationToken);
+        var candidates = await response.Content.ReadFromJsonAsync<CharacterCandidateResponse[]>(cancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.NotNull(candidates);
+        var candidate = Assert.Single(candidates);
+        Assert.Equal("幸運同學", candidate.Name);
+        Assert.Equal(2, candidate.OccurrenceCount);
+        Assert.DoesNotContain(candidates, item => item.Name == "繼續");
+    }
+
+    [Fact]
     public async Task Character_candidates_require_processable_authorized_text()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
