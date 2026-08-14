@@ -108,6 +108,13 @@ public static class DependencyInjection
             client.Timeout = TimeSpan.FromSeconds(localLlmOptions.TimeoutSeconds);
         })
         .ConfigurePrimaryHttpMessageHandler(static () => new SocketsHttpHandler { UseProxy = false });
+        services.AddHttpClient<OllamaSpeakerAttributionProvider>((provider, client) =>
+        {
+            var localLlmOptions = provider.GetRequiredService<IOptions<LocalLlmCharacterAnalysisOptions>>().Value;
+            client.BaseAddress = new Uri(localLlmOptions.BaseUrl, UriKind.Absolute);
+            client.Timeout = TimeSpan.FromSeconds(localLlmOptions.TimeoutSeconds);
+        })
+        .ConfigurePrimaryHttpMessageHandler(static () => new SocketsHttpHandler { UseProxy = false });
         services.AddScoped<IBookInsightsService, BookInsightsService>();
         services.AddScoped<ILibraryStatusService, LibraryStatusService>();
         services.AddScoped<INarrationService, NarrationService>();
@@ -121,8 +128,17 @@ public static class DependencyInjection
         services.AddScoped<PostgreSqlCastEpochActivationPublisher>();
         services.AddScoped<CompanionTokenService>();
         services.AddSingleton<ChineseSpeechSegmenter>();
-        services.AddSingleton<ISpeakerAttributionProvider>(
-            _ => new LocalSpeakerAttributionProvider(new RuleBasedSpeakerAttributionProvider()));
+        services.AddSingleton<RuleBasedSpeakerAttributionProvider>();
+        services.AddSingleton<ISpeakerAttributionProvider>(provider =>
+        {
+            var options = provider.GetRequiredService<IOptions<LocalLlmCharacterAnalysisOptions>>().Value;
+            var hybrid = new HybridSpeakerAttributionProvider(
+                provider.GetRequiredService<RuleBasedSpeakerAttributionProvider>(),
+                provider.GetRequiredService<OllamaSpeakerAttributionProvider>());
+            return new LocalSpeakerAttributionProvider(
+                hybrid,
+                TimeSpan.FromSeconds(options.TimeoutSeconds));
+        });
         services.AddScoped<IChapterSpeechPlanRepository, ChapterSpeechPlanRepository>();
         services.AddScoped<ISpeechPlanService, SpeechPlanService>();
         services.AddSingleton<IBookImportParser, PlainTextBookParser>();

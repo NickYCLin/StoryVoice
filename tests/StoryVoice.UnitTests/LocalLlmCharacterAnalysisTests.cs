@@ -17,7 +17,7 @@ public sealed class LocalLlmCharacterAnalysisTests
         {
           "model":"gpt-oss:20b",
           "done":true,
-          "message":{"content":"{\"candidates\":[{\"name\":\"阿明\",\"confidence\":\"high\",\"dialogueEvidenceCount\":2},{\"name\":\"不存在\",\"confidence\":\"high\",\"dialogueEvidenceCount\":9}]}"}
+          "message":{"content":"{\"candidates\":[{\"name\":\"阿明\",\"confidence\":\"high\",\"dialogueEvidenceCount\":2,\"aliases\":[\"小明\",\"正文沒有\"]},{\"name\":\"不存在\",\"confidence\":\"high\",\"dialogueEvidenceCount\":9,\"aliases\":[]}] }"}
         }
         """;
 
@@ -28,7 +28,7 @@ public sealed class LocalLlmCharacterAnalysisTests
         [
             (1, (IReadOnlyList<LocalLlmCharacterCandidate>)
             [
-                new("阿明", "medium", 1),
+                new("阿明", "medium", 1, ["小明"]),
                 new("", "high", 99),
                 new("小華", "low", 2),
             ]),
@@ -47,6 +47,7 @@ public sealed class LocalLlmCharacterAnalysisTests
                 Assert.Equal("high", first.Confidence);
                 Assert.Equal(3, first.DialogueEvidenceCount);
                 Assert.Equal([1, 2], first.EvidenceChapterNumbers);
+                Assert.Equal(["小明"], first.Aliases);
             },
             second =>
             {
@@ -69,7 +70,7 @@ public sealed class LocalLlmCharacterAnalysisTests
         [
             (1, (IReadOnlyList<LocalLlmCharacterCandidate>)
             [
-                new("喵喵", "high", 4),
+                new("喵喵", "high", 4, ["米可蕥"]),
                 new("米可蕥", "medium", 3),
             ]),
             (2, (IReadOnlyList<LocalLlmCharacterCandidate>)
@@ -83,6 +84,7 @@ public sealed class LocalLlmCharacterAnalysisTests
         Assert.Equal("high", candidate.Confidence);
         Assert.Equal(6, candidate.DialogueEvidenceCount);
         Assert.Equal([1, 2], candidate.EvidenceChapterNumbers);
+        Assert.Equal(["喵喵"], candidate.Aliases);
     }
 
     [Fact]
@@ -91,7 +93,7 @@ public sealed class LocalLlmCharacterAnalysisTests
         var handler = new CapturingHandler(ValidAnalysis);
         using var client = new HttpClient(handler) { BaseAddress = new Uri("http://local-ollama/") };
         var provider = CreateProvider(client);
-        const string chapterText = "阿明說：「你好。」\n小華回答：「再見。」\n完整章節結尾 sentinel。";
+        const string chapterText = "阿明（大家也叫他小明）說：「你好。」\n小華回答：「再見。」\n完整章節結尾 sentinel。";
 
         var chapters = await provider.AnalyzeAsync(
             new LocalLlmCharacterAnalysisRequest(
@@ -103,6 +105,7 @@ public sealed class LocalLlmCharacterAnalysisTests
         Assert.Equal("阿明", candidate.Name);
         Assert.Equal("high", candidate.Confidence);
         Assert.Equal(2, candidate.DialogueEvidenceCount);
+        Assert.Equal(["小明"], candidate.Aliases);
         using var chatRequest = JsonDocument.Parse(handler.ChatRequestBody);
         var messages = chatRequest.RootElement.GetProperty("messages");
         Assert.Contains(chapterText, messages[1].GetProperty("content").GetString(), StringComparison.Ordinal);
@@ -118,7 +121,7 @@ public sealed class LocalLlmCharacterAnalysisTests
 
     [Theory]
     [InlineData("{\"done\":true,\"message\":{\"content\":\"{\\\"candidates\\\":null}\"}}")]
-    [InlineData("{\"done\":true,\"message\":{\"content\":\"{\\\"candidates\\\":[{\\\"name\\\":\\\"阿明\\\",\\\"confidence\\\":\\\"high\\\",\\\"dialogueEvidenceCount\\\":1,\\\"unexpected\\\":true}]}\"}}")]
+    [InlineData("{\"done\":true,\"message\":{\"content\":\"{\\\"candidates\\\":[{\\\"name\\\":\\\"阿明\\\",\\\"confidence\\\":\\\"high\\\",\\\"dialogueEvidenceCount\\\":1,\\\"aliases\\\":[],\\\"unexpected\\\":true}]}\"}}")]
     public async Task Ollama_provider_rejects_malformed_or_non_schema_model_output(string response)
     {
         using var client = new HttpClient(new CapturingHandler(response)) { BaseAddress = new Uri("http://local-ollama/") };
@@ -183,7 +186,7 @@ public sealed class LocalLlmCharacterAnalysisTests
         var secondSource = LocalLlmCharacterAnalysisSource.Create(second.Chapters);
 
         Assert.NotEqual(firstSource.SourceHash, secondSource.SourceHash);
-        Assert.Equal("v2-full-chapter-context-low-series-aliases", LocalLlmCharacterAnalysisSource.PromptVersion);
+        Assert.Equal("v3-full-chapter-context-explicit-aliases", LocalLlmCharacterAnalysisSource.PromptVersion);
     }
 
     [Fact]

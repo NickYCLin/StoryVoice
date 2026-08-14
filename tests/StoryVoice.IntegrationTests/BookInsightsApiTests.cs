@@ -13,66 +13,43 @@ namespace StoryVoice.IntegrationTests;
 public sealed class BookInsightsApiTests(ApiFactory factory) : IClassFixture<ApiFactory>
 {
     [Fact]
-    public async Task Imported_text_generates_idempotent_exact_source_summary()
+    public async Task Extractive_summary_endpoints_are_retired_for_imported_text()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
         var book = await ImportTextAsync(client, cancellationToken);
 
-        using var firstResponse = await PutWithCsrfAsync(
+        using var putResponse = await PutWithCsrfAsync(
             client,
             $"/api/books/{book.Id}/summary",
             cancellationToken);
-        var first = await firstResponse.Content.ReadFromJsonAsync<ExtractiveBookSummaryResponse>(cancellationToken);
-        using var secondResponse = await PutWithCsrfAsync(
-            client,
-            $"/api/books/{book.Id}/summary",
-            cancellationToken);
-        var second = await secondResponse.Content.ReadFromJsonAsync<ExtractiveBookSummaryResponse>(cancellationToken);
+        using var getResponse = await client.GetAsync($"/api/books/{book.Id}/summary", cancellationToken);
 
-        Assert.Equal(HttpStatusCode.OK, firstResponse.StatusCode);
-        Assert.Equal(HttpStatusCode.OK, secondResponse.StatusCode);
-        Assert.NotNull(first);
-        Assert.NotNull(second);
-        Assert.Equal("Extractive", first.Kind);
-        Assert.Equal(first.SourceHash, second.SourceHash);
-        Assert.Equal(first.GeneratedAt, second.GeneratedAt);
-        Assert.NotEmpty(first.Excerpts);
-        foreach (var excerpt in first.Excerpts)
-        {
-            var chapter = book.Chapters.Single(item => item.Id == excerpt.ChapterId);
-            Assert.Equal(excerpt.Text, chapter.OriginalText.Substring(excerpt.StartOffset, excerpt.Length));
-        }
+        Assert.Equal(HttpStatusCode.NotFound, putResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, getResponse.StatusCode);
     }
 
     [Fact]
-    public async Task Metadata_only_book_rejects_summary_but_accepts_manual_book_note()
+    public async Task Metadata_only_book_accepts_manual_book_note()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         using var sessionClient = await factory.CreateAuthenticatedClientAsync(cancellationToken);
         using var companionClient = await CreateCompanionClientAsync(sessionClient, cancellationToken);
         var linked = await ImportLinkedBookAsync(companionClient, cancellationToken);
 
-        using var summaryResponse = await PutWithCsrfAsync(
-            sessionClient,
-            $"/api/books/{linked.Id}/summary",
-            cancellationToken);
-        using var problem = JsonDocument.Parse(await summaryResponse.Content.ReadAsStreamAsync(cancellationToken));
         using var noteResponse = await sessionClient.PostWithCsrfAsync(
             $"/api/books/{linked.Id}/notes",
             new CreateReadingNoteRequest("這是我自己的閱讀備忘。", null),
             cancellationToken);
         var note = await noteResponse.Content.ReadFromJsonAsync<ReadingNoteResponse>(cancellationToken);
 
-        Assert.Equal(HttpStatusCode.Conflict, summaryResponse.StatusCode);
-        Assert.Equal(BookTextUnavailableException.StableCode, problem.RootElement.GetProperty("code").GetString());
         Assert.Equal(HttpStatusCode.Created, noteResponse.StatusCode);
         Assert.NotNull(note);
         Assert.Null(note.ChapterId);
     }
 
     [Fact]
-    public async Task Explicit_owner_scoped_link_enables_summary_and_chapter_note()
+    public async Task Explicit_owner_scoped_link_enables_chapter_note()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         using var sessionClient = await factory.CreateAuthenticatedClientAsync(cancellationToken);
@@ -86,11 +63,6 @@ public sealed class BookInsightsApiTests(ApiFactory factory) : IClassFixture<Api
             new SetBookContentLinkRequest(content.Id),
             cancellationToken);
         var link = await linkResponse.Content.ReadFromJsonAsync<BookContentLinkResponse>(cancellationToken);
-        using var summaryResponse = await PutWithCsrfAsync(
-            sessionClient,
-            $"/api/books/{linked.Id}/summary",
-            cancellationToken);
-        var summary = await summaryResponse.Content.ReadFromJsonAsync<ExtractiveBookSummaryResponse>(cancellationToken);
         using var noteResponse = await sessionClient.PostWithCsrfAsync(
             $"/api/books/{linked.Id}/notes",
             new CreateReadingNoteRequest("第一章的手動筆記。", content.Chapters[0].Id),
@@ -99,9 +71,6 @@ public sealed class BookInsightsApiTests(ApiFactory factory) : IClassFixture<Api
         Assert.Equal(HttpStatusCode.OK, linkResponse.StatusCode);
         Assert.NotNull(link);
         Assert.Equal(content.Id, link.ContentBookId);
-        Assert.Equal(HttpStatusCode.OK, summaryResponse.StatusCode);
-        Assert.NotNull(summary);
-        Assert.Equal(content.Id, summary.ContentBookId);
         Assert.Equal(HttpStatusCode.Created, noteResponse.StatusCode);
     }
 
@@ -267,17 +236,12 @@ public sealed class BookInsightsApiTests(ApiFactory factory) : IClassFixture<Api
     }
 
     [Fact]
-    public async Task Removing_nonexistent_link_preserves_direct_upload_summary_and_chapter_notes()
+    public async Task Removing_nonexistent_link_preserves_direct_upload_chapter_notes()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
         var uploaded = await ImportTextAsync(client, cancellationToken);
 
-        using var summary = await PutWithCsrfAsync(
-            client,
-            $"/api/books/{uploaded.Id}/summary",
-            cancellationToken);
-        summary.EnsureSuccessStatusCode();
         using var note = await client.PostWithCsrfAsync(
             $"/api/books/{uploaded.Id}/notes",
             new CreateReadingNoteRequest("直傳正文的章節筆記。", uploaded.Chapters[0].Id),
@@ -290,10 +254,8 @@ public sealed class BookInsightsApiTests(ApiFactory factory) : IClassFixture<Api
             cancellationToken);
         using var notesResponse = await client.GetAsync($"/api/books/{uploaded.Id}/notes", cancellationToken);
         var notes = await notesResponse.Content.ReadFromJsonAsync<ReadingNoteResponse[]>(cancellationToken);
-        using var summaryResponse = await client.GetAsync($"/api/books/{uploaded.Id}/summary", cancellationToken);
 
         Assert.Equal(HttpStatusCode.NoContent, unlink.StatusCode);
-        Assert.Equal(HttpStatusCode.OK, summaryResponse.StatusCode);
         Assert.NotNull(notes);
         Assert.Single(notes);
         Assert.Equal(uploaded.Chapters[0].Id, notes[0].ChapterId);
@@ -406,6 +368,84 @@ public sealed class BookInsightsApiTests(ApiFactory factory) : IClassFixture<Api
         var candidate = Assert.Single(analysis.Candidates);
         Assert.Equal("艾莉絲", candidate.Name);
         Assert.Equal(3, candidate.DialogueEvidenceCount);
+    }
+
+    [Fact]
+    public async Task Reviewed_character_candidates_atomically_join_book_create_cast_merge_aliases_and_are_idempotent()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var owner = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        using var other = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        var book = await ImportTextAsync(
+            owner,
+            """
+            第一章 角色候選
+            測試角色又被稱為隊長。測試角色說：「開始建立角色表。」
+            """,
+            cancellationToken);
+        using var generate = await PutWithCsrfAsync(
+            owner,
+            $"/api/books/{book.Id}/character-analysis",
+            cancellationToken);
+        generate.EnsureSuccessStatusCode();
+        using var createSeries = await owner.PostWithCsrfAsync(
+            "/api/series",
+            new CreateStorySeriesRequest(
+                $"候選套用-{Guid.NewGuid():N}",
+                "edge",
+                "zh-TW-YunJheNeural",
+                "+0%",
+                "+0Hz",
+                "+0%",
+                350),
+            cancellationToken);
+        createSeries.EnsureSuccessStatusCode();
+        var created = await createSeries.Content.ReadFromJsonAsync<StorySeriesDetailsResponse>(cancellationToken);
+        Assert.NotNull(created);
+        var request = new ApplyAnalyzedSeriesCharactersRequest(
+            book.Id,
+            [
+                new ApplyAnalyzedSeriesCharacterRequest(
+                    "測試角色",
+                    "主角",
+                    ["英雄", "隊長"],
+                    SeriesCharacterRole.Main,
+                    "edge",
+                    "zh-TW-HsiaoChenNeural",
+                    "+0%",
+                    "+0Hz",
+                    "+0%"),
+            ]);
+
+        using var apply = await owner.PostWithCsrfAsync(
+            $"/api/series/{created.Id}/analyzed-characters",
+            request,
+            cancellationToken);
+        using var replay = await owner.PostWithCsrfAsync(
+            $"/api/series/{created.Id}/analyzed-characters",
+            request,
+            cancellationToken);
+        using var otherApply = await other.PostWithCsrfAsync(
+            $"/api/series/{created.Id}/analyzed-characters",
+            request,
+            cancellationToken);
+        var applied = await apply.Content.ReadFromJsonAsync<StorySeriesDetailsResponse>(cancellationToken);
+        var replayed = await replay.Content.ReadFromJsonAsync<StorySeriesDetailsResponse>(cancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, apply.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, replay.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, otherApply.StatusCode);
+        Assert.NotNull(applied);
+        Assert.NotNull(replayed);
+        Assert.Equal(book.Id, Assert.Single(applied.Books).BookId);
+        var character = Assert.Single(applied.Characters);
+        Assert.Equal("主角", character.CanonicalName);
+        Assert.Equal(
+            ["測試角色", "英雄", "隊長"],
+            character.Aliases.Select(alias => alias.Value).Order(StringComparer.Ordinal).ToArray());
+        Assert.Single(replayed.Books);
+        Assert.Single(replayed.Characters);
+        Assert.Equal(3, replayed.Characters[0].Aliases.Count);
     }
 
     [Fact]

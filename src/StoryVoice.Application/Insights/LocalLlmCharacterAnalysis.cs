@@ -20,13 +20,15 @@ public sealed record LocalLlmCharacterAnalysisChapter(
 public sealed record LocalLlmCharacterCandidate(
     string Name,
     string Confidence,
-    int DialogueEvidenceCount);
+    int DialogueEvidenceCount,
+    IReadOnlyList<string>? Aliases = null);
 
 public sealed record LocalLlmCharacterAnalysisCandidateResponse(
     string Name,
     string Confidence,
     int DialogueEvidenceCount,
-    IReadOnlyList<int> EvidenceChapterNumbers);
+    IReadOnlyList<int> EvidenceChapterNumbers,
+    IReadOnlyList<string>? Aliases = null);
 
 public sealed record LocalLlmCharacterAnalysisResponse(
     Guid BookId,
@@ -89,7 +91,7 @@ public interface ILocalLlmCharacterAnalysisProvider
 public static class LocalLlmCharacterAnalysisSource
 {
     public const string Generator = "local-ollama";
-    public const string PromptVersion = "v2-full-chapter-context-low-series-aliases";
+    public const string PromptVersion = "v3-full-chapter-context-explicit-aliases";
     private const int MaximumCandidates = 60;
     public const int MaximumChapterCount = 30;
     public const int MaximumBookCharacters = 120_000;
@@ -149,6 +151,34 @@ public static class LocalLlmCharacterAnalysisSource
 
                 accumulator.Confidence = StrongerConfidence(accumulator.Confidence, confidence);
                 accumulator.AddEvidence(chapterNumber, candidate.DialogueEvidenceCount);
+                if (!string.Equals(name, canonicalName, StringComparison.Ordinal))
+                {
+                    accumulator.AddAlias(name);
+                }
+
+                foreach (var alias in candidate.Aliases ?? [])
+                {
+                    var normalizedAlias = NormalizeName(alias);
+                    if (normalizedAlias.Length == 0)
+                    {
+                        continue;
+                    }
+
+                    var aliasCanonicalName = ResolveCanonicalName(
+                        normalizedAlias,
+                        canonicalNamesByNormalizedIdentity);
+                    if (string.Equals(aliasCanonicalName, canonicalName, StringComparison.Ordinal))
+                    {
+                        if (!string.Equals(normalizedAlias, canonicalName, StringComparison.Ordinal))
+                        {
+                            accumulator.AddAlias(normalizedAlias);
+                        }
+
+                        continue;
+                    }
+
+                    accumulator.AddAlias(normalizedAlias);
+                }
             }
         }
 
@@ -160,7 +190,8 @@ public static class LocalLlmCharacterAnalysisSource
                 candidate.Name,
                 candidate.Confidence,
                 candidate.DialogueEvidenceCount,
-                candidate.EvidenceChapterNumbers.Order().ToArray()))
+                candidate.EvidenceChapterNumbers.Order().ToArray(),
+                candidate.Aliases.Order(StringComparer.Ordinal).ToArray()))
             .ToArray();
     }
 
@@ -213,11 +244,13 @@ public static class LocalLlmCharacterAnalysisSource
     private sealed class CandidateAccumulator(string name, string confidence)
     {
         private readonly Dictionary<int, int> _evidenceByChapter = [];
+        private readonly HashSet<string> _aliases = new(StringComparer.Ordinal);
 
         public string Name { get; } = name;
         public string Confidence { get; set; } = confidence;
         public int DialogueEvidenceCount => _evidenceByChapter.Values.Sum();
         public IEnumerable<int> EvidenceChapterNumbers => _evidenceByChapter.Keys;
+        public IEnumerable<string> Aliases => _aliases;
 
         public void AddEvidence(int chapterNumber, int dialogueEvidenceCount)
         {
@@ -225,6 +258,14 @@ public static class LocalLlmCharacterAnalysisSource
                 || dialogueEvidenceCount > current)
             {
                 _evidenceByChapter[chapterNumber] = dialogueEvidenceCount;
+            }
+        }
+
+        public void AddAlias(string alias)
+        {
+            if (!string.Equals(alias, Name, StringComparison.Ordinal))
+            {
+                _aliases.Add(alias);
             }
         }
     }

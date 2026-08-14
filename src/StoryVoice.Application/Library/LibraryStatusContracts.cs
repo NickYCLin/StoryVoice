@@ -7,7 +7,6 @@ public sealed record LibraryBookStatusResponse(
     bool OfficialReaderAvailable,
     bool? OfficialTtsAvailable,
     bool AuthorizedTextAvailable,
-    bool ExtractiveSummaryAvailable,
     int ReadingNoteCount,
     string? StoryVoiceNarrationStatus,
     bool StoryVoiceNarrationMatchesAuthorizedText,

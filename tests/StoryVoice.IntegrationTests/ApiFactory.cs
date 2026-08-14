@@ -6,7 +6,9 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using StoryVoice.Application.Insights;
+using StoryVoice.Application.Narrations.SpeechPlanning;
 using StoryVoice.Domain.Series;
+using StoryVoice.Infrastructure.Narrations;
 using StoryVoice.Infrastructure.Persistence;
 
 namespace StoryVoice.IntegrationTests;
@@ -53,6 +55,8 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
                     .AddInterceptors(new ComputedCanonicalKindInterceptor()));
             services.RemoveAll<ILocalLlmCharacterAnalysisProvider>();
             services.AddSingleton<ILocalLlmCharacterAnalysisProvider, FakeLocalLlmCharacterAnalysisProvider>();
+            services.RemoveAll<ISpeakerAttributionProvider>();
+            services.AddSingleton<ISpeakerAttributionProvider, RuleBasedSpeakerAttributionProvider>();
         });
     }
 
@@ -94,7 +98,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
             var candidates = new List<LocalLlmCharacterCandidate>();
             if (chapterText.Contains("測試角色", StringComparison.Ordinal))
             {
-                candidates.Add(new LocalLlmCharacterCandidate("測試角色", "high", 2));
+                candidates.Add(new LocalLlmCharacterCandidate("測試角色", "high", 2, ["隊長"]));
             }
 
             if (chapterText.Contains("隊長", StringComparison.Ordinal))

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { filterAndSortBooks, normalizeDeviceTag } from '../src/libraryCatalog.ts'
+import { filterAndSortBooks } from '../src/libraryCatalog.ts'
 
 const baseBooks = [
   {
@@ -21,29 +21,27 @@ const baseBooks = [
   },
 ]
 
-const defaults = { query: '', source: 'all', layout: 'all', tts: 'all', tag: 'all', sort: 'created-desc' }
-const tags = { 'b-2': ['待讀', '小說'], 'b-3': ['小說'] }
+const defaults = { query: '', source: 'all', layout: 'all', tts: 'all', sort: 'created-desc' }
 
-test('searches title, author, external id, and device tags without mutating input', () => {
+test('searches title, author, and external id without mutating input', () => {
   const original = structuredClone(baseBooks)
-  assert.deepEqual(filterAndSortBooks(baseBooks, { ...defaults, query: 'alpha' }, tags).map(book => book.id), ['b-1'])
-  assert.deepEqual(filterAndSortBooks(baseBooks, { ...defaults, query: '作者甲' }, tags).map(book => book.id), ['b-3'])
-  assert.deepEqual(filterAndSortBooks(baseBooks, { ...defaults, query: 'e0502' }, tags).map(book => book.id), ['b-2'])
-  assert.deepEqual(filterAndSortBooks(baseBooks, { ...defaults, query: '待讀' }, tags).map(book => book.id), ['b-2'])
+  assert.deepEqual(filterAndSortBooks(baseBooks, { ...defaults, query: 'alpha' }).map(book => book.id), ['b-1'])
+  assert.deepEqual(filterAndSortBooks(baseBooks, { ...defaults, query: '作者甲' }).map(book => book.id), ['b-3'])
+  assert.deepEqual(filterAndSortBooks(baseBooks, { ...defaults, query: 'e0502' }).map(book => book.id), ['b-2'])
   assert.deepEqual(baseBooks, original)
 })
 
-test('combines source, layout, TTS tri-state, and tag filters', () => {
-  assert.deepEqual(filterAndSortBooks(baseBooks, { ...defaults, source: 'books-com-tw', layout: 'Reflowable', tts: 'false', tag: '待讀' }, tags).map(book => book.id), ['b-2'])
-  assert.deepEqual(filterAndSortBooks(baseBooks, { ...defaults, source: 'uploaded', layout: 'unknown', tts: 'unknown' }, tags).map(book => book.id), ['b-1'])
-  assert.deepEqual(filterAndSortBooks(baseBooks, { ...defaults, tts: 'true' }, tags).map(book => book.id), ['b-3'])
+test('combines source, layout, and TTS tri-state filters', () => {
+  assert.deepEqual(filterAndSortBooks(baseBooks, { ...defaults, source: 'books-com-tw', layout: 'Reflowable', tts: 'false' }).map(book => book.id), ['b-2'])
+  assert.deepEqual(filterAndSortBooks(baseBooks, { ...defaults, source: 'uploaded', layout: 'unknown', tts: 'unknown' }).map(book => book.id), ['b-1'])
+  assert.deepEqual(filterAndSortBooks(baseBooks, { ...defaults, tts: 'true' }).map(book => book.id), ['b-3'])
 })
 
 test('sorts deterministically by title, author, latest sync, and creation time', () => {
-  assert.deepEqual(filterAndSortBooks(baseBooks, { ...defaults, sort: 'title' }, tags).map(book => book.id), ['b-2', 'b-3', 'b-1'])
-  assert.deepEqual(filterAndSortBooks(baseBooks, { ...defaults, sort: 'author' }, tags).map(book => book.id), ['b-2', 'b-3', 'b-1'])
-  assert.deepEqual(filterAndSortBooks(baseBooks, { ...defaults, sort: 'synced-desc' }, tags).map(book => book.id), ['b-3', 'b-2', 'b-1'])
-  assert.deepEqual(filterAndSortBooks(baseBooks, defaults, tags).map(book => book.id), ['b-1', 'b-2', 'b-3'])
+  assert.deepEqual(filterAndSortBooks(baseBooks, { ...defaults, sort: 'title' }).map(book => book.id), ['b-2', 'b-3', 'b-1'])
+  assert.deepEqual(filterAndSortBooks(baseBooks, { ...defaults, sort: 'author' }).map(book => book.id), ['b-2', 'b-3', 'b-1'])
+  assert.deepEqual(filterAndSortBooks(baseBooks, { ...defaults, sort: 'synced-desc' }).map(book => book.id), ['b-3', 'b-2', 'b-1'])
+  assert.deepEqual(filterAndSortBooks(baseBooks, defaults).map(book => book.id), ['b-1', 'b-2', 'b-3'])
 })
 
 test('title sort understands Chinese-numeral volume markers, not just Arabic digits', () => {
@@ -54,13 +52,7 @@ test('title sort understands Chinese-numeral volume markers, not just Arabic dig
     { id: 'v10', title: '特殊傳說第十部：水之妖精族', author: '護玄', createdAt: '2026-08-10T00:00:00Z', sourceProvider: null, externalSourceId: null, nativeTtsAvailable: null, ebookLayout: null, sourceSyncedAt: null },
   ]
   assert.deepEqual(
-    filterAndSortBooks(volumes, { ...defaults, sort: 'title' }, {}).map(book => book.id),
+    filterAndSortBooks(volumes, { ...defaults, sort: 'title' }).map(book => book.id),
     ['v1', 'v2', 'v10', 'v11'],
   )
-})
-
-test('normalizes local device tags and rejects unusable labels', () => {
-  assert.equal(normalizeDeviceTag('  待  讀  '), '待 讀')
-  assert.equal(normalizeDeviceTag('x'.repeat(25)), null)
-  assert.equal(normalizeDeviceTag('   '), null)
 })

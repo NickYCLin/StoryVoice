@@ -11,12 +11,9 @@ test('linked metadata requires an explicit authorized EPUB or TXT association', 
   assert.ok(app.includes("/content-link`"))
 })
 
-test('summary UI is truthfully extractive and exposes provenance', () => {
-  assert.ok(app.includes('擷取式摘要'))
-  assert.ok(app.includes('原文選句，非 AI 改寫'))
-  assert.ok(app.includes('excerpt.chapterTitle'))
-  assert.ok(app.includes('excerpt.startOffset'))
-  assert.ok(app.includes('等待合法正文'))
+test('retired extractive summary has no remaining UI or API request', () => {
+  assert.ok(!app.includes('擷取式摘要'))
+  assert.ok(!app.includes('/summary`'))
 })
 
 test('manual notes work independently from provider text and mutations carry CSRF', () => {
@@ -27,17 +24,19 @@ test('manual notes work independently from provider text and mutations carry CSR
   assert.ok(app.includes("headers: { 'X-CSRF-TOKEN': csrfToken }"))
 })
 
-test('local LLM character analysis is explicit, review-only, and does not retain the rule-based screen', () => {
-  assert.ok(app.includes('本機 LLM 角色分析'))
-  assert.ok(app.includes('分析建議，待人工確認'))
-  assert.ok(app.includes('每章完整交給本機模型閱讀後再匯總'))
-  assert.ok(app.includes('不會自動建立角色、覆蓋系列資料、指派聲線或產生音檔'))
+test('local LLM candidates can be checked, merged by canonical name and applied to a series cast', () => {
+  assert.ok(app.includes('本機 LLM 角色與 alias 分析'))
+  assert.ok(app.includes('Canonical 名稱'))
+  assert.ok(app.includes('Aliases（以、分隔）'))
+  assert.ok(app.includes('建立／合併系列角色表'))
   assert.ok(app.includes("/character-analysis`"))
+  assert.ok(app.includes('/analyzed-characters`'))
   assert.ok(app.includes('handleGenerateCharacterAnalysis'))
   assert.ok(app.includes("method: 'PUT'"))
   assert.ok(app.includes('本機 LLM 正在逐章讀取完整正文'))
   assert.ok(app.includes('完成後立即卸載'))
-  assert.ok(app.includes('navigator.clipboard.writeText(candidate.name)'))
+  assert.ok(app.includes('candidateDrafts[candidate.name]?.selected'))
+  assert.ok(app.includes("to={selectedSeriesId ? `/series?seriesId=${selectedSeriesId}` : '/series'}"))
   assert.ok(!app.includes('/character-candidates`'))
   assert.ok(!app.includes('偵測到的說話角色'))
   assert.ok(!app.includes('FirstPersonNarrator'))

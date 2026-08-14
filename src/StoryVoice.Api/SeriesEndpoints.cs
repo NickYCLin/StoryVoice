@@ -114,6 +114,21 @@ public static class SeriesEndpoints
         .AddEndpointFilter<AntiforgeryEndpointFilter>()
         .WithName("AddStorySeriesCharacterAlias");
 
+        group.MapPost("/{seriesId:guid}/analyzed-characters", async (
+            Guid seriesId,
+            ApplyAnalyzedSeriesCharactersRequest request,
+            ISeriesService service,
+            CancellationToken cancellationToken) =>
+        {
+            var series = await service.ApplyAnalyzedCharactersAsync(
+                seriesId,
+                request,
+                cancellationToken);
+            return series is null ? Results.NotFound() : Results.Ok(series);
+        })
+        .AddEndpointFilter<AntiforgeryEndpointFilter>()
+        .WithName("ApplyAnalyzedStorySeriesCharacters");
+
         return endpoints;
     }
 }

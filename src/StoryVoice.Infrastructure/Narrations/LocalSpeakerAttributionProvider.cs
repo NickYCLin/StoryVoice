@@ -14,7 +14,7 @@ public sealed class LocalSpeakerAttributionProvider(
     ISpeakerAttributionProvider innerProvider,
     TimeSpan? timeout = null) : ISpeakerAttributionProvider
 {
-    private readonly TimeSpan _timeout = timeout ?? TimeSpan.FromSeconds(5);
+    private readonly TimeSpan _timeout = timeout ?? TimeSpan.FromMinutes(10);
 
     public async Task<IReadOnlyList<SpeakerAttributionResult>> AttributeAsync(
         SpeakerAttributionRequest request,

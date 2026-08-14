@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 
 import { fetchJson } from './api'
 import { useAuthedOutletContext } from './authOutletContext'
@@ -87,6 +87,8 @@ function voiceLabel(voice: string, options: VoiceOption[]) {
 
 export function SeriesCastPanel() {
   const { csrfToken } = useAuthedOutletContext()
+  const [searchParams] = useSearchParams()
+  const requestedSeriesId = searchParams.get('seriesId') ?? ''
   const [series, setSeries] = useState<SeriesSummary[]>([])
   const [voiceOptions, setVoiceOptions] = useState<VoiceOption[]>([])
   const [libraryBooks, setLibraryBooks] = useState<BookSummary[]>([])
@@ -129,13 +131,16 @@ export function SeriesCastPanel() {
       setCharacterProfiles(profiles)
       setNarratorVoice((current) => current || voices[0]?.voice || '')
       setCharacterVoice((current) => current || voices[0]?.voice || '')
-      setSelectedSeriesId((current) => current || items[0]?.id || '')
+      setSelectedSeriesId((current) => current || (
+        items.some((item) => item.id === requestedSeriesId)
+          ? requestedSeriesId
+          : items[0]?.id ?? ''))
       setState('ready')
     } catch (error) {
       setState('error')
       setMessage(error instanceof Error ? error.message : '無法讀取系列配音資料。')
     }
-  }, [])
+  }, [requestedSeriesId])
 
   const loadDetails = useCallback(async (seriesId: string) => {
     if (!seriesId) {

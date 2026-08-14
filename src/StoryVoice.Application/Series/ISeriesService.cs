@@ -35,6 +35,11 @@ public interface ISeriesService
         AddSeriesCharacterAliasRequest request,
         CancellationToken cancellationToken);
 
+    Task<StorySeriesDetailsResponse?> ApplyAnalyzedCharactersAsync(
+        Guid seriesId,
+        ApplyAnalyzedSeriesCharactersRequest request,
+        CancellationToken cancellationToken);
+
     Task<StorySeriesDetailsResponse?> SetPointOfViewCharacterAsync(
         Guid seriesId,
         SetSeriesPointOfViewCharacterRequest request,

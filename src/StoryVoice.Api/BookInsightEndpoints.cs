@@ -39,25 +39,6 @@ public static class BookInsightEndpoints
                 : Results.NotFound())
         .AddEndpointFilter<AntiforgeryEndpointFilter>();
 
-        group.MapGet("/summary", async (
-            Guid bookId,
-            IBookInsightsService service,
-            CancellationToken cancellationToken) =>
-        {
-            var summary = await service.GetSummaryAsync(bookId, cancellationToken);
-            return summary is null ? Results.NotFound() : Results.Ok(summary);
-        });
-
-        group.MapPut("/summary", async (
-            Guid bookId,
-            IBookInsightsService service,
-            CancellationToken cancellationToken) =>
-        {
-            var summary = await service.GenerateSummaryAsync(bookId, cancellationToken);
-            return summary is null ? Results.NotFound() : Results.Ok(summary);
-        })
-        .AddEndpointFilter<AntiforgeryEndpointFilter>();
-
         group.MapGet("/character-analysis", async (
             Guid bookId,
             IBookInsightsService service,

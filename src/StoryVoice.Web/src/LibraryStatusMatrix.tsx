@@ -9,7 +9,6 @@ type LibraryBookStatus = {
   officialReaderAvailable: boolean
   officialTtsAvailable: boolean | null
   authorizedTextAvailable: boolean
-  extractiveSummaryAvailable: boolean
   readingNoteCount: number
   storyVoiceNarrationStatus: string | null
   storyVoiceNarrationMatchesAuthorizedText: boolean
@@ -101,7 +100,6 @@ export default function LibraryStatusMatrix({ refreshKey }: Props) {
               <span>{item.officialReaderAvailable ? '官方閱讀器：有' : '官方閱讀器：無'}</span>
               <span>{officialTtsLabel(item.officialTtsAvailable)}</span>
               <span>{item.authorizedTextAvailable ? '合法正文：已連結' : '合法正文：未提供'}</span>
-              <span>{item.extractiveSummaryAvailable ? '擷取式摘要：已建立' : '擷取式摘要：未建立'}</span>
               <span>你的筆記：{item.readingNoteCount} 則</span>
               <span>{narrationLabel(item)}</span>
             </div>

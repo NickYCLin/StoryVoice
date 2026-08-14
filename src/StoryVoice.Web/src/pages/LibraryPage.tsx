@@ -6,8 +6,6 @@ import { useAuthedOutletContext } from '../authOutletContext'
 import { BookInsightsPanel } from '../BookInsightsPanel'
 import {
   filterAndSortBooks,
-  normalizeDeviceTag,
-  type DeviceBookTags,
   type LibraryCatalogFilters,
 } from '../libraryCatalog'
 import LibraryStatusMatrix from '../LibraryStatusMatrix'
@@ -17,33 +15,12 @@ import { toBookSummary, type BookDetails, type BookSummary } from '../types'
 type LoadState = 'idle' | 'loading' | 'ready' | 'error'
 
 const companionDownloadUrl = `${import.meta.env.BASE_URL}storyvoice-books-companion.zip`
-const deviceTagsStorageKey = 'storyvoice:device-book-tags:v1'
 const defaultCatalogFilters: LibraryCatalogFilters = {
   query: '',
   source: 'all',
   layout: 'all',
   tts: 'all',
-  tag: 'all',
   sort: 'created-desc',
-}
-
-function readDeviceBookTags(): DeviceBookTags {
-  try {
-    const stored = JSON.parse(localStorage.getItem(deviceTagsStorageKey) ?? '{}') as unknown
-    if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return {}
-
-    return Object.fromEntries(Object.entries(stored).flatMap(([bookId, values]) => {
-      if (!Array.isArray(values)) return []
-      const tags = values
-        .filter((value): value is string => typeof value === 'string')
-        .map(normalizeDeviceTag)
-        .filter((value): value is string => value !== null)
-        .slice(0, 8)
-      return tags.length > 0 ? [[bookId, tags]] : []
-    }))
-  } catch {
-    return {}
-  }
 }
 
 export function LibraryPage() {
@@ -61,23 +38,15 @@ export function LibraryPage() {
   const [uploadState, setUploadState] = useState<LoadState>('idle')
   const [uploadMessage, setUploadMessage] = useState('')
   const [catalogFilters, setCatalogFilters] = useState<LibraryCatalogFilters>(defaultCatalogFilters)
-  const [deviceBookTags, setDeviceBookTags] = useState<DeviceBookTags>(readDeviceBookTags)
-  const [deviceTagDraft, setDeviceTagDraft] = useState('')
 
   const visibleBooks = useMemo(
-    () => filterAndSortBooks(books, catalogFilters, deviceBookTags),
-    [books, catalogFilters, deviceBookTags],
-  )
-  const availableDeviceTags = useMemo(
-    () => [...new Set(books.flatMap((book) => deviceBookTags[book.id] ?? []))]
-      .sort((left, right) => left.localeCompare(right, 'zh-TW')),
-    [books, deviceBookTags],
+    () => filterAndSortBooks(books, catalogFilters),
+    [books, catalogFilters],
   )
   const hasCatalogFilters = catalogFilters.query !== ''
     || catalogFilters.source !== 'all'
     || catalogFilters.layout !== 'all'
     || catalogFilters.tts !== 'all'
-    || catalogFilters.tag !== 'all'
     || catalogFilters.sort !== 'created-desc'
 
   const handleBookUpdated = useCallback((updated: BookDetails) => {
@@ -116,13 +85,6 @@ export function LibraryPage() {
   }, [books.length, libraryState, navigate, routeBookId, visibleBooks])
 
   useEffect(() => {
-    if (catalogFilters.tag !== 'all' && !availableDeviceTags.includes(catalogFilters.tag)) {
-      setCatalogFilters((current) => ({ ...current, tag: 'all' }))
-    }
-  }, [availableDeviceTags, catalogFilters.tag])
-
-  useEffect(() => {
-    setDeviceTagDraft('')
     if (!routeBookId) {
       setSelectedBook(null)
       setDetailState('idle')
@@ -150,42 +112,6 @@ export function LibraryPage() {
 
     return () => controller.abort()
   }, [routeBookId])
-
-  function saveDeviceBookTags(update: (current: DeviceBookTags) => DeviceBookTags) {
-    setDeviceBookTags((current) => {
-      const next = update(current)
-      try {
-        localStorage.setItem(deviceTagsStorageKey, JSON.stringify(next))
-      } catch {
-        // The organizer remains usable for this page even if private browsing blocks storage.
-      }
-      return next
-    })
-  }
-
-  function handleAddDeviceTag(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (!routeBookId) return
-    const tag = normalizeDeviceTag(deviceTagDraft)
-    if (!tag) return
-
-    saveDeviceBookTags((current) => {
-      const existing = current[routeBookId] ?? []
-      if (existing.length >= 8 || existing.some((value) => value.localeCompare(tag, 'zh-TW', { sensitivity: 'base' }) === 0)) return current
-      return { ...current, [routeBookId]: [...existing, tag] }
-    })
-    setDeviceTagDraft('')
-  }
-
-  function removeDeviceTag(bookId: string, tag: string) {
-    saveDeviceBookTags((current) => {
-      const remaining = (current[bookId] ?? []).filter((value) => value !== tag)
-      const next = { ...current }
-      if (remaining.length > 0) next[bookId] = remaining
-      else delete next[bookId]
-      return next
-    })
-  }
 
   async function handleUpload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -298,7 +224,7 @@ export function LibraryPage() {
         <div>
           <p className="eyebrow">Your library</p>
           <h1 className="mt-3 font-serif text-4xl tracking-tight sm:text-5xl">整理你的故事書庫。</h1>
-          <p className="mt-4 max-w-2xl text-sm leading-7 text-stone-600">搜尋、篩選、排序並加上此裝置標籤；有合法正文的 EPUB／TXT 仍可直接匯入章節。</p>
+          <p className="mt-4 max-w-2xl text-sm leading-7 text-stone-600">搜尋、篩選與排序書庫；更自由的分類請使用書冊，有合法正文的 EPUB／TXT 可直接匯入章節。</p>
         </div>
         <span className="rounded-full border border-stone-200 px-3 py-1 text-xs text-stone-500">書庫已有 {books.length} 本</span>
       </div>
@@ -392,7 +318,7 @@ export function LibraryPage() {
         <section aria-label="書庫整理工具" className="mb-6 rounded-3xl border border-stone-200 bg-white p-5 sm:p-6">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <label className="text-xs text-stone-500 sm:col-span-2 lg:col-span-1">
-              搜尋書名、作者、書籍 ID 或標籤
+              搜尋書名、作者或書籍 ID
               <input
                 className="auth-input mt-2"
                 onChange={(event) => setCatalogFilters((current) => ({ ...current, query: event.target.value }))}
@@ -425,13 +351,6 @@ export function LibraryPage() {
                 <option value="true">可用</option>
                 <option value="false">未開放</option>
                 <option value="unknown">未標示／非博客來</option>
-              </select>
-            </label>
-            <label className="text-xs text-stone-500">
-              此裝置標籤
-              <select className="auth-input mt-2" disabled={availableDeviceTags.length === 0} onChange={(event) => setCatalogFilters((current) => ({ ...current, tag: event.target.value }))} value={catalogFilters.tag}>
-                <option value="all">全部標籤</option>
-                {availableDeviceTags.map((tag) => <option key={tag} value={tag}>{tag}</option>)}
               </select>
             </label>
             <label className="text-xs text-stone-500">
@@ -499,13 +418,6 @@ export function LibraryPage() {
                     <span>{book.chapterCount} 章</span><span>·</span><span>{book.sourceProvider === 'books-com-tw' ? '博客來' : book.fileType.toUpperCase()}</span><span>·</span><span>{book.status === 'Linked' ? '已連結' : book.status}</span>
                     {book.nativeTtsAvailable === true && <><span>·</span><span className="text-emerald-600">官方 TTS</span></>}
                   </div>
-                  {(deviceBookTags[book.id]?.length ?? 0) > 0 && (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {deviceBookTags[book.id].slice(0, 3).map((tag) => (
-                        <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-1 text-[10px] text-sky-700" key={tag}>{tag}</span>
-                      ))}
-                    </div>
-                  )}
                 </div>
               </button>
             ))}
@@ -533,35 +445,6 @@ export function LibraryPage() {
                     )}
                   </div>
                   <span className="shrink-0 rounded-full border border-stone-200 px-3 py-1 text-xs text-stone-500">{selectedBook.chapters.length} 章</span>
-                </div>
-                <div className="mt-5 rounded-2xl border border-sky-100 bg-sky-50/70 p-4">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <strong className="mr-1 text-xs text-stone-700">此裝置標籤</strong>
-                    {(deviceBookTags[selectedBook.id] ?? []).map((tag) => (
-                      <button
-                        aria-label={`移除標籤 ${tag}`}
-                        className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-xs text-sky-700 transition hover:border-rose-300 hover:text-rose-700"
-                        key={tag}
-                        onClick={() => removeDeviceTag(selectedBook.id, tag)}
-                        type="button"
-                      >
-                        {tag} ×
-                      </button>
-                    ))}
-                    {(deviceBookTags[selectedBook.id]?.length ?? 0) === 0 && <span className="text-xs text-stone-400">尚未加標籤</span>}
-                  </div>
-                  <form className="mt-3 flex flex-col gap-2 sm:flex-row" onSubmit={handleAddDeviceTag}>
-                    <input
-                      aria-label="新增此裝置標籤"
-                      className="auth-input min-w-0 flex-1"
-                      maxLength={24}
-                      onChange={(event) => setDeviceTagDraft(event.target.value)}
-                      placeholder="例如：待讀、小說、工作"
-                      value={deviceTagDraft}
-                    />
-                    <button className="secondary-button shrink-0" disabled={!normalizeDeviceTag(deviceTagDraft) || (deviceBookTags[selectedBook.id]?.length ?? 0) >= 8} type="submit">加入標籤</button>
-                  </form>
-                  <p className="mt-2 text-[10px] leading-5 text-stone-400">最多 8 個，只保存在目前瀏覽器；不會傳到博客來。</p>
                 </div>
                 <BookInsightsPanel
                   book={selectedBook}

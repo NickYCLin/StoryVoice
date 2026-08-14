@@ -15,21 +15,24 @@ Phase 1 Foundation 已建立：
 - Book / Chapter domain model and REST API
 - EPUB / TXT multipart upload、metadata、TOC 與章節解析
 - 博客來電子書櫃 Companion：同步可見 metadata 與官方閱讀連結
-- 使用者明確連結合法 EPUB／TXT 正文、擷取式摘要與手動閱讀筆記
+- 使用者明確連結合法 EPUB／TXT 正文與手動閱讀筆記（擷取式摘要入口已退場，既有資料暫留供回復）
 - 單一神經語音 MVP：持久化工作、租約與重試、取消、私有 MP3 與 owner-scoped Range 串流
-- 全書庫處理狀態矩陣：分開標示官方 TTS、合法正文、摘要、筆記與 StoryVoice 音訊
+- 全書庫處理狀態矩陣：分開標示官方 TTS、合法正文、筆記與 StoryVoice 音訊
 - 跨冊系列／固定角色／alias、不可變 cast revision 與整批原子啟用資料邊界
 - 章名、旁白與引號對話的 deterministic offset segmentation
 - owner-scoped 系列配音管理 API 與伺服器 voice allowlist
+- 本機 LLM 角色與 alias 分析、候選勾選／合併、原子套用系列角色表
+- 規則優先、本機 LLM 補判的逐句說話者草稿；只有高信心自動確認，其餘進人工審核
 - 書冊（獨立於角色配音系列之外的單純書本分類收藏）與冊次排序
+- 書庫分類統一使用書冊；舊的瀏覽器「此裝置標籤」已移除
 - 書冊唯讀分享：依 email 分享給其他已註冊使用者，可隨時撤銷
 - React Router 多頁面前端（書庫／書冊／分享給我的），取代原本的單頁式版面
 - Serilog, OpenAPI, liveness/readiness health checks
 - Docker Compose development stack
 - Unit and integration tests + GitHub Actions CI
 
-AI 與多角色 TTS 尚未假裝完成；它們會依 [`DEVELOPMENT_PLAN.md`](DEVELOPMENT_PLAN.md)
-分階段落地。EPUB / TXT 匯入與單聲線朗讀已可使用；逐項完成度與下一個實作入口見
+AI 與多角色 TTS 仍按 [`DEVELOPMENT_PLAN.md`](DEVELOPMENT_PLAN.md) 分階段落地；
+目前已具備角色候選審核、說話者草稿、逐章確認與 staged 多角色產製。逐項完成度與下一個實作入口見
 [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md)。
 
 ## Quick start

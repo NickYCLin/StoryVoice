@@ -40,6 +40,21 @@ public sealed record UpdateSeriesCharacterRequest(
 
 public sealed record AddSeriesCharacterAliasRequest(string Alias);
 
+public sealed record ApplyAnalyzedSeriesCharacterRequest(
+    string SourceName,
+    string CanonicalName,
+    IReadOnlyList<string> Aliases,
+    SeriesCharacterRole Role,
+    string VoiceProvider,
+    string Voice,
+    string Rate,
+    string Pitch,
+    string Volume);
+
+public sealed record ApplyAnalyzedSeriesCharactersRequest(
+    Guid BookId,
+    IReadOnlyList<ApplyAnalyzedSeriesCharacterRequest> Characters);
+
 public sealed record SetSeriesPointOfViewCharacterRequest(Guid? CharacterId);
 
 public sealed record SeriesVoiceOptionResponse(

@@ -31,12 +31,6 @@ public sealed class LibraryStatusService(
             .Select(book => book.Id)
             .ToListAsync(cancellationToken))
             .ToHashSet();
-        var summaryIds = (await dbContext.BookExtractiveSummaries
-            .AsNoTracking()
-            .Where(summary => summary.OwnerId == currentUser.UserId && bookIds.Contains(summary.BookId))
-            .Select(summary => summary.BookId)
-            .ToListAsync(cancellationToken))
-            .ToHashSet();
         var noteBookIds = await dbContext.ReadingNotes
             .AsNoTracking()
             .Where(note => note.OwnerId == currentUser.UserId && bookIds.Contains(note.BookId))
@@ -108,7 +102,6 @@ public sealed class LibraryStatusService(
                     !string.IsNullOrWhiteSpace(book.SourceUrl),
                     book.NativeTtsAvailable,
                     authorizedText,
-                    summaryIds.Contains(book.Id),
                     noteCounts.GetValueOrDefault(book.Id),
                     narrationStatus?.ToString(),
                     narrationMatchesAuthorizedText,

@@ -13,7 +13,7 @@ test('library status matrix separates source capabilities from StoryVoice proces
   assert.match(matrix, /既有 StoryVoice 音訊（非目前合法正文）/)
   assert.doesNotMatch(matrix, /if \(!status\.authorizedTextAvailable\) return/)
   assert.match(matrix, /合法正文：未提供/)
-  assert.match(matrix, /擷取式摘要：未建立/)
+  assert.doesNotMatch(matrix, /擷取式摘要/)
   assert.match(matrix, /你的筆記/)
   assert.match(matrix, /authorized_text_required/)
   assert.match(matrix, /Blocked：需由你明確上傳並連結合法、無 DRM 的 EPUB／TXT 正文/)

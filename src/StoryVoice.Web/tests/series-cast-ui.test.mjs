@@ -35,6 +35,12 @@ test('App 可開啟系列配音控制台', () => {
   assert.match(app, /SeriesCastPanel/)
 })
 
+test('角色分析套用後可由 query string 直接開啟指定系列', () => {
+  assert.match(panel, /useSearchParams/)
+  assert.match(panel, /searchParams\.get\('seriesId'\)/)
+  assert.match(panel, /item\.id === requestedSeriesId/)
+})
+
 test('系列配音控制台每個角色都可以展開自訂聲線工作室', () => {
   assert.match(panel, /import { CharacterVoiceProfilesPanel } from '\.\/CharacterVoiceProfilesPanel'/)
   assert.match(panel, /<CharacterVoiceProfilesPanel/)

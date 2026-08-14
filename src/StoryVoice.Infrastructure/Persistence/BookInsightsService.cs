@@ -53,7 +53,6 @@ internal sealed class BookInsightsService(
         if (target.ContentBookId != contentBookId)
         {
             target.LinkAuthorizedContent(contentBookId);
-            await RemoveExistingSummaryAsync(bookId, cancellationToken);
             await RemoveExistingCharacterAnalysisAsync(bookId, cancellationToken);
             await DetachChapterNotesAsync(bookId, cancellationToken);
         }
@@ -76,7 +75,6 @@ internal sealed class BookInsightsService(
         }
 
         target.UnlinkAuthorizedContent();
-        await RemoveExistingSummaryAsync(bookId, cancellationToken);
         await RemoveExistingCharacterAnalysisAsync(bookId, cancellationToken);
         await DetachChapterNotesAsync(bookId, cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -415,16 +413,6 @@ internal sealed class BookInsightsService(
         if (!belongsToAuthorizedContent)
         {
             throw new ArgumentException("章節不屬於這本書已連結的合法正文。", nameof(chapterId));
-        }
-    }
-
-    private async Task RemoveExistingSummaryAsync(Guid bookId, CancellationToken cancellationToken)
-    {
-        var summary = await dbContext.BookExtractiveSummaries
-            .SingleOrDefaultAsync(item => item.BookId == bookId, cancellationToken);
-        if (summary is not null)
-        {
-            dbContext.BookExtractiveSummaries.Remove(summary);
         }
     }
 

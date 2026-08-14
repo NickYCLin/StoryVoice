@@ -8,7 +8,6 @@ export type LibraryCatalogFilters = {
   source: LibrarySourceFilter
   layout: LibraryLayoutFilter
   tts: LibraryTtsFilter
-  tag: string | 'all'
   sort: LibrarySort
 }
 
@@ -23,8 +22,6 @@ export type LibraryCatalogBook = {
   ebookLayout: 'Reflowable' | 'Fixed' | null
   sourceSyncedAt: string | null
 }
-
-export type DeviceBookTags = Record<string, string[]>
 
 const collator = new Intl.Collator('zh-Hant', { numeric: true, sensitivity: 'base' })
 
@@ -74,19 +71,12 @@ function timestamp(value: string | null) {
   return Number.isNaN(parsed) ? Number.NEGATIVE_INFINITY : parsed
 }
 
-export function normalizeDeviceTag(value: string) {
-  const tag = value.normalize('NFKC').replace(/\s+/g, ' ').trim()
-  return tag.length > 0 && tag.length <= 24 ? tag : null
-}
-
 export function filterAndSortBooks<T extends LibraryCatalogBook>(
   books: readonly T[],
   filters: LibraryCatalogFilters,
-  tagsByBook: DeviceBookTags = {},
 ) {
   const query = normalized(filters.query)
   const visible = books.filter((book) => {
-    const tags = tagsByBook[book.id] ?? []
     if (filters.source === 'books-com-tw' && book.sourceProvider !== 'books-com-tw') return false
     if (filters.source === 'uploaded' && book.sourceProvider !== null) return false
     if (filters.layout === 'unknown' && book.ebookLayout !== null) return false
@@ -94,10 +84,9 @@ export function filterAndSortBooks<T extends LibraryCatalogBook>(
     if (filters.tts === 'true' && book.nativeTtsAvailable !== true) return false
     if (filters.tts === 'false' && book.nativeTtsAvailable !== false) return false
     if (filters.tts === 'unknown' && book.nativeTtsAvailable !== null) return false
-    if (filters.tag !== 'all' && !tags.some((tag) => normalized(tag) === normalized(filters.tag))) return false
     if (!query) return true
 
-    return [book.title, book.author, book.externalSourceId, ...tags]
+    return [book.title, book.author, book.externalSourceId]
       .some((value) => normalized(value).includes(query))
   })
 

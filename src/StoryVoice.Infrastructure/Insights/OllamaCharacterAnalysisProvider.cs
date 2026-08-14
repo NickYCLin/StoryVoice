@@ -16,7 +16,6 @@ public sealed class OllamaCharacterAnalysisProvider(
     HttpClient httpClient,
     IOptions<LocalLlmCharacterAnalysisOptions> options) : ILocalLlmCharacterAnalysisProvider
 {
-    private static readonly SemaphoreSlim AnalysisGate = new(1, 1);
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
     private static readonly JsonDocumentOptions StrictJsonOptions = new()
     {
@@ -41,9 +40,14 @@ public sealed class OllamaCharacterAnalysisProvider(
                 "properties": {
                   "name": { "type": "string", "minLength": 1, "maxLength": 80 },
                   "confidence": { "type": "string", "enum": ["high", "medium"] },
-                  "dialogueEvidenceCount": { "type": "integer", "minimum": 1, "maximum": 1000 }
+                  "dialogueEvidenceCount": { "type": "integer", "minimum": 1, "maximum": 1000 },
+                  "aliases": {
+                    "type": "array",
+                    "maxItems": 12,
+                    "items": { "type": "string", "minLength": 1, "maxLength": 80 }
+                  }
                 },
-                "required": ["name", "confidence", "dialogueEvidenceCount"],
+                "required": ["name", "confidence", "dialogueEvidenceCount", "aliases"],
                 "additionalProperties": false
               }
             }
@@ -59,7 +63,7 @@ public sealed class OllamaCharacterAnalysisProvider(
         LocalLlmCharacterAnalysisRequest request,
         CancellationToken cancellationToken)
     {
-        await AnalysisGate.WaitAsync(cancellationToken);
+        await LocalOllamaExecutionGate.Gate.WaitAsync(cancellationToken);
         try
         {
             var results = new List<LocalLlmChapterCharacterAnalysis>(request.Chapters.Count);
@@ -79,7 +83,7 @@ public sealed class OllamaCharacterAnalysisProvider(
             }
             finally
             {
-                AnalysisGate.Release();
+                LocalOllamaExecutionGate.Gate.Release();
             }
         }
     }
@@ -126,6 +130,14 @@ public sealed class OllamaCharacterAnalysisProvider(
 
             return ParseCandidates(content)
                 .Where(candidate => chapter.Text.Contains(candidate.Name, StringComparison.Ordinal))
+                .Select(candidate => candidate with
+                {
+                    Aliases = (candidate.Aliases ?? [])
+                        .Where(alias => chapter.Text.Contains(alias, StringComparison.Ordinal))
+                        .Where(alias => !string.Equals(alias, candidate.Name, StringComparison.Ordinal))
+                        .Distinct(StringComparer.Ordinal)
+                        .ToArray(),
+                })
                 .ToArray();
         }
         catch (LocalLlmCharacterAnalysisUnavailableException)
@@ -271,13 +283,16 @@ public sealed class OllamaCharacterAnalysisProvider(
             foreach (var candidate in candidates.EnumerateArray())
             {
                 var candidateObject = RequireObject(candidate);
-                RequireExactProperties(candidateObject, ["name", "confidence", "dialogueEvidenceCount"]);
+                RequireExactProperties(candidateObject, ["name", "confidence", "dialogueEvidenceCount", "aliases"]);
                 var name = RequireSingleProperty(candidateObject, "name");
                 var confidence = RequireSingleProperty(candidateObject, "confidence");
                 var evidenceCount = RequireSingleProperty(candidateObject, "dialogueEvidenceCount");
+                var aliases = RequireSingleProperty(candidateObject, "aliases");
                 if (name.ValueKind != JsonValueKind.String
                     || confidence.ValueKind != JsonValueKind.String
                     || evidenceCount.ValueKind != JsonValueKind.Number
+                    || aliases.ValueKind != JsonValueKind.Array
+                    || aliases.GetArrayLength() > 12
                     || !evidenceCount.TryGetInt32(out var count))
                 {
                     throw new LocalLlmCharacterAnalysisUnavailableException();
@@ -292,7 +307,23 @@ public sealed class OllamaCharacterAnalysisProvider(
                     throw new LocalLlmCharacterAnalysisUnavailableException();
                 }
 
-                result.Add(new LocalLlmCharacterCandidate(normalizedName, normalizedConfidence, count));
+                var normalizedAliases = aliases.EnumerateArray()
+                    .Select(alias => alias.ValueKind == JsonValueKind.String
+                        ? LocalLlmCharacterAnalysisSource.NormalizeName(alias.GetString())
+                        : throw new LocalLlmCharacterAnalysisUnavailableException())
+                    .Where(alias => alias.Length is >= 1 and <= MaximumNameLength)
+                    .Distinct(StringComparer.Ordinal)
+                    .ToArray();
+                if (normalizedAliases.Length != aliases.GetArrayLength())
+                {
+                    throw new LocalLlmCharacterAnalysisUnavailableException();
+                }
+
+                result.Add(new LocalLlmCharacterCandidate(
+                    normalizedName,
+                    normalizedConfidence,
+                    count,
+                    normalizedAliases));
             }
 
             return result;
@@ -367,7 +398,8 @@ public sealed class OllamaCharacterAnalysisProvider(
     private static string BuildChapterPrompt(LocalLlmCharacterAnalysisChapter chapter) => $$"""
         請分析下列中文小說的完整單一章節。列出「正文中實際出現名稱」且有明確對白歸屬證據的角色候選。
         你必須讀取完整章節，並運用相鄰對話輪替、敘事觀點、指代、明確發話動詞與上下文判斷。
-        名稱必須逐字出現在正文；只有高或中信心才可輸出。不確定、只有代名詞、僅泛稱、或無法可靠歸屬者一律省略。
+        name 是角色最適合放進系列角色表的 canonical 名稱；aliases 是正文中逐字出現、確定指向同一角色的稱呼（暱稱、稱號或譯名），沒有就輸出空陣列。
+        name 與每個 alias 都必須逐字出現在正文；只有高或中信心才可輸出。不確定、只有代名詞、僅泛稱、或無法可靠歸屬者一律省略。
         dialogueEvidenceCount 是此章內你能支持的對白次數，至少 1。不得建立角色、不得猜測真名、不得輸出推理、引句、摘要或 markdown。
 
         章節標題：{{chapter.ChapterTitle}}
@@ -376,7 +408,7 @@ public sealed class OllamaCharacterAnalysisProvider(
         正文結束
         """;
 
-    private const string SystemPrompt = "你是只在本機執行的中文小說角色分析器。輸出必須符合 JSON schema，沒有足夠證據就輸出空 candidates。";
+    private const string SystemPrompt = "你是只在本機執行的中文小說角色與別名分析器。輸出必須符合 JSON schema，沒有足夠證據就輸出空 candidates。";
 
     private sealed record OllamaChatRequest(
         string Model,

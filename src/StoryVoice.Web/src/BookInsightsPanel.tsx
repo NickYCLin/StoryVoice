@@ -1,34 +1,17 @@
 import { useEffect, useState, type FormEvent } from 'react'
+import { Link } from 'react-router-dom'
 
 import { apiUrl, responseProblem } from './api'
 import type { BookDetails, BookSummary } from './types'
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error'
 
-type SummaryExcerpt = {
-  chapterId: string
-  chapterTitle: string
-  startOffset: number
-  length: number
-  text: string
-}
-
-type ExtractiveBookSummary = {
-  bookId: string
-  contentBookId: string
-  kind: 'Extractive'
-  generator: string
-  version: string
-  sourceHash: string
-  generatedAt: string
-  excerpts: SummaryExcerpt[]
-}
-
 type LocalLlmCharacterCandidate = {
   name: string
   confidence: 'high' | 'medium'
   dialogueEvidenceCount: number
   evidenceChapterNumbers: number[]
+  aliases?: string[]
 }
 
 type LocalLlmCharacterAnalysis = {
@@ -51,6 +34,34 @@ type ReadingNote = {
   updatedAt: string
 }
 
+type StorySeriesSummary = {
+  id: string
+  name: string
+  bookCount: number
+  characterCount: number
+}
+
+type SeriesVoiceOption = {
+  provider: string
+  voice: string
+  displayName: string
+  locale: string
+}
+
+type CandidateDraft = {
+  selected: boolean
+  canonicalName: string
+  aliases: string
+  role: 'Main' | 'Supporting' | 'Minor'
+  voiceKey: string
+}
+
+const voiceKey = (voice: SeriesVoiceOption) => `${voice.provider}\n${voice.voice}`
+const splitAliases = (value: string) => value
+  .split(/[、,，\n]/)
+  .map((alias) => alias.normalize('NFKC').trim())
+  .filter((alias, index, aliases) => alias !== '' && aliases.indexOf(alias) === index)
+
 type BookInsightsPanelProps = {
   book: BookDetails
   books: BookSummary[]
@@ -68,9 +79,6 @@ export function BookInsightsPanel({ book, books, csrfToken, onBookUpdated }: Boo
   const [contentSelection, setContentSelection] = useState(book.contentBookId ?? '')
   const [linkState, setLinkState] = useState<LoadState>('idle')
   const [linkMessage, setLinkMessage] = useState('')
-  const [summary, setSummary] = useState<ExtractiveBookSummary | null>(null)
-  const [summaryState, setSummaryState] = useState<LoadState>('loading')
-  const [summaryMessage, setSummaryMessage] = useState('')
   const [notes, setNotes] = useState<ReadingNote[]>([])
   const [notesState, setNotesState] = useState<LoadState>('loading')
   const [noteDraft, setNoteDraft] = useState('')
@@ -78,18 +86,21 @@ export function BookInsightsPanel({ book, books, csrfToken, onBookUpdated }: Boo
   const [characterAnalysis, setCharacterAnalysis] = useState<LocalLlmCharacterAnalysis | null>(null)
   const [characterAnalysisState, setCharacterAnalysisState] = useState<LoadState>('loading')
   const [characterAnalysisMessage, setCharacterAnalysisMessage] = useState('')
+  const [seriesOptions, setSeriesOptions] = useState<StorySeriesSummary[]>([])
+  const [voiceOptions, setVoiceOptions] = useState<SeriesVoiceOption[]>([])
+  const [selectedSeriesId, setSelectedSeriesId] = useState('')
+  const [candidateDrafts, setCandidateDrafts] = useState<Record<string, CandidateDraft>>({})
+  const [applyState, setApplyState] = useState<LoadState>('idle')
+  const [applyMessage, setApplyMessage] = useState('')
 
   const eligibleContentBooks = books.filter((candidate) => candidate.id !== book.id
     && candidate.authorizedTextAvailable)
-  const canGenerateSummary = book.authorizedTextAvailable || linkedContentId !== ''
+  const canAnalyzeText = book.authorizedTextAvailable || linkedContentId !== ''
 
   useEffect(() => {
     const controller = new AbortController()
     setLinkedContentId(book.contentBookId ?? '')
     setContentSelection(book.contentBookId ?? '')
-    setSummary(null)
-    setSummaryState('loading')
-    setSummaryMessage('')
     setNotes([])
     setNotesState('loading')
     setNoteDraft('')
@@ -97,6 +108,9 @@ export function BookInsightsPanel({ book, books, csrfToken, onBookUpdated }: Boo
     setCharacterAnalysis(null)
     setCharacterAnalysisState('loading')
     setCharacterAnalysisMessage('')
+    setCandidateDrafts({})
+    setApplyState('idle')
+    setApplyMessage('')
 
     fetch(apiUrl(`/api/books/${book.id}/character-analysis`), {
       credentials: 'same-origin',
@@ -112,22 +126,6 @@ export function BookInsightsPanel({ book, books, csrfToken, onBookUpdated }: Boo
       if (error instanceof DOMException && error.name === 'AbortError') return
       setCharacterAnalysisState('error')
       setCharacterAnalysisMessage(error instanceof Error ? error.message : '本機 LLM 角色分析讀取失敗。')
-    })
-
-    fetch(apiUrl(`/api/books/${book.id}/summary`), {
-      credentials: 'same-origin',
-      signal: controller.signal,
-    }).then(async (response) => {
-      if (response.status === 404) return null
-      if (!response.ok) throw new Error(await responseProblem(response, '摘要讀取失敗。'))
-      return response.json() as Promise<ExtractiveBookSummary>
-    }).then((value) => {
-      setSummary(value)
-      setSummaryState('ready')
-    }).catch((error) => {
-      if (error instanceof DOMException && error.name === 'AbortError') return
-      setSummaryState('error')
-      setSummaryMessage(error instanceof Error ? error.message : '摘要讀取失敗。')
     })
 
     fetch(apiUrl(`/api/books/${book.id}/notes`), {
@@ -147,6 +145,40 @@ export function BookInsightsPanel({ book, books, csrfToken, onBookUpdated }: Boo
 
     return () => controller.abort()
   }, [book.id, book.contentBookId])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    Promise.all([
+      fetch(apiUrl('/api/series/'), { credentials: 'same-origin', signal: controller.signal }),
+      fetch(apiUrl('/api/series/voice-options'), { credentials: 'same-origin', signal: controller.signal }),
+    ]).then(async ([seriesResponse, voicesResponse]) => {
+      if (!seriesResponse.ok || !voicesResponse.ok) throw new Error('series_setup_failed')
+      const series = await seriesResponse.json() as StorySeriesSummary[]
+      const voices = await voicesResponse.json() as SeriesVoiceOption[]
+      setSeriesOptions(series)
+      setVoiceOptions(voices)
+      setSelectedSeriesId((current) => current || series[0]?.id || '')
+    }).catch((error) => {
+      if (error instanceof DOMException && error.name === 'AbortError') return
+      setApplyState('error')
+      setApplyMessage('系列與聲線清單讀取失敗，請重新整理。')
+    })
+    return () => controller.abort()
+  }, [])
+
+  useEffect(() => {
+    if (!characterAnalysis) return
+    setCandidateDrafts((current) => Object.fromEntries(characterAnalysis.candidates.map((candidate, index) => {
+      const fallbackVoice = voiceOptions[index % Math.max(voiceOptions.length, 1)]
+      return [candidate.name, current[candidate.name] ?? {
+        selected: candidate.confidence === 'high',
+        canonicalName: candidate.name,
+        aliases: (candidate.aliases ?? []).join('、'),
+        role: candidate.confidence === 'high' ? 'Supporting' : 'Minor',
+        voiceKey: fallbackVoice ? voiceKey(fallbackVoice) : '',
+      }]
+    })))
+  }, [characterAnalysis, voiceOptions])
 
   async function handleMetadataCorrection(clear = false) {
     setMetadataState('loading')
@@ -188,8 +220,6 @@ export function BookInsightsPanel({ book, books, csrfToken, onBookUpdated }: Boo
       })
       if (!response.ok) throw new Error(await responseProblem(response, '正文連結失敗。'))
       setLinkedContentId(contentSelection)
-      setSummary(null)
-      setSummaryState('ready')
       setCharacterAnalysis(null)
       setCharacterAnalysisState('ready')
       setCharacterAnalysisMessage(contentSelection ? '正文已變更，舊的本機 LLM 分析已清除。' : '已解除正文連結，舊的本機 LLM 分析已清除。')
@@ -199,34 +229,6 @@ export function BookInsightsPanel({ book, books, csrfToken, onBookUpdated }: Boo
     } catch (error) {
       setLinkState('error')
       setLinkMessage(error instanceof Error ? error.message : '正文連結失敗。')
-    }
-  }
-
-  async function handleGenerateSummary() {
-    setSummaryState('loading')
-    setSummaryMessage('正在從已保存的合法正文挑選原文句子…')
-    try {
-      const response = await fetch(apiUrl(`/api/books/${book.id}/summary`), {
-        method: 'PUT',
-        credentials: 'same-origin',
-        headers: { 'X-CSRF-TOKEN': csrfToken },
-      })
-      if (!response.ok) throw new Error(await responseProblem(response, '摘要建立失敗。'))
-      setSummary(await response.json() as ExtractiveBookSummary)
-      setSummaryState('ready')
-      setSummaryMessage('擷取式摘要已建立；每段都保留原章節與文字位置。')
-    } catch (error) {
-      setSummaryState('error')
-      setSummaryMessage(error instanceof Error ? error.message : '摘要建立失敗。')
-    }
-  }
-
-  async function handleCopyCharacterCandidateName(candidate: LocalLlmCharacterCandidate) {
-    try {
-      await navigator.clipboard.writeText(candidate.name)
-      setCharacterAnalysisMessage(`已複製「${candidate.name}」。這只是本機 LLM 待確認候選，尚未建立角色或指派聲線。`)
-    } catch {
-      setCharacterAnalysisMessage(`「${candidate.name}」：這個瀏覽器不支援自動複製，請手動選取文字。`)
     }
   }
 
@@ -242,11 +244,63 @@ export function BookInsightsPanel({ book, books, csrfToken, onBookUpdated }: Boo
       if (!response.ok) throw new Error(await responseProblem(response, '本機 LLM 角色分析失敗。'))
       const analysis = await response.json() as LocalLlmCharacterAnalysis
       setCharacterAnalysis(analysis)
+      setCandidateDrafts({})
       setCharacterAnalysisState('ready')
-      setCharacterAnalysisMessage('本機 LLM 分析完成；所有候選仍待人工確認，沒有建立角色、指派聲線或產生音檔。')
+      setCharacterAnalysisMessage('本機 LLM 分析完成；請勾選、校正 canonical 名稱並合併 alias，再套用到系列。')
     } catch (error) {
       setCharacterAnalysisState('error')
       setCharacterAnalysisMessage(error instanceof Error ? error.message : '本機 LLM 角色分析失敗。')
+    }
+  }
+
+  function updateCandidate(name: string, patch: Partial<CandidateDraft>) {
+    setCandidateDrafts((current) => ({
+      ...current,
+      [name]: { ...current[name], ...patch },
+    }))
+  }
+
+  async function handleApplyAnalyzedCharacters() {
+    if (!characterAnalysis || !selectedSeriesId) return
+    const selections = characterAnalysis.candidates
+      .filter((candidate) => candidateDrafts[candidate.name]?.selected)
+      .map((candidate) => {
+        const draft = candidateDrafts[candidate.name]
+        const voice = voiceOptions.find((option) => voiceKey(option) === draft.voiceKey)
+        if (!draft.canonicalName.trim() || !voice) throw new Error(`請補齊「${candidate.name}」的 canonical 名稱與聲線。`)
+        return {
+          sourceName: candidate.name,
+          canonicalName: draft.canonicalName.trim(),
+          aliases: splitAliases(draft.aliases),
+          role: draft.role,
+          voiceProvider: voice.provider,
+          voice: voice.voice,
+          rate: '+0%',
+          pitch: '+0Hz',
+          volume: '+0%',
+        }
+      })
+    if (selections.length === 0) {
+      setApplyState('error')
+      setApplyMessage('請至少勾選一位角色候選。')
+      return
+    }
+
+    setApplyState('loading')
+    setApplyMessage('正在合併 alias、建立系列角色表並加入這本書…')
+    try {
+      const response = await fetch(apiUrl(`/api/series/${selectedSeriesId}/analyzed-characters`), {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken },
+        body: JSON.stringify({ bookId: book.id, characters: selections }),
+      })
+      if (!response.ok) throw new Error(await responseProblem(response, '角色候選套用失敗。'))
+      setApplyState('ready')
+      setApplyMessage(`已套用 ${selections.length} 筆候選；下一步到系列頁設定視角角色並產生逐章說話者草稿。`)
+    } catch (error) {
+      setApplyState('error')
+      setApplyMessage(error instanceof Error ? error.message : '角色候選套用失敗。')
     }
   }
 
@@ -328,62 +382,53 @@ export function BookInsightsPanel({ book, books, csrfToken, onBookUpdated }: Boo
         </section>
       )}
 
-      <section className="rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4" aria-label="擷取式摘要">
-        <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
-          <div>
-            <h4 className="font-serif text-lg text-stone-800">擷取式摘要 <span className="text-xs font-sans text-emerald-700">原文選句，非 AI 改寫</span></h4>
-            <p className="mt-2 text-xs leading-6 text-stone-500">依章節順序挑選原文句子，保留可驗證的章節與文字位置。</p>
-          </div>
-          <button className="secondary-button shrink-0 disabled:cursor-not-allowed disabled:opacity-40" disabled={!canGenerateSummary || summaryState === 'loading'} onClick={handleGenerateSummary} type="button">{summary ? '重新驗證摘要' : '建立摘要'}</button>
-        </div>
-        {!canGenerateSummary && <p className="mt-3 text-xs text-amber-700">等待合法正文：上傳 EPUB／TXT，並在外部書目上明確選擇連結。</p>}
-        {summary && (
-          <ol className="mt-4 space-y-3">
-            {summary.excerpts.map((excerpt) => (
-              <li className="rounded-xl border border-stone-200 bg-stone-50 p-3" key={`${excerpt.chapterId}-${excerpt.startOffset}`}>
-                <p className="text-[10px] uppercase tracking-widest text-emerald-700">{excerpt.chapterTitle} · offset {excerpt.startOffset}</p>
-                <p className="mt-2 text-sm leading-7 text-stone-600">{excerpt.text}</p>
-              </li>
-            ))}
-          </ol>
-        )}
-        <p className={`mt-3 min-h-5 text-xs ${summaryState === 'error' ? 'text-rose-600' : 'text-stone-500'}`} role="status">{summaryState === 'loading' && !summaryMessage ? '正在讀取摘要…' : summaryMessage}</p>
-      </section>
-
       <section className="rounded-2xl border border-rose-100 bg-rose-50/70 p-4" aria-label="本機 LLM 角色分析">
         <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
           <div>
-            <h4 className="font-serif text-lg text-stone-800">本機 LLM 角色分析 <span className="text-xs font-sans text-rose-700">分析建議，待人工確認</span></h4>
-            <p className="mt-2 text-xs leading-6 text-stone-500">每章完整交給本機模型閱讀後再匯總；只保留高／中信心且正文確實出現的名稱。候選不會自動建立角色、覆蓋系列資料、指派聲線或產生音檔。</p>
+            <h4 className="font-serif text-lg text-stone-800">本機 LLM 角色與 alias 分析 <span className="text-xs font-sans text-rose-700">勾選後套用系列</span></h4>
+            <p className="mt-2 text-xs leading-6 text-stone-500">完整逐章分析後，先由你勾選候選、校正 canonical 名稱並合併 alias；套用時會自動加入系列冊次與建立缺少的系列角色，不會刪除既有角色。</p>
           </div>
-          <button className="secondary-button shrink-0 disabled:cursor-not-allowed disabled:opacity-40" disabled={!canGenerateSummary || characterAnalysisState === 'loading'} onClick={handleGenerateCharacterAnalysis} type="button">{characterAnalysis ? '重新以本機 LLM 分析' : '以本機 LLM 分析'}</button>
+          <button className="secondary-button shrink-0 disabled:cursor-not-allowed disabled:opacity-40" disabled={!canAnalyzeText || characterAnalysisState === 'loading'} onClick={handleGenerateCharacterAnalysis} type="button">{characterAnalysis ? '重新以本機 LLM 分析' : '以本機 LLM 分析'}</button>
         </div>
-        {!canGenerateSummary && <p className="mt-3 text-xs text-amber-700">等待合法正文：上傳 EPUB／TXT，並在外部書目上明確選擇連結。</p>}
+        {!canAnalyzeText && <p className="mt-3 text-xs text-amber-700">等待合法正文：上傳 EPUB／TXT，並在外部書目上明確選擇連結。</p>}
         {characterAnalysis && (
           <>
             <p className="mt-3 text-[10px] tracking-wide text-stone-400">模型 {characterAnalysis.model} · {characterAnalysis.promptVersion} · {new Date(characterAnalysis.generatedAt).toLocaleString('zh-TW')}</p>
             {characterAnalysis.candidates.length > 0 && (
-              <ul className="mt-4 flex flex-wrap gap-2">
+              <div className="mt-4 space-y-3">
                 {characterAnalysis.candidates.map((candidate) => (
-                  <li key={candidate.name}>
-                    <button
-                      className="rounded-full border border-rose-200 bg-white px-3 py-1.5 text-left text-xs text-stone-600 transition hover:border-rose-400 hover:text-rose-700"
-                      onClick={() => void handleCopyCharacterCandidateName(candidate)}
-                      title={`本機 LLM：${candidate.confidence === 'high' ? '高' : '中'}信心；章節 ${candidate.evidenceChapterNumbers.join('、')}`}
-                      type="button"
-                    >
-                      <span className="font-medium text-stone-800">{candidate.name}</span>
-                      <span className={`ml-1.5 ${candidate.confidence === 'high' ? 'text-rose-700' : 'text-amber-700'}`}>{candidate.confidence === 'high' ? '高信心' : '中信心'}</span>
-                      <span className="ml-1.5 text-stone-400">× {candidate.dialogueEvidenceCount} 句 · 第 {candidate.evidenceChapterNumbers.join('、')} 章</span>
-                    </button>
-                  </li>
+                  <article className="rounded-xl border border-rose-100 bg-white p-3" key={candidate.name}>
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                      <label className="flex items-center gap-2 font-medium text-stone-800">
+                        <input checked={candidateDrafts[candidate.name]?.selected ?? false} onChange={(event) => updateCandidate(candidate.name, { selected: event.target.checked })} type="checkbox" />
+                        {candidate.name}
+                      </label>
+                      <span className={candidate.confidence === 'high' ? 'text-rose-700' : 'text-amber-700'}>{candidate.confidence === 'high' ? '高信心' : '中信心'}</span>
+                      <span className="text-stone-400">{candidate.dialogueEvidenceCount} 句 · 第 {candidate.evidenceChapterNumbers.join('、')} 章</span>
+                    </div>
+                    <div className="mt-3 grid grid-cols-1 gap-2 lg:grid-cols-2">
+                      <label className="text-[10px] text-stone-500">Canonical 名稱<input className="auth-input mt-1" maxLength={80} onChange={(event) => updateCandidate(candidate.name, { canonicalName: event.target.value })} value={candidateDrafts[candidate.name]?.canonicalName ?? candidate.name} /></label>
+                      <label className="text-[10px] text-stone-500">Aliases（以、分隔）<input className="auth-input mt-1" maxLength={500} onChange={(event) => updateCandidate(candidate.name, { aliases: event.target.value })} value={candidateDrafts[candidate.name]?.aliases ?? (candidate.aliases ?? []).join('、')} /></label>
+                      <label className="text-[10px] text-stone-500">角色層級<select className="auth-input mt-1" onChange={(event) => updateCandidate(candidate.name, { role: event.target.value as CandidateDraft['role'] })} value={candidateDrafts[candidate.name]?.role ?? 'Minor'}><option value="Main">主要角色</option><option value="Supporting">次要角色</option><option value="Minor">小角色</option></select></label>
+                      <label className="text-[10px] text-stone-500">聲線<select className="auth-input mt-1" onChange={(event) => updateCandidate(candidate.name, { voiceKey: event.target.value })} value={candidateDrafts[candidate.name]?.voiceKey ?? ''}><option value="">選擇聲線</option>{voiceOptions.map((voice) => <option key={voiceKey(voice)} value={voiceKey(voice)}>{voice.displayName} · {voice.locale}</option>)}</select></label>
+                    </div>
+                  </article>
                 ))}
-              </ul>
+                <div className="rounded-xl border border-stone-200 bg-stone-50 p-3">
+                  <label className="text-xs text-stone-500">套用到系列<select className="auth-input mt-2" onChange={(event) => setSelectedSeriesId(event.target.value)} value={selectedSeriesId}><option value="">選擇系列</option>{seriesOptions.map((series) => <option key={series.id} value={series.id}>{series.name} · {series.characterCount} 位角色</option>)}</select></label>
+                  {seriesOptions.length === 0 && <p className="mt-2 text-xs text-amber-700">尚無系列，請先到「系列配音」建立系列與旁白聲線。</p>}
+                  <div className="mt-3 flex flex-wrap items-center gap-3">
+                    <button className="secondary-button disabled:opacity-40" disabled={!selectedSeriesId || applyState === 'loading' || Object.values(candidateDrafts).every((draft) => !draft.selected)} onClick={() => void handleApplyAnalyzedCharacters()} type="button">{applyState === 'loading' ? '套用中…' : '建立／合併系列角色表'}</button>
+                    <Link className="text-xs font-medium text-rose-700 hover:text-rose-800" to={selectedSeriesId ? `/series?seriesId=${selectedSeriesId}` : '/series'}>前往系列配音 →</Link>
+                  </div>
+                  <p className={`mt-2 min-h-5 text-xs ${applyState === 'error' ? 'text-rose-600' : 'text-stone-500'}`} role="status">{applyMessage}</p>
+                </div>
+              </div>
             )}
             {characterAnalysis.candidates.length === 0 && <p className="mt-3 text-xs text-stone-400">本機模型沒有足夠證據列出命名說話者；未知比亂填好。</p>}
           </>
         )}
-        {canGenerateSummary && characterAnalysisState === 'ready' && !characterAnalysis && <p className="mt-3 text-xs text-stone-400">尚未執行本機 LLM 分析；按上方按鈕才會使用本機模型。</p>}
+        {canAnalyzeText && characterAnalysisState === 'ready' && !characterAnalysis && <p className="mt-3 text-xs text-stone-400">尚未執行本機 LLM 分析；按上方按鈕才會使用本機模型。</p>}
         <p className={`mt-3 min-h-5 text-xs ${characterAnalysisState === 'error' ? 'text-rose-600' : 'text-stone-500'}`} role="status">{characterAnalysisState === 'loading' && !characterAnalysisMessage ? '正在讀取本機 LLM 分析…' : characterAnalysisMessage}</p>
       </section>
 

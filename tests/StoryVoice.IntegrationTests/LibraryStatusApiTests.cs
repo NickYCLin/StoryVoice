@@ -16,13 +16,11 @@ namespace StoryVoice.IntegrationTests;
 public sealed class LibraryStatusApiTests(ApiFactory factory) : IClassFixture<ApiFactory>
 {
     [Fact]
-    public async Task Matrix_reports_authorized_text_summary_notes_and_narration_without_guessing_metadata()
+    public async Task Matrix_reports_authorized_text_notes_and_narration_without_guessing_metadata()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
         var uploaded = await ImportTextAsync(client, cancellationToken);
-        using var summary = await PutWithCsrfAsync(client, $"/api/books/{uploaded.Id}/summary", cancellationToken);
-        summary.EnsureSuccessStatusCode();
         using var note = await client.PostWithCsrfAsync(
             $"/api/books/{uploaded.Id}/notes",
             new CreateReadingNoteRequest("使用者自己的狀態矩陣筆記。", null),
@@ -50,7 +48,6 @@ public sealed class LibraryStatusApiTests(ApiFactory factory) : IClassFixture<Ap
         Assert.NotNull(matrix);
         var uploadedStatus = Assert.Single(matrix, item => item.BookId == uploaded.Id);
         Assert.True(uploadedStatus.AuthorizedTextAvailable);
-        Assert.True(uploadedStatus.ExtractiveSummaryAvailable);
         Assert.Equal(1, uploadedStatus.ReadingNoteCount);
         Assert.Equal("Queued", uploadedStatus.StoryVoiceNarrationStatus);
         Assert.True(uploadedStatus.StoryVoiceNarrationMatchesAuthorizedText);

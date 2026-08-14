@@ -1,6 +1,9 @@
+using System.Text;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using StoryVoice.Application.Authentication;
+using StoryVoice.Application.Insights;
 using StoryVoice.Application.Series;
 using StoryVoice.Domain.Books;
 using StoryVoice.Domain.Series;
@@ -13,6 +16,7 @@ internal sealed class SeriesService(
     IStorySeriesRepository repository,
     IOptions<SeriesVoiceCatalogOptions> voiceCatalogOptions) : ISeriesService
 {
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly IReadOnlyList<SeriesVoiceCatalogEntry> _voiceCatalog =
         voiceCatalogOptions.Value.Voices.ToArray();
 
@@ -213,6 +217,149 @@ internal sealed class SeriesService(
         return await ToDetailsAsync(series, cancellationToken);
     }
 
+    public async Task<StorySeriesDetailsResponse?> ApplyAnalyzedCharactersAsync(
+        Guid seriesId,
+        ApplyAnalyzedSeriesCharactersRequest request,
+        CancellationToken cancellationToken)
+    {
+        EnsureId(seriesId, nameof(seriesId));
+        ArgumentNullException.ThrowIfNull(request);
+        EnsureId(request.BookId, nameof(request.BookId));
+        if (request.Characters is null || request.Characters.Count is < 1 or > 60)
+        {
+            throw new ArgumentException("每次至少選擇 1 位、最多 60 位角色候選。", nameof(request));
+        }
+
+        var ownerId = EnsureCurrentOwnerId();
+        var seriesExists = await dbContext.StorySeries.AsNoTracking().AnyAsync(
+            candidate => candidate.OwnerId == ownerId && candidate.Id == seriesId,
+            cancellationToken);
+        if (!seriesExists)
+        {
+            return null;
+        }
+
+        var analysis = await dbContext.BookLocalLlmCharacterAnalyses
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                item => item.OwnerId == ownerId && item.BookId == request.BookId,
+                cancellationToken);
+        if (analysis is null)
+        {
+            throw new InvalidOperationException("請先完成這本書的本機 LLM 角色分析。");
+        }
+
+        var analyzedCandidates = JsonSerializer.Deserialize<LocalLlmCharacterAnalysisCandidateResponse[]>(
+            analysis.CandidatesJson,
+            JsonOptions) ?? [];
+        var candidatesByName = analyzedCandidates.ToDictionary(
+            candidate => NormalizeIdentityKey(candidate.Name),
+            candidate => candidate,
+            StringComparer.Ordinal);
+        foreach (var selection in request.Characters)
+        {
+            ArgumentNullException.ThrowIfNull(selection);
+            if (!candidatesByName.ContainsKey(NormalizeIdentityKey(selection.SourceName)))
+            {
+                throw new ArgumentException("角色候選已過期，請重新執行分析後再套用。", nameof(request));
+            }
+
+            if (selection.Aliases is null || selection.Aliases.Count > 24)
+            {
+                throw new ArgumentException("單一角色最多可套用 24 個 alias。", nameof(request));
+            }
+        }
+
+        var contentBookId = analysis.ContentBookId;
+        var book = await dbContext.Books.SingleOrDefaultAsync(
+            candidate => candidate.Id == contentBookId && candidate.OwnerId == ownerId,
+            cancellationToken);
+        if (book is null || book.Status == BookStatus.Linked || book.IsArchived)
+        {
+            return null;
+        }
+
+        await using var transaction = dbContext.Database.IsRelational()
+            ? await dbContext.Database.BeginTransactionAsync(cancellationToken)
+            : null;
+        try
+        {
+            var series = await repository.GetForMutationAsync(seriesId, cancellationToken);
+            if (series is null)
+            {
+                return null;
+            }
+
+            if (series.Books.All(member => member.BookId != contentBookId))
+            {
+                var nextSortOrder = series.Books.Count == 0
+                    ? 1
+                    : checked(series.Books.Max(member => member.SortOrder) + 1);
+                series.AddBook(book, book.Title, nextSortOrder);
+            }
+
+            foreach (var selection in request.Characters)
+            {
+                var voice = ResolveVoice(selection.VoiceProvider, selection.Voice);
+                var canonicalKey = NormalizeIdentityKey(selection.CanonicalName);
+                var existingIdentity = series.IdentityKeys.SingleOrDefault(
+                    key => string.Equals(key.NormalizedValue, canonicalKey, StringComparison.Ordinal));
+                var character = existingIdentity is null
+                    ? series.AddCharacter(
+                        selection.CanonicalName,
+                        selection.Role,
+                        voice.Provider,
+                        voice.Voice,
+                        selection.Rate,
+                        selection.Pitch,
+                        selection.Volume,
+                        "由本機 LLM 角色候選建立")
+                    : series.Characters.Single(item => item.Id == existingIdentity.CharacterId);
+
+                var aliases = new[] { selection.SourceName }
+                    .Concat(selection.Aliases)
+                    .Select(alias => alias?.Trim() ?? string.Empty)
+                    .Where(alias => alias.Length > 0)
+                    .Distinct(StringComparer.Ordinal)
+                    .ToArray();
+                foreach (var alias in aliases)
+                {
+                    var aliasKey = NormalizeIdentityKey(alias);
+                    var identity = series.IdentityKeys.SingleOrDefault(
+                        key => string.Equals(key.NormalizedValue, aliasKey, StringComparison.Ordinal));
+                    if (identity is not null)
+                    {
+                        if (identity.CharacterId != character.Id)
+                        {
+                            throw new InvalidOperationException($"「{alias}」已屬於系列內另一位角色，無法自動合併。");
+                        }
+
+                        continue;
+                    }
+
+                    series.AddAlias(character.Id, alias);
+                }
+            }
+
+            await SaveChangesAsync(cancellationToken);
+            if (transaction is not null)
+            {
+                await transaction.CommitAsync(cancellationToken);
+            }
+
+            return await ToDetailsAsync(series, cancellationToken);
+        }
+        catch
+        {
+            if (transaction is not null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+            }
+
+            throw;
+        }
+    }
+
     public IReadOnlyList<SeriesVoiceOptionResponse> ListVoiceOptions() =>
         _voiceCatalog
             .OrderBy(voice => voice.Locale, StringComparer.Ordinal)
@@ -346,5 +493,17 @@ internal sealed class SeriesService(
         {
             throw new ArgumentException("識別碼不可為空白。", parameterName);
         }
+    }
+
+    private static string NormalizeIdentityKey(string? value)
+    {
+        var display = (value ?? string.Empty).Normalize(NormalizationForm.FormKC).Trim();
+        if (display.Length == 0)
+        {
+            throw new ArgumentException("角色名稱不可空白。", nameof(value));
+        }
+
+        return string.Join(' ', display.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
+            .ToUpperInvariant();
     }
 }
