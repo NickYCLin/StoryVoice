@@ -61,6 +61,10 @@ public static class DependencyInjection
             .Validate(options => !string.IsNullOrWhiteSpace(options.Model), "本機 LLM model 不可空白。")
             .Validate(options => string.Equals(options.Model, "gpt-oss:20b", StringComparison.Ordinal),
                 "本機 LLM 角色分析只允許核准的 gpt-oss:20b 模型。")
+            .Validate(options => string.Equals(options.ReasoningEffort, "low", StringComparison.OrdinalIgnoreCase),
+                "本機 LLM 角色分析只允許 low reasoning，避免完整章節推論超時。")
+            .Validate(options => options.NumContext == 16_384,
+                "本機 LLM 角色分析只允許已驗證的 16K context。")
             .Validate(options => options.TimeoutSeconds is >= 30 and <= 1_800, "本機 LLM timeout 必須介於 30 至 1800 秒。")
             .Validate(options => options.UnloadTimeoutSeconds is >= 3 and <= 60, "本機 LLM unload timeout 必須介於 3 至 60 秒。")
             .Validate(options => options.MaximumResponseBytes is >= 1_024 and <= 65_536, "本機 LLM response 上限必須介於 1 KiB 至 64 KiB。")

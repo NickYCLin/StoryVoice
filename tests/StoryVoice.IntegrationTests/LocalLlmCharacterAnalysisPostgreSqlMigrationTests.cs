@@ -13,7 +13,7 @@ namespace StoryVoice.IntegrationTests;
 public sealed class LocalLlmCharacterAnalysisPostgreSqlMigrationTests
 {
     private const string PreviousMigration = "20260814094000_AllowPendingSeriesBookOnboarding";
-    private const string CurrentMigration = "20260814100000_AddLocalLlmCharacterAnalyses";
+    private const string CurrentMigration = "20260814122000_AddLocalLlmCharacterAnalyses";
 
     [Fact]
     public async Task Local_LLM_analysis_migration_expands_safely_and_blocks_data_losing_down()

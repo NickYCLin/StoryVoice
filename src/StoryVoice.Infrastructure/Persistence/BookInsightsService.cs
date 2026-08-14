@@ -185,9 +185,6 @@ internal sealed class BookInsightsService(
 
         var source = LocalLlmCharacterAnalysisSource.Create(content!.Chapters);
         var chapterCandidates = await localLlmCharacterAnalysisProvider.AnalyzeAsync(source, cancellationToken);
-        var mergedCandidates = LocalLlmCharacterAnalysisSource.Merge(
-            chapterCandidates.Select(item => (item.ChapterNumber, item.Candidates)));
-        var candidatesJson = JsonSerializer.Serialize(mergedCandidates, JsonOptions);
 
         await using var transaction = dbContext.Database.IsRelational()
             ? await dbContext.Database.BeginTransactionAsync(cancellationToken)
@@ -219,6 +216,14 @@ internal sealed class BookInsightsService(
         {
             throw new LocalLlmCharacterAnalysisSourceChangedException();
         }
+
+        var canonicalNamesByIdentity = await GetSeriesCanonicalNamesByIdentityAsync(
+            currentTarget.Id,
+            cancellationToken);
+        var mergedCandidates = LocalLlmCharacterAnalysisSource.Merge(
+            chapterCandidates.Select(item => (item.ChapterNumber, item.Candidates)),
+            canonicalNamesByIdentity);
+        var candidatesJson = JsonSerializer.Serialize(mergedCandidates, JsonOptions);
 
         var analysis = await dbContext.BookLocalLlmCharacterAnalyses
             .SingleOrDefaultAsync(
@@ -346,6 +351,34 @@ internal sealed class BookInsightsService(
         return await dbContext.Books
             .FromSqlInterpolated($"SELECT * FROM books WHERE \"Id\" = {bookId} AND \"OwnerId\" = {currentUser.UserId} FOR UPDATE")
             .SingleOrDefaultAsync(cancellationToken);
+    }
+
+    private async Task<IReadOnlyDictionary<string, string>> GetSeriesCanonicalNamesByIdentityAsync(
+        Guid bookId,
+        CancellationToken cancellationToken)
+    {
+        var ownerId = currentUser.UserId;
+        var identities = await (
+            from membership in dbContext.SeriesBooks.AsNoTracking()
+            join identity in dbContext.SeriesCharacterIdentityKeys.AsNoTracking()
+                on membership.SeriesId equals identity.SeriesId
+            join character in dbContext.SeriesCharacters.AsNoTracking()
+                on identity.CharacterId equals character.Id
+            where membership.OwnerId == ownerId
+                && membership.BookId == bookId
+                && identity.OwnerId == ownerId
+                && character.OwnerId == ownerId
+            select new
+            {
+                identity.NormalizedValue,
+                character.CanonicalName,
+            })
+            .ToArrayAsync(cancellationToken);
+
+        return identities.ToDictionary(
+            identity => identity.NormalizedValue,
+            identity => identity.CanonicalName,
+            StringComparer.Ordinal);
     }
 
     private IQueryable<Book> OwnedBooks(bool tracking = false)

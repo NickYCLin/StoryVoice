@@ -58,6 +58,34 @@ public sealed class LocalLlmCharacterAnalysisTests
     }
 
     [Fact]
+    public void Merge_maps_registered_aliases_to_canonical_names_without_double_counting_a_chapter()
+    {
+        var canonicalNamesByIdentity = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["米可蕥"] = "米可蕥",
+            ["喵喵"] = "米可蕥",
+        };
+        var result = LocalLlmCharacterAnalysisSource.Merge(
+        [
+            (1, (IReadOnlyList<LocalLlmCharacterCandidate>)
+            [
+                new("喵喵", "high", 4),
+                new("米可蕥", "medium", 3),
+            ]),
+            (2, (IReadOnlyList<LocalLlmCharacterCandidate>)
+            [
+                new("喵喵", "medium", 2),
+            ]),
+        ], canonicalNamesByIdentity);
+
+        var candidate = Assert.Single(result);
+        Assert.Equal("米可蕥", candidate.Name);
+        Assert.Equal("high", candidate.Confidence);
+        Assert.Equal(6, candidate.DialogueEvidenceCount);
+        Assert.Equal([1, 2], candidate.EvidenceChapterNumbers);
+    }
+
+    [Fact]
     public async Task Ollama_provider_sends_the_complete_chapter_discards_absent_names_and_confirms_unload()
     {
         var handler = new CapturingHandler(ValidAnalysis);
@@ -79,7 +107,9 @@ public sealed class LocalLlmCharacterAnalysisTests
         var messages = chatRequest.RootElement.GetProperty("messages");
         Assert.Contains(chapterText, messages[1].GetProperty("content").GetString(), StringComparison.Ordinal);
         Assert.Equal("gpt-oss:20b", chatRequest.RootElement.GetProperty("model").GetString());
+        Assert.Equal("low", chatRequest.RootElement.GetProperty("think").GetString());
         Assert.Equal(0, chatRequest.RootElement.GetProperty("options").GetProperty("temperature").GetInt32());
+        Assert.Equal(16_384, chatRequest.RootElement.GetProperty("options").GetProperty("num_ctx").GetInt32());
         using var unloadRequest = JsonDocument.Parse(handler.UnloadRequestBody);
         Assert.Equal(string.Empty, unloadRequest.RootElement.GetProperty("prompt").GetString());
         Assert.False(unloadRequest.RootElement.GetProperty("stream").GetBoolean());
@@ -153,7 +183,7 @@ public sealed class LocalLlmCharacterAnalysisTests
         var secondSource = LocalLlmCharacterAnalysisSource.Create(second.Chapters);
 
         Assert.NotEqual(firstSource.SourceHash, secondSource.SourceHash);
-        Assert.Equal("v1-full-chapter-context", LocalLlmCharacterAnalysisSource.PromptVersion);
+        Assert.Equal("v2-full-chapter-context-low-series-aliases", LocalLlmCharacterAnalysisSource.PromptVersion);
     }
 
     [Fact]
@@ -186,6 +216,8 @@ public sealed class LocalLlmCharacterAnalysisTests
             Options.Create(new LocalLlmCharacterAnalysisOptions
             {
                 Model = "gpt-oss:20b",
+                ReasoningEffort = "low",
+                NumContext = 16_384,
                 TimeoutSeconds = 600,
                 UnloadTimeoutSeconds = 3,
                 MaximumResponseBytes = maximumResponseBytes,

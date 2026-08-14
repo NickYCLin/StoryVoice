@@ -62,7 +62,7 @@ public sealed class LocalLlmCharacterAnalysisInputTooLargeException : Exception
     public const string StableCode = "local_llm_character_analysis_input_too_large";
 
     public LocalLlmCharacterAnalysisInputTooLargeException()
-        : base("本機 LLM 分析僅接受最多 30 章、全書 120,000 字且每章 6,000 字以內的正文；系統不會截斷內容。")
+        : base("本機 LLM 分析僅接受最多 30 章、全書 120,000 字且每章 8,000 字以內的正文；系統不會截斷內容。")
     {
     }
 }
@@ -89,11 +89,11 @@ public interface ILocalLlmCharacterAnalysisProvider
 public static class LocalLlmCharacterAnalysisSource
 {
     public const string Generator = "local-ollama";
-    public const string PromptVersion = "v1-full-chapter-context";
+    public const string PromptVersion = "v2-full-chapter-context-low-series-aliases";
     private const int MaximumCandidates = 60;
     public const int MaximumChapterCount = 30;
     public const int MaximumBookCharacters = 120_000;
-    public const int MaximumChapterCharacters = 6_000;
+    public const int MaximumChapterCharacters = 8_000;
 
     public static LocalLlmCharacterAnalysisRequest Create(IEnumerable<Chapter> chapters)
     {
@@ -120,7 +120,8 @@ public static class LocalLlmCharacterAnalysisSource
     }
 
     public static IReadOnlyList<LocalLlmCharacterAnalysisCandidateResponse> Merge(
-        IEnumerable<(int ChapterNumber, IReadOnlyList<LocalLlmCharacterCandidate> Candidates)> chapterCandidates)
+        IEnumerable<(int ChapterNumber, IReadOnlyList<LocalLlmCharacterCandidate> Candidates)> chapterCandidates,
+        IReadOnlyDictionary<string, string>? canonicalNamesByNormalizedIdentity = null)
     {
         var merged = new Dictionary<string, CandidateAccumulator>(StringComparer.Ordinal);
         foreach (var (chapterNumber, candidates) in chapterCandidates)
@@ -139,15 +140,15 @@ public static class LocalLlmCharacterAnalysisSource
                     continue;
                 }
 
-                if (!merged.TryGetValue(name, out var accumulator))
+                var canonicalName = ResolveCanonicalName(name, canonicalNamesByNormalizedIdentity);
+                if (!merged.TryGetValue(canonicalName, out var accumulator))
                 {
-                    accumulator = new CandidateAccumulator(name, confidence);
-                    merged.Add(name, accumulator);
+                    accumulator = new CandidateAccumulator(canonicalName, confidence);
+                    merged.Add(canonicalName, accumulator);
                 }
 
                 accumulator.Confidence = StrongerConfidence(accumulator.Confidence, confidence);
-                accumulator.DialogueEvidenceCount = checked(accumulator.DialogueEvidenceCount + candidate.DialogueEvidenceCount);
-                accumulator.EvidenceChapterNumbers.Add(chapterNumber);
+                accumulator.AddEvidence(chapterNumber, candidate.DialogueEvidenceCount);
             }
         }
 
@@ -177,6 +178,21 @@ public static class LocalLlmCharacterAnalysisSource
     private static string StrongerConfidence(string current, string next) =>
         current == "high" || next != "high" ? current : next;
 
+    private static string ResolveCanonicalName(
+        string name,
+        IReadOnlyDictionary<string, string>? canonicalNamesByNormalizedIdentity)
+    {
+        var normalizedIdentity = name.ToUpperInvariant();
+        if (canonicalNamesByNormalizedIdentity is null
+            || !canonicalNamesByNormalizedIdentity.TryGetValue(normalizedIdentity, out var canonicalName))
+        {
+            return name;
+        }
+
+        var normalizedCanonicalName = NormalizeName(canonicalName);
+        return normalizedCanonicalName.Length == 0 ? name : normalizedCanonicalName;
+    }
+
     private static string ComputeSourceHash(IEnumerable<LocalLlmCharacterAnalysisChapter> chapters)
     {
         var source = new StringBuilder();
@@ -196,9 +212,20 @@ public static class LocalLlmCharacterAnalysisSource
 
     private sealed class CandidateAccumulator(string name, string confidence)
     {
+        private readonly Dictionary<int, int> _evidenceByChapter = [];
+
         public string Name { get; } = name;
         public string Confidence { get; set; } = confidence;
-        public int DialogueEvidenceCount { get; set; }
-        public ISet<int> EvidenceChapterNumbers { get; } = new SortedSet<int>();
+        public int DialogueEvidenceCount => _evidenceByChapter.Values.Sum();
+        public IEnumerable<int> EvidenceChapterNumbers => _evidenceByChapter.Keys;
+
+        public void AddEvidence(int chapterNumber, int dialogueEvidenceCount)
+        {
+            if (!_evidenceByChapter.TryGetValue(chapterNumber, out var current)
+                || dialogueEvidenceCount > current)
+            {
+                _evidenceByChapter[chapterNumber] = dialogueEvidenceCount;
+            }
+        }
     }
 }

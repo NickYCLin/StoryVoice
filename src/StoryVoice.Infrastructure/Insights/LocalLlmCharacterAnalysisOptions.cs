@@ -6,6 +6,8 @@ public sealed class LocalLlmCharacterAnalysisOptions
 
     public string BaseUrl { get; set; } = "http://host.docker.internal:11434/";
     public string Model { get; set; } = "gpt-oss:20b";
+    public string ReasoningEffort { get; set; } = "low";
+    public int NumContext { get; set; } = 16_384;
     public int TimeoutSeconds { get; set; } = 600;
     public int UnloadTimeoutSeconds { get; set; } = 15;
     public int MaximumResponseBytes { get; set; } = 16 * 1024;

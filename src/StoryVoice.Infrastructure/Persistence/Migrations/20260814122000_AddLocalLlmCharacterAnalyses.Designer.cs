@@ -12,7 +12,7 @@ using StoryVoice.Infrastructure.Persistence;
 namespace StoryVoice.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(StoryVoiceDbContext))]
-    [Migration("20260814100000_AddLocalLlmCharacterAnalyses")]
+    [Migration("20260814122000_AddLocalLlmCharacterAnalyses")]
     partial class AddLocalLlmCharacterAnalyses
     {
         /// <inheritdoc />

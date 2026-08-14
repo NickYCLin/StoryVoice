@@ -86,9 +86,23 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
 
             return request.Chapters.Select(chapter => new LocalLlmChapterCharacterAnalysis(
                 chapter.ChapterNumber,
-                chapter.Text.Contains("測試角色", StringComparison.Ordinal)
-                    ? [new LocalLlmCharacterCandidate("測試角色", "high", 2)]
-                    : [])).ToArray();
+                CreateCandidates(chapter.Text))).ToArray();
+        }
+
+        private static IReadOnlyList<LocalLlmCharacterCandidate> CreateCandidates(string chapterText)
+        {
+            var candidates = new List<LocalLlmCharacterCandidate>();
+            if (chapterText.Contains("測試角色", StringComparison.Ordinal))
+            {
+                candidates.Add(new LocalLlmCharacterCandidate("測試角色", "high", 2));
+            }
+
+            if (chapterText.Contains("隊長", StringComparison.Ordinal))
+            {
+                candidates.Add(new LocalLlmCharacterCandidate("隊長", "high", 3));
+            }
+
+            return candidates;
         }
 
         private async Task UnlinkAuthorizedContentDuringAnalysisAsync(CancellationToken cancellationToken)

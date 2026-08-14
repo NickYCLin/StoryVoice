@@ -5,6 +5,8 @@ using System.Text;
 using System.Text.Json;
 using StoryVoice.Application.Books;
 using StoryVoice.Application.Insights;
+using StoryVoice.Application.Series;
+using StoryVoice.Domain.Series;
 
 namespace StoryVoice.IntegrationTests;
 
@@ -339,6 +341,74 @@ public sealed class BookInsightsApiTests(ApiFactory factory) : IClassFixture<Api
     }
 
     [Fact]
+    public async Task Local_LLM_character_analysis_maps_registered_series_alias_to_canonical_name()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var owner = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        var book = await ImportTextAsync(
+            owner,
+            """
+            第一章 系列別名
+            隊長說：「這段對白應映射到正式角色名稱。」
+            """,
+            cancellationToken);
+
+        using var createSeries = await owner.PostWithCsrfAsync(
+            "/api/series",
+            new CreateStorySeriesRequest(
+                $"角色分析別名-{Guid.NewGuid():N}",
+                "edge",
+                "zh-TW-YunJheNeural",
+                "+0%",
+                "+0Hz",
+                "+0%",
+                350),
+            cancellationToken);
+        createSeries.EnsureSuccessStatusCode();
+        var series = await createSeries.Content.ReadFromJsonAsync<StorySeriesDetailsResponse>(cancellationToken);
+        Assert.NotNull(series);
+
+        using var addBook = await owner.PostWithCsrfAsync(
+            $"/api/series/{series.Id}/books",
+            new AddSeriesBookRequest(book.Id, "第一冊", 1),
+            cancellationToken);
+        addBook.EnsureSuccessStatusCode();
+        using var addCharacter = await owner.PostWithCsrfAsync(
+            $"/api/series/{series.Id}/characters",
+            new AddSeriesCharacterRequest(
+                "艾莉絲",
+                SeriesCharacterRole.Main,
+                "edge",
+                "zh-TW-HsiaoChenNeural",
+                "+0%",
+                "+0Hz",
+                "+0%",
+                null),
+            cancellationToken);
+        addCharacter.EnsureSuccessStatusCode();
+        var withCharacter = await addCharacter.Content.ReadFromJsonAsync<StorySeriesDetailsResponse>(cancellationToken);
+        Assert.NotNull(withCharacter);
+        var character = Assert.Single(withCharacter.Characters);
+        using var addAlias = await owner.PostWithCsrfAsync(
+            $"/api/series/{series.Id}/characters/{character.Id}/aliases",
+            new AddSeriesCharacterAliasRequest("隊長"),
+            cancellationToken);
+        addAlias.EnsureSuccessStatusCode();
+
+        using var generate = await PutWithCsrfAsync(
+            owner,
+            $"/api/books/{book.Id}/character-analysis",
+            cancellationToken);
+        var analysis = await generate.Content.ReadFromJsonAsync<LocalLlmCharacterAnalysisResponse>(cancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, generate.StatusCode);
+        Assert.NotNull(analysis);
+        var candidate = Assert.Single(analysis.Candidates);
+        Assert.Equal("艾莉絲", candidate.Name);
+        Assert.Equal(3, candidate.DialogueEvidenceCount);
+    }
+
+    [Fact]
     public async Task Local_LLM_failure_returns_503_and_does_not_save_a_partial_analysis()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -357,6 +427,7 @@ public sealed class BookInsightsApiTests(ApiFactory factory) : IClassFixture<Api
         Assert.Equal(HttpStatusCode.ServiceUnavailable, generate.StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, cached.StatusCode);
     }
+
     [Fact]
     public async Task Local_LLM_character_analysis_rejects_oversized_full_context_without_truncation()
     {
@@ -364,7 +435,7 @@ public sealed class BookInsightsApiTests(ApiFactory factory) : IClassFixture<Api
         using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
         var book = await ImportTextAsync(
             client,
-            $"第一章 上限\n{new string('字', 6_001)}",
+            $"第一章 上限\n{new string('字', 8_001)}",
             cancellationToken);
 
         using var response = await PutWithCsrfAsync(
@@ -374,7 +445,9 @@ public sealed class BookInsightsApiTests(ApiFactory factory) : IClassFixture<Api
         using var problem = JsonDocument.Parse(await response.Content.ReadAsStreamAsync(cancellationToken));
 
         Assert.Equal(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
-        Assert.Equal(LocalLlmCharacterAnalysisInputTooLargeException.StableCode, problem.RootElement.GetProperty("code").GetString());
+        Assert.Equal(
+            LocalLlmCharacterAnalysisInputTooLargeException.StableCode,
+            problem.RootElement.GetProperty("code").GetString());
     }
 
     [Fact]

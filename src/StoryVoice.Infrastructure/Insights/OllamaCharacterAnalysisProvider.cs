@@ -101,8 +101,9 @@ public sealed class OllamaCharacterAnalysisProvider(
                     new OllamaChatRequest(
                         Model,
                         Stream: false,
+                        options.Value.ReasoningEffort.Trim().ToLowerInvariant(),
                         ResponseSchema,
-                        new OllamaGenerationOptions(Temperature: 0),
+                        new OllamaGenerationOptions(Temperature: 0, options.Value.NumContext),
                         [
                             new OllamaMessage("system", SystemPrompt),
                             new OllamaMessage("user", BuildChapterPrompt(chapter)),
@@ -380,12 +381,15 @@ public sealed class OllamaCharacterAnalysisProvider(
     private sealed record OllamaChatRequest(
         string Model,
         bool Stream,
+        string Think,
         JsonElement Format,
         OllamaGenerationOptions Options,
         IReadOnlyList<OllamaMessage> Messages,
         [property: JsonPropertyName("keep_alive")] string KeepAlive);
 
-    private sealed record OllamaGenerationOptions(int Temperature);
+    private sealed record OllamaGenerationOptions(
+        int Temperature,
+        [property: JsonPropertyName("num_ctx")] int NumContext);
 
     private sealed record OllamaMessage(string Role, string Content);
 
