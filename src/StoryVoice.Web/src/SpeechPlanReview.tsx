@@ -13,7 +13,7 @@ export type SpeechPlanSegment = {
   id: string
   sortOrder: number
   sourceKind: 'ChapterTitle' | 'Body'
-  kind: 'Narrator' | 'Dialogue'
+  kind: 'Narrator' | 'Dialogue' | 'InnerMonologue'
   startOffset: number
   length: number
   characterId: string | null
@@ -189,6 +189,7 @@ export function SpeechPlanReview({
                         <p className="min-w-0 flex-1 text-sm leading-6 text-stone-700">{segmentText(entry.chapter, segment)}</p>
                         <span className={`shrink-0 text-xs ${segment.reviewStatus === 'Confirmed' ? 'text-emerald-700' : 'text-amber-700'}`}>
                           {segment.kind === 'Dialogue' && `${segment.characterName ?? '無法判定'} · `}
+                          {segment.kind === 'InnerMonologue' && `內心／默讀：${segment.characterName ?? '無法判定'} · `}
                           {segment.reviewStatus === 'Confirmed' ? '已確認' : `待審核 · 信心 ${segment.confidence}%`}
                         </span>
                       </div>

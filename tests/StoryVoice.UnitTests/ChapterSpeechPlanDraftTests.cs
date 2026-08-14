@@ -70,6 +70,30 @@ public sealed class ChapterSpeechPlanDraftTests
     }
 
     [Fact]
+    public void Inner_monologue_segments_require_a_body_source_and_point_of_view_character()
+    {
+        var missingCharacter = new[]
+        {
+            TitleTurn(),
+            new DraftSegmentInput(1, SpeechSegmentSourceKind.Body, 0, 5, Hash("thought"), SpeechSegmentTurnKind.InnerMonologue, null, 100, SpeechSegmentDecisionSource.Rule, SpeechSegmentReviewStatus.Confirmed),
+        };
+        var titleSource = new[]
+        {
+            TitleTurn(),
+            new DraftSegmentInput(1, SpeechSegmentSourceKind.ChapterTitle, 0, 5, Hash("thought-title"), SpeechSegmentTurnKind.InnerMonologue, AliceId, 100, SpeechSegmentDecisionSource.Rule, SpeechSegmentReviewStatus.Confirmed),
+        };
+        var invalidGeneratedState = new[]
+        {
+            TitleTurn(),
+            new DraftSegmentInput(1, SpeechSegmentSourceKind.Body, 0, 5, Hash("thought-review"), SpeechSegmentTurnKind.InnerMonologue, AliceId, 99, SpeechSegmentDecisionSource.LocalModel, SpeechSegmentReviewStatus.Suggested),
+        };
+
+        Assert.Throws<ArgumentException>(() => CreateDraft(missingCharacter));
+        Assert.Throws<ArgumentException>(() => CreateDraft(titleSource));
+        Assert.Throws<ArgumentException>(() => CreateDraft(invalidGeneratedState));
+    }
+
+    [Fact]
     public void Draft_needs_review_while_any_dialogue_segment_is_unconfirmed_and_is_ready_once_all_confirmed()
     {
         var draft = CreateDraft(
@@ -91,6 +115,19 @@ public sealed class ChapterSpeechPlanDraftTests
         var draft = CreateDraft([TitleTurn()]);
 
         Assert.Equal(ChapterSpeechPlanDraftStatus.ReadyToConfirm, draft.Status);
+    }
+
+    [Fact]
+    public void Confirmed_inner_monologue_does_not_create_a_speaker_review_gap()
+    {
+        var draft = CreateDraft(
+        [
+            TitleTurn(),
+            new DraftSegmentInput(1, SpeechSegmentSourceKind.Body, 0, 5, Hash("thought"), SpeechSegmentTurnKind.InnerMonologue, AliceId, 100, SpeechSegmentDecisionSource.Rule, SpeechSegmentReviewStatus.Confirmed),
+        ]);
+
+        Assert.Equal(ChapterSpeechPlanDraftStatus.ReadyToConfirm, draft.Status);
+        Assert.Equal(AliceId, draft.Segments[1].CharacterId);
     }
 
     [Fact]
@@ -195,6 +232,11 @@ public sealed class ChapterSpeechPlanDraftTests
         Assert.Equal(2, revision.Segments.Count);
         Assert.Equal(AliceId, revision.Segments[1].CharacterId);
         Assert.False(string.IsNullOrWhiteSpace(revision.Fingerprint));
+        Assert.True(revision.MatchesDraft(draft));
+
+        draft.RegenerateFromSegmentation(draft.SourceHash, [TitleTurn()]);
+
+        Assert.False(revision.MatchesDraft(draft));
     }
 
     [Fact]

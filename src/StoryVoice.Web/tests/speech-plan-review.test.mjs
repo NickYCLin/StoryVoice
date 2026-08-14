@@ -16,6 +16,13 @@ test('已確認的對白段也會顯示判定到的角色名字，不只是待�
   assert.match(review, /無法判定/)
 })
 
+test('內心／默讀片段顯示視角角色，且不列入對白待審核或角色指派', () => {
+  assert.match(review, /kind: 'Narrator' \| 'Dialogue' \| 'InnerMonologue'/)
+  assert.match(review, /segment\.kind === 'InnerMonologue' && `內心／默讀：\$\{segment\.characterName \?\? '無法判定'\}/)
+  assert.match(review, /filter\(\(segment\) => segment\.kind === 'Dialogue' && segment\.reviewStatus !== 'Confirmed'\)/)
+  assert.match(review, /segment\.kind === 'Dialogue' && segment\.reviewStatus !== 'Confirmed' && \(/)
+})
+
 test('計畫未確認時禁止建立 staged 多角色工作，並顯示缺口數', () => {
   assert.match(review, /confirmedGapCount/)
   assert.match(review, /disabled=\{confirmedGapCount > 0/)

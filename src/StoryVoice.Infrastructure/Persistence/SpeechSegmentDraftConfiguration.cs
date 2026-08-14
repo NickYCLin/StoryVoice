@@ -20,7 +20,9 @@ internal sealed class SpeechSegmentDraftConfiguration : IEntityTypeConfiguration
             table.HasCheckConstraint(
                 "CK_speech_segment_drafts_source_kind",
                 "\"SourceKind\" IN ('ChapterTitle', 'Body')");
-            table.HasCheckConstraint("CK_speech_segment_drafts_kind", "\"Kind\" IN ('Narrator', 'Dialogue')");
+            table.HasCheckConstraint(
+                "CK_speech_segment_drafts_kind",
+                "\"Kind\" IN ('Narrator', 'Dialogue', 'InnerMonologue')");
             table.HasCheckConstraint(
                 "CK_speech_segment_drafts_decision_source",
                 "\"DecisionSource\" IN ('Rule', 'LocalModel', 'User')");
@@ -30,6 +32,9 @@ internal sealed class SpeechSegmentDraftConfiguration : IEntityTypeConfiguration
             table.HasCheckConstraint(
                 "CK_speech_segment_drafts_narrator_no_character",
                 "\"Kind\" <> 'Narrator' OR \"CharacterId\" IS NULL");
+            table.HasCheckConstraint(
+                "CK_speech_segment_drafts_inner_monologue_state",
+                "\"Kind\" <> 'InnerMonologue' OR (\"CharacterId\" IS NOT NULL AND \"Confidence\" = 100 AND \"DecisionSource\" = 'Rule' AND \"ReviewStatus\" = 'Confirmed')");
         });
         builder.HasKey(segment => segment.Id);
         builder.Property(segment => segment.Id).ValueGeneratedNever();

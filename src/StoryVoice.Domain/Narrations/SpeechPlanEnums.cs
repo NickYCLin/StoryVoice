@@ -17,7 +17,8 @@ public enum SpeechSegmentSourceKind
 public enum SpeechSegmentTurnKind
 {
     Narrator,
-    Dialogue
+    Dialogue,
+    InnerMonologue
 }
 
 public enum SpeechSegmentReviewStatus

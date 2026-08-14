@@ -35,13 +35,17 @@ internal sealed class SpeechPlanService(
         }
 
         var knownCharacters = await LoadKnownCharactersAsync(ownerId, seriesId, cancellationToken);
+        var pointOfViewCharacterId = await LoadPointOfViewCharacterIdAsync(
+            ownerId,
+            seriesId,
+            cancellationToken);
         var hasDialogue = plan.BodySegments.Any(segment => segment.Kind == SpeechSegmentKind.Dialogue);
         var attributionResults = hasDialogue
             ? await attributionProvider.AttributeAsync(
                 new SpeakerAttributionRequest(
                     knownCharacters,
                     BuildFullSegmentContext(plan.BodySegments, chapter.OriginalText),
-                    await LoadPointOfViewCharacterIdAsync(ownerId, seriesId, cancellationToken)),
+                    pointOfViewCharacterId),
                 cancellationToken)
             : [];
         var attributionByIndex = attributionResults.ToDictionary(result => result.SegmentIndex);
@@ -82,6 +86,26 @@ internal sealed class SpeechPlanService(
                 continue;
             }
 
+            if (bodySegment.Kind == SpeechSegmentKind.InnerMonologue)
+            {
+                var hasKnownPointOfViewCharacter = pointOfViewCharacterId is Guid povCharacterId
+                    && knownCharacters.Any(character => character.CharacterId == povCharacterId);
+                segments.Add(new DraftSegmentInput(
+                    sortOrder,
+                    SpeechSegmentSourceKind.Body,
+                    bodySegment.StartOffset,
+                    bodySegment.Length,
+                    HashSlice(text),
+                    hasKnownPointOfViewCharacter
+                        ? SpeechSegmentTurnKind.InnerMonologue
+                        : SpeechSegmentTurnKind.Narrator,
+                    hasKnownPointOfViewCharacter ? pointOfViewCharacterId : null,
+                    100,
+                    SpeechSegmentDecisionSource.Rule,
+                    SpeechSegmentReviewStatus.Confirmed));
+                continue;
+            }
+
             var attribution = attributionByIndex.GetValueOrDefault(bodySegment.Index);
             var (characterId, confidence, decisionSource, reviewStatus) = MapAttribution(attribution);
             segments.Add(new DraftSegmentInput(
@@ -106,11 +130,9 @@ internal sealed class SpeechPlanService(
             return await ToResponseAsync(draft, knownCharacters, cancellationToken);
         }
 
-        if (existingDraft.SourceHash == plan.SourceHash && existingDraft.Status != ChapterSpeechPlanDraftStatus.Stale)
-        {
-            return await ToResponseAsync(existingDraft, knownCharacters, cancellationToken);
-        }
-
+        // POST is an explicit rebuild operation. Always replace the generated segments even when
+        // chapter text is unchanged, because speaker attribution also depends on the current cast,
+        // aliases and point-of-view character. GET remains the non-mutating cached read path.
         existingDraft.RegenerateFromSegmentation(plan.SourceHash, segments);
         await SaveChangesAsync(cancellationToken);
         return await ToResponseAsync(existingDraft, knownCharacters, cancellationToken);
@@ -307,16 +329,19 @@ internal sealed class SpeechPlanService(
         IReadOnlyList<KnownCharacterIdentity> knownCharacters,
         CancellationToken cancellationToken)
     {
-        var confirmedRevisionId = await dbContext.ConfirmedSpeechPlanRevisions
+        var matchingRevisions = await dbContext.ConfirmedSpeechPlanRevisions
             .AsNoTracking()
+            .Include(revision => revision.Segments)
             .Where(revision => revision.OwnerId == draft.OwnerId
                 && revision.SeriesId == draft.SeriesId
                 && revision.BookId == draft.BookId
                 && revision.ChapterId == draft.ChapterId
                 && revision.SourceHash == draft.SourceHash)
             .OrderByDescending(revision => revision.RevisionNumber)
-            .Select(revision => (Guid?)revision.Id)
-            .FirstOrDefaultAsync(cancellationToken);
+            .ToListAsync(cancellationToken);
+        var confirmedRevisionId = matchingRevisions
+            .FirstOrDefault(revision => revision.MatchesDraft(draft))
+            ?.Id;
 
         return ToResponse(draft, knownCharacters, confirmedRevisionId);
     }

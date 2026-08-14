@@ -105,6 +105,23 @@ public sealed class ConfirmedSpeechPlanRevision
     public bool VerifyFingerprint() =>
         string.Equals(Fingerprint, ComputeFingerprint(SourceHash, _segments), StringComparison.Ordinal);
 
+    /// <summary>
+    /// Returns whether this immutable revision represents the draft's current generated segments.
+    /// A draft can be explicitly rebuilt with the same chapter source hash after cast, aliases or
+    /// point-of-view settings change, so source hash equality alone is not sufficient.
+    /// </summary>
+    public bool MatchesDraft(ChapterSpeechPlanDraft draft)
+    {
+        ArgumentNullException.ThrowIfNull(draft);
+        return draft.Status != ChapterSpeechPlanDraftStatus.Stale
+            && OwnerId == draft.OwnerId
+            && SeriesId == draft.SeriesId
+            && BookId == draft.BookId
+            && ChapterId == draft.ChapterId
+            && string.Equals(SourceHash, draft.SourceHash, StringComparison.Ordinal)
+            && string.Equals(Fingerprint, ComputeFingerprint(draft.SourceHash, draft.Segments), StringComparison.Ordinal);
+    }
+
     private static string ComputeFingerprint(
         string sourceHash,
         IReadOnlyList<SpeechSegmentDraft> segments) =>

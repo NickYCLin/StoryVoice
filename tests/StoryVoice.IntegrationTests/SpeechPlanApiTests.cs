@@ -147,6 +147,65 @@ public sealed class SpeechPlanApiTests(ApiFactory factory) : IClassFixture<ApiFa
     }
 
     [Fact]
+    public async Task Written_title_is_confirmed_as_point_of_view_inner_monologue_not_dialogue()
+    {
+        const string chapterTitle = "第一章";
+        const string chapterBody = "最厚的一迭有用活頁夾子整理起來，叫做『新生入學介紹與如何自保』。我繼續往下看。";
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+
+        var series = await CreateSeriesAsync(client, "內心默讀測試系列", cancellationToken);
+        var book = await CreateBookAsync(client, chapterTitle, chapterBody, cancellationToken);
+        await client.PostWithCsrfAsync(
+            $"/api/series/{series.Id}/books",
+            new { bookId = book.Id, volumeLabel = "第一冊", sortOrder = 1 },
+            cancellationToken);
+        var pointOfViewCharacter = await AddCharacterAsync(client, series.Id, "主角", cancellationToken);
+        var chapterId = book.Chapters.Single().Id;
+        using var initialBuildResponse = await client.PostWithCsrfAsync(
+            $"/api/series/{series.Id}/books/{book.Id}/chapters/{chapterId}/speech-plan",
+            new { },
+            cancellationToken);
+        var initialDraft = await initialBuildResponse.Content.ReadFromJsonAsync<ChapterSpeechPlanDraftResponse>(cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, initialBuildResponse.StatusCode);
+        Assert.NotNull(initialDraft);
+        Assert.DoesNotContain(initialDraft.Segments, segment => segment.Kind == "InnerMonologue");
+        Assert.Contains(
+            initialDraft.Segments,
+            segment => segment.Kind == "Narrator" && segment.StartOffset == chapterBody.IndexOf('『'));
+        using var initialConfirmResponse = await client.PostWithCsrfAsync(
+            $"/api/series/{series.Id}/speech-plan-drafts/{initialDraft.Id}/confirm",
+            new { },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, initialConfirmResponse.StatusCode);
+
+        using var pointOfViewResponse = await client.PutWithCsrfAsync(
+            $"/api/series/{series.Id}/point-of-view-character",
+            new SetSeriesPointOfViewCharacterRequest(pointOfViewCharacter.Id),
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, pointOfViewResponse.StatusCode);
+
+        using var buildResponse = await client.PostWithCsrfAsync(
+            $"/api/series/{series.Id}/books/{book.Id}/chapters/{chapterId}/speech-plan",
+            new { },
+            cancellationToken);
+        var draft = await buildResponse.Content.ReadFromJsonAsync<ChapterSpeechPlanDraftResponse>(cancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, buildResponse.StatusCode);
+        Assert.NotNull(draft);
+        Assert.Equal(initialDraft.PlanVersion + 1, draft.PlanVersion);
+        Assert.Null(draft.ConfirmedRevisionId);
+        var innerMonologue = Assert.Single(draft.Segments, segment => segment.Kind == "InnerMonologue");
+        Assert.Equal(pointOfViewCharacter.Id, innerMonologue.CharacterId);
+        Assert.Equal(pointOfViewCharacter.CanonicalName, innerMonologue.CharacterName);
+        Assert.Equal(100, innerMonologue.Confidence);
+        Assert.Equal("Rule", innerMonologue.DecisionSource);
+        Assert.Equal("Confirmed", innerMonologue.ReviewStatus);
+        Assert.DoesNotContain(draft.Segments, segment => segment.Kind == "Dialogue");
+        Assert.Equal("ReadyToConfirm", draft.Status);
+    }
+
+    [Fact]
     public async Task Non_owner_and_non_member_book_cannot_touch_the_speech_plan()
     {
         var cancellationToken = TestContext.Current.CancellationToken;

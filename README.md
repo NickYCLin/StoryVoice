@@ -19,7 +19,7 @@ Phase 1 Foundation 已建立：
 - 單一神經語音 MVP：持久化工作、租約與重試、取消、私有 MP3 與 owner-scoped Range 串流
 - 全書庫處理狀態矩陣：分開標示官方 TTS、合法正文、筆記與 StoryVoice 音訊
 - 跨冊系列／固定角色／alias、不可變 cast revision 與整批原子啟用資料邊界
-- 章名、旁白與引號對話的 deterministic offset segmentation
+- 章名、旁白、對話與視角角色內心／文件默讀的 deterministic offset segmentation
 - owner-scoped 系列配音管理 API 與伺服器 voice allowlist
 - 本機 LLM 角色與 alias 分析、候選勾選／合併、原子套用系列角色表
 - 規則優先、本機 LLM 補判的逐句說話者草稿；只有高信心自動確認，其餘進人工審核

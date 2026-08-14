@@ -147,13 +147,19 @@ public static class MultiCharacterTurnBuilder
         string precedingContext,
         IReadOnlyDictionary<Guid, CharacterVoiceProfileBundle> profilesByCharacter)
     {
-        if (segment.Kind == SpeechSegmentTurnKind.Dialogue && segment.CharacterId is Guid characterId)
+        if ((segment.Kind is SpeechSegmentTurnKind.Dialogue or SpeechSegmentTurnKind.InnerMonologue)
+            && segment.CharacterId is Guid characterId)
         {
             var assignment = castRevision.Assignments
                 .SingleOrDefault(candidate => candidate.CharacterId == characterId);
             if (assignment is not null)
             {
-                var emotion = DialogueEmotionClassifier.Classify(segmentText, precedingContext);
+                // Inner/document reading uses the POV character's neutral/base delivery. It is not
+                // spoken dialogue, so punctuation or nearby narrative words must not select an
+                // angry/happy scene profile or apply dialogue-only synthesis deltas.
+                var emotion = segment.Kind == SpeechSegmentTurnKind.InnerMonologue
+                    ? DialogueEmotion.Neutral
+                    : DialogueEmotionClassifier.Classify(segmentText, precedingContext);
                 var isCustomVoiceProvider = string.Equals(
                     assignment.VoiceProvider,
                     CharacterVoiceProviders.ThreeWaVoxCpm2,
@@ -195,7 +201,7 @@ public static class MultiCharacterTurnBuilder
             }
         }
 
-        // Narrator segments, and any dialogue segment a human explicitly confirmed as narrator
+        // Narrator segments, and any dialogue/inner segment a human explicitly confirmed as narrator
         // fallback (or whose assigned character was somehow removed from the cast revision, or
         // whose custom-provider profile isn't Ready yet), safely default to the narrator's own
         // fixed voice rather than guessing.

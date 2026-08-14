@@ -20,13 +20,18 @@ internal sealed class ConfirmedSpeechSegmentConfiguration : IEntityTypeConfigura
             table.HasCheckConstraint(
                 "CK_confirmed_speech_segments_source_kind",
                 "\"SourceKind\" IN ('ChapterTitle', 'Body')");
-            table.HasCheckConstraint("CK_confirmed_speech_segments_kind", "\"Kind\" IN ('Narrator', 'Dialogue')");
+            table.HasCheckConstraint(
+                "CK_confirmed_speech_segments_kind",
+                "\"Kind\" IN ('Narrator', 'Dialogue', 'InnerMonologue')");
             table.HasCheckConstraint(
                 "CK_confirmed_speech_segments_decision_source",
                 "\"DecisionSource\" IN ('Rule', 'LocalModel', 'User')");
             table.HasCheckConstraint(
                 "CK_confirmed_speech_segments_narrator_no_character",
                 "\"Kind\" <> 'Narrator' OR \"CharacterId\" IS NULL");
+            table.HasCheckConstraint(
+                "CK_confirmed_speech_segments_inner_monologue_state",
+                "\"Kind\" <> 'InnerMonologue' OR (\"CharacterId\" IS NOT NULL AND \"Confidence\" = 100 AND \"DecisionSource\" = 'Rule')");
         });
         builder.HasKey(segment => segment.Id);
         builder.Property(segment => segment.Id).ValueGeneratedNever();

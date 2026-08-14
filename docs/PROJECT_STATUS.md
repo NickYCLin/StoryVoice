@@ -1,6 +1,6 @@
 # StoryVoice 開發進度
 
-最後更新：2026-08-14（串接本機 LLM 角色／alias 審核與逐句說話者草稿）
+最後更新：2026-08-14（區分對話、內心／文件默讀與音效／排版引文）
 
 本文件記錄已由程式碼與測試證實的能力，以及接下來可直接實作的項目。
 產品方向與長期資料模型仍以
@@ -18,7 +18,7 @@
 - 單一聲線朗讀工作：持久化、租約、重試、取消、進度、私有 MP3 與 Range 串流。
 - 系列／冊次／角色／alias domain model 與 PostgreSQL 約束；canonical name 與 alias 共用唯一命名空間。
 - 不可變 cast revision、staged rebuild batch 與全系列 active epoch 原子切換邊界。
-- 以原文 offset 切分章名、旁白與引號對話；所有片段可無遺漏、無重排地重組原文。
+- 以原文 offset 切分章名、旁白、對話與視角角色內心／文件默讀；高信心文件標題、標示與默讀語境不進說話者審核，改用視角角色的中性／基礎聲線，音效／詞中排版引文維持旁白，電話、發話、朗讀給他人聽與咒語仍是對話。所有片段可無遺漏、無重排地重組原文。
 - owner-scoped 系列配音 API：系列建立與查詢、冊次加入、角色與 alias 管理、固定聲線更新、伺服器 voice allowlist。
 - 書冊（`BookCollection`）：與角色配音系列(`StorySeries`)各自獨立的單純書本分類收藏，可調整成員書籍排序與冊次標籤；書庫的瀏覽器「此裝置標籤」已移除，分類統一使用書冊。
 - 書冊唯讀分享：owner 可依 email 把書冊分享給其他已註冊帳號，被分享者只能唯讀瀏覽書名與章節正文，看不到閱讀筆記、摘要或朗讀音訊；owner 可隨時撤銷。
@@ -40,7 +40,7 @@
 | Task 2：系列與 cast EF 持久化 | 已完成 | migration、複合 FK、唯一索引與 rollback guard |
 | Task 3：不可變 cast revision 與 rebuild batch | 已完成 | fingerprint、staged visibility、原子 epoch activation |
 | Task 4：owner-scoped 系列配音 API | 已完成 | auth、CSRF、owner isolation、voice allowlist、不回正文 |
-| Task 5：deterministic speech segmentation | 已完成 | offset、source hash、巢狀／未閉合引號與完整重組 |
+| Task 5：deterministic speech segmentation | 已完成 | offset、source hash、巢狀／未閉合引號、對話／內心默讀語意分類與完整重組 |
 | Task 6：受限說話者辨識 | 已完成 | 規則優先、本機 LLM 補判、known identity schema、高信心自動確認、unknown／review fallback |
 | Task 7：speech plan 保存與審核 | 已完成 | draft、confirmed revision、stale 與 immutable job binding |
 | Task 8：多聲線 Edge TTS | 已完成 | provider dispatcher、分段合成、ffmpeg／ffprobe（含真實二進位檔驗證）、原子發布 |

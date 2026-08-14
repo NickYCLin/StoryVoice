@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Security.Cryptography;
+using System.Text.RegularExpressions;
 
 namespace StoryVoice.Application.Narrations.SpeechPlanning;
 
@@ -8,7 +9,35 @@ public sealed class ChineseSpeechSegmenter
     // The source hash doubles as the speech-plan regeneration fingerprint. Bump its discriminator
     // whenever contextual attribution semantics change, so existing drafts are rebuilt rather than
     // silently retaining assignments generated under an older rule set.
-    public const string AlgorithmVersion = "zh-quote-v2-context-attribution";
+    public const string AlgorithmVersion = "zh-quote-v3-semantic-kinds";
+
+    private const int QuoteContextLength = 180;
+    private const int DirectCueContextLength = 96;
+    private static readonly Regex ExplicitDialogueBeforeQuote = new(
+        @"(?:(?:說|問|答|喊|吼|叫|回答|回應|開口|朗讀|讀出|念出|吟唱)(?:著|道)?|念給[^。！？!?『』]{0,24}聽|(?<!寫)道)\s*[，,：:]?\s*$",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly Regex ExplicitDialogueAfterQuote = new(
+        @"^\s*(?:[^。！？!?]{0,48})?(?:說話|說道|說的|問道|回答|喊道|朗讀|讀出|念出|念給[^。！？!?『』]{0,24}聽|聲音|語氣|電話|手機的那端|電話的那端|對方|聽見)",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly Regex PhoneOrCommunicationContext = new(
+        @"(?:放在耳朵|接起(?:手機|電話)?|拿起(?:手機|電話)?|手機的那端|電話的那端|電話另?一頭|對方(?:傳來|說|回答)|掛掉(?:手機|電話)?|通訊器|話筒|耳機).{0,32}(?:聲音|語氣|說|回答|掛斷)?",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly Regex InnerThoughtBeforeQuote = new(
+        @"(?:我|自己|心裡|心中|腦中|腦海)(?:[^。！？!?『』]{0,32})?(?:心想|暗想|默念|默讀|想著|想到|想)\s*[，,：:]?\s*$",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly Regex DocumentOrReadingBeforeQuote = new(
+        @"(?:叫做|名為|題為|寫道|標題(?:是|為|叫)?|書名(?:是|為|叫)?|校名(?:是|為|叫)?|名稱(?:是|為|叫)?)\s*[，,：:]?\s*$"
+        + @"|(?:封口|封面|紙上|上面|資料|通知|信件|表格|螢幕)(?:[^。！？!?『』]{0,48})?(?:寫(?:著|了|的)?|印(?:著|了|的)?|顯示|標示)(?:[^。！？!?『』]{0,24})?(?:[。！？!?][^。！？!?『』]{0,64})?[。！？!?….\s]*$"
+        + @"|(?:寫(?:著|了|的)?|印(?:著|了|的)?|顯示|標示)(?:[^。！？!?『』]{0,24})?(?:大字|小字|字樣|內容)(?:[^。！？!?『』]{0,16})?$"
+        + @"|(?:消息|結果)(?:[^。！？!?『』]{0,36})?(?:一件事情|顯示(?:的)?(?:內容|結果)?|內容(?:是|為))(?:[。！？!?….\s]*)$",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly Regex DocumentOrReadingAfterQuote = new(
+        @"^\s*(?:的)?(?:這行字|這幾個字|字樣|標題|書名|校名|名稱|內容|資料|通知|恐嚇信)",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly HashSet<string> SoundEffects = new(StringComparer.Ordinal)
+    {
+        "啪", "砰", "碰", "咚", "轟", "哐", "鏘", "叮", "鈴", "喀嚓", "啪喳"
+    };
 
     public ChapterSpeechPlan Segment(string? chapterTitle, string body)
     {
@@ -97,7 +126,7 @@ public sealed class ChineseSpeechSegmenter
 
             AddSegment(
                 segments,
-                SpeechSegmentKind.Dialogue,
+                ClassifyCompletedQuote(body, dialogueOffset, offset + 1, dialogueNeedsReview),
                 dialogueOffset,
                 offset + 1 - dialogueOffset,
                 dialogueNeedsReview);
@@ -228,10 +257,84 @@ public sealed class ChineseSpeechSegmenter
 
     private static bool IsClosingQuote(char current) => current is '」' or '』' or '”';
 
+    private static SpeechSegmentKind ClassifyCompletedQuote(
+        string body,
+        int startOffset,
+        int endOffset,
+        bool needsReview)
+    {
+        if (needsReview || body[startOffset] != '『')
+        {
+            return SpeechSegmentKind.Dialogue;
+        }
+
+        var beforeStart = Math.Max(0, startOffset - QuoteContextLength);
+        var afterLength = Math.Min(QuoteContextLength, body.Length - endOffset);
+        var before = body.Substring(beforeStart, startOffset - beforeStart);
+        var after = body.Substring(endOffset, afterLength);
+        var directBefore = before.Length <= DirectCueContextLength
+            ? before
+            : before[^DirectCueContextLength..];
+        var directAfter = after.Length <= DirectCueContextLength
+            ? after
+            : after[..DirectCueContextLength];
+        var quotedText = body[(startOffset + 1)..(endOffset - 1)].Trim();
+
+        if (HasExplicitDialogueContext(directBefore, directAfter))
+        {
+            return SpeechSegmentKind.Dialogue;
+        }
+
+        if (IsSoundEffect(quotedText, directBefore, directAfter)
+            || IsInlineTypographicEmphasis(body, startOffset, endOffset, quotedText))
+        {
+            return SpeechSegmentKind.Narrator;
+        }
+
+        if (InnerThoughtBeforeQuote.IsMatch(before)
+            || DocumentOrReadingBeforeQuote.IsMatch(before)
+            || DocumentOrReadingAfterQuote.IsMatch(after))
+        {
+            return SpeechSegmentKind.InnerMonologue;
+        }
+
+        return SpeechSegmentKind.Dialogue;
+    }
+
+    private static bool HasExplicitDialogueContext(string before, string after) =>
+        ExplicitDialogueBeforeQuote.IsMatch(before)
+        || ExplicitDialogueAfterQuote.IsMatch(after)
+        || PhoneOrCommunicationContext.IsMatch(before)
+        || PhoneOrCommunicationContext.IsMatch(after);
+
+    private static bool IsSoundEffect(string quotedText, string before, string after)
+    {
+        if (!SoundEffects.Contains(quotedText))
+        {
+            return false;
+        }
+
+        return before.Contains("聲", StringComparison.Ordinal)
+            || before.Contains("響", StringComparison.Ordinal)
+            || after.Contains("聲", StringComparison.Ordinal)
+            || after.Contains("響", StringComparison.Ordinal);
+    }
+
+    private static bool IsInlineTypographicEmphasis(
+        string body,
+        int startOffset,
+        int endOffset,
+        string quotedText) =>
+        quotedText.Length is > 0 and <= 8
+        && startOffset > 0
+        && endOffset < body.Length
+        && char.IsLetterOrDigit(body[startOffset - 1])
+        && char.IsLetterOrDigit(body[endOffset]);
+
     private static string ComputeSourceHash(string title, string body)
     {
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        hash.AppendData("StoryVoice.ChapterSpeechSource.v2-context-attribution\0"u8);
+        hash.AppendData("StoryVoice.ChapterSpeechSource.v3-semantic-kinds\0"u8);
         AppendUtf16(hash, title);
         AppendUtf16(hash, body);
         return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();

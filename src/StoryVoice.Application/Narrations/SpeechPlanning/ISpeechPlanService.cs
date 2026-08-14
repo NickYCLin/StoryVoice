@@ -3,9 +3,9 @@ namespace StoryVoice.Application.Narrations.SpeechPlanning;
 public interface ISpeechPlanService
 {
     /// <summary>
-    /// Builds a chapter's first draft, or regenerates it (as a new <c>PlanVersion</c>) if the
-    /// chapter's title/body no longer matches the draft's <c>SourceHash</c>. Idempotent when the
-    /// chapter has not changed and a draft already exists.
+    /// Builds a chapter's first draft, or explicitly regenerates it as a new <c>PlanVersion</c>.
+    /// Regeneration always refreshes speaker decisions because they also depend on the current
+    /// cast, aliases and point-of-view character even when the chapter text is unchanged.
     /// </summary>
     Task<ChapterSpeechPlanDraftResponse?> BuildOrRefreshDraftAsync(
         Guid seriesId,

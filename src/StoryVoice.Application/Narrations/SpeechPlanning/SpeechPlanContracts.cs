@@ -9,7 +9,8 @@ public enum SpeechPlanStatus
 public enum SpeechSegmentKind
 {
     Narrator,
-    Dialogue
+    Dialogue,
+    InnerMonologue
 }
 
 public enum SpeechSegmentStatus

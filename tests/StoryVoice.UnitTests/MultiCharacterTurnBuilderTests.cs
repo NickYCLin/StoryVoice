@@ -31,6 +31,44 @@ public sealed class MultiCharacterTurnBuilderTests
     }
 
     [Fact]
+    public void Inner_monologue_uses_the_point_of_view_character_voice_without_becoming_dialogue_review()
+    {
+        var castRevision = BuildCastRevision(narratorVoice: "narrator-voice", aliceVoice: "alice-voice");
+        var chapter = BuildConfirmedChapter(
+            0,
+            "序章",
+            "最厚的一迭資料叫做『新生入學介紹與如何自保』。我繼續往下看。",
+            AliceId);
+
+        var turns = MultiCharacterTurnBuilder.BuildTurns(castRevision, [chapter]);
+
+        var innerVoiceTurn = Assert.Single(turns, turn => turn.Voice == "alice-voice");
+        Assert.Contains("新生入學介紹與如何自保", innerVoiceTurn.Text);
+        Assert.DoesNotContain("最厚的一迭資料叫做", innerVoiceTurn.Text);
+        Assert.Equal("+0%", innerVoiceTurn.Rate);
+        Assert.Equal("+4Hz", innerVoiceTurn.Pitch);
+        Assert.Equal("+2%", innerVoiceTurn.Volume);
+    }
+
+    [Fact]
+    public void Inner_monologue_ignores_dialogue_emotion_cues_and_keeps_the_base_character_delivery()
+    {
+        var castRevision = BuildCastRevision(narratorVoice: "narrator-voice", aliceVoice: "alice-voice");
+        var chapter = BuildConfirmedChapter(
+            0,
+            "序章",
+            "封口上面怒氣沖沖地用紅筆寫了幾個大字。『摔者死！！』多麼簡潔。",
+            AliceId);
+
+        var turns = MultiCharacterTurnBuilder.BuildTurns(castRevision, [chapter]);
+
+        var innerVoiceTurn = Assert.Single(turns, turn => turn.Voice == "alice-voice");
+        Assert.Equal("+0%", innerVoiceTurn.Rate);
+        Assert.Equal("+4Hz", innerVoiceTurn.Pitch);
+        Assert.Equal("+2%", innerVoiceTurn.Volume);
+    }
+
+    [Fact]
     public void Adjacent_same_voice_segments_within_a_chapter_merge_into_one_turn()
     {
         var castRevision = BuildCastRevision(narratorVoice: "narrator-voice", aliceVoice: "alice-voice");
@@ -221,6 +259,31 @@ public sealed class MultiCharacterTurnBuilderTests
     }
 
     [Fact]
+    public void Inner_monologue_for_a_custom_provider_uses_base_even_when_text_looks_angry()
+    {
+        var castRevision = BuildCastRevision(
+            narratorVoice: "narrator-voice",
+            aliceVoice: "alice-voice",
+            aliceProvider: "3wa-voxcpm2");
+        var chapter = BuildConfirmedChapter(
+            0,
+            "序章",
+            "封口上面怒氣沖沖地用紅筆寫了幾個大字。『摔者死！！』多麼簡潔。",
+            AliceId);
+        var voiceProfiles = new[]
+        {
+            BuildReadyProfile(CharacterVoiceProfileKind.Base, sceneCode: null, taskId: "base-task"),
+            BuildReadyProfile(CharacterVoiceProfileKind.Scene, CharacterVoiceSceneCodes.Angry, taskId: "angry-task"),
+        };
+        var characterProfileIdsByCharacterId = new Dictionary<Guid, Guid> { [AliceId] = AliceCharacterProfileId };
+
+        var turns = MultiCharacterTurnBuilder.BuildTurns(castRevision, [chapter], voiceProfiles, characterProfileIdsByCharacterId);
+
+        var aliceTurn = Assert.Single(turns, turn => turn.Voice.StartsWith("clone:", StringComparison.Ordinal));
+        Assert.Equal("clone:base-task", aliceTurn.Voice);
+    }
+
+    [Fact]
     public void A_custom_provider_character_with_no_ready_profile_at_all_safely_falls_back_to_the_narrator_voice()
     {
         var castRevision = BuildCastRevision(
@@ -300,9 +363,12 @@ public sealed class MultiCharacterTurnBuilderTests
         {
             var sortOrder = segments.Count;
             var text = body.Substring(bodySegment.StartOffset, bodySegment.Length);
-            var kind = bodySegment.Kind == SpeechSegmentKind.Dialogue
-                ? SpeechSegmentTurnKind.Dialogue
-                : SpeechSegmentTurnKind.Narrator;
+            var kind = bodySegment.Kind switch
+            {
+                SpeechSegmentKind.Dialogue => SpeechSegmentTurnKind.Dialogue,
+                SpeechSegmentKind.InnerMonologue => SpeechSegmentTurnKind.InnerMonologue,
+                _ => SpeechSegmentTurnKind.Narrator,
+            };
             segments.Add(new DraftSegmentInput(
                 sortOrder,
                 SpeechSegmentSourceKind.Body,
@@ -310,7 +376,9 @@ public sealed class MultiCharacterTurnBuilderTests
                 bodySegment.Length,
                 HashSlice(text),
                 kind,
-                kind == SpeechSegmentTurnKind.Dialogue ? dialogueCharacterId : null,
+                kind is SpeechSegmentTurnKind.Dialogue or SpeechSegmentTurnKind.InnerMonologue
+                    ? dialogueCharacterId
+                    : null,
                 100,
                 SpeechSegmentDecisionSource.Rule,
                 SpeechSegmentReviewStatus.Confirmed));

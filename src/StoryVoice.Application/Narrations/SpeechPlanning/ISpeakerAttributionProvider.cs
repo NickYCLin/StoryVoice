@@ -48,8 +48,9 @@ public sealed record SpeakerAttributionResult(
 /// <summary>
 /// Attributes a speaker to each Dialogue segment. Implementations must only ever return a
 /// <c>CharacterId</c> that appears in <see cref="SpeakerAttributionRequest.KnownCharacters"/>,
-/// and must only score <see cref="SpeechSegmentKind.Dialogue"/> segments (Narrator segments are
-/// never attributed to a character). Implementations must not invent character names — an
+/// and must only score <see cref="SpeechSegmentKind.Dialogue"/> segments (Narrator and
+/// InnerMonologue segments bypass speaker attribution). Implementations must not invent character
+/// names — an
 /// unmatched or ambiguous segment must resolve to <see cref="SpeakerAttributionOutcome.Unknown"/>
 /// or <see cref="SpeakerAttributionOutcome.Suggested"/>, never a fabricated identity.
 /// </summary>

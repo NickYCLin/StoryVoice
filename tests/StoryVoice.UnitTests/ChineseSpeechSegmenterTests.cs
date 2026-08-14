@@ -47,6 +47,82 @@ public sealed class ChineseSpeechSegmenterTests
         AssertReconstructsExactly(body, plan);
     }
 
+    [Theory]
+    [InlineData(
+        "在各處傳回來的消息都跟我講一件事情。\n......『查無此校』\n......要耍人也耍的高明一點好不好！",
+        "『查無此校』",
+        SpeechSegmentKind.InnerMonologue)]
+    [InlineData(
+        "因為那個紙袋封口上面用紅筆寫了幾個大字。說真的，我沒聽過有學校會這樣寫的。\n『摔者死！ 』\n多麼簡潔利落啊。",
+        "『摔者死！ 』",
+        SpeechSegmentKind.InnerMonologue)]
+    [InlineData(
+        "最厚的那一迭有用活頁夾子好好整理起來，叫做『新生入學介紹與如何自保』。",
+        "『新生入學介紹與如何自保』",
+        SpeechSegmentKind.InnerMonologue)]
+    [InlineData(
+        "『啪』的一個巨大聲響。我那很有氣魄的大姐拿資料從我腦後呼下去。",
+        "『啪』",
+        SpeechSegmentKind.Narrator)]
+    [InlineData(
+        "看來看去，居然比我今天那間『貴』族學校更便宜很多。",
+        "『貴』",
+        SpeechSegmentKind.Narrator)]
+    public void Segment_classifies_vol1_non_spoken_lenticular_quotes_by_high_confidence_context(
+        string body,
+        string quotedText,
+        SpeechSegmentKind expectedKind)
+    {
+        var plan = _segmenter.Segment("第一話 分發出錯", body);
+
+        var segment = Assert.Single(plan.BodySegments, candidate => Slice(body, candidate) == quotedText);
+        Assert.Equal(expectedKind, segment.Kind);
+        Assert.Equal(SpeechSegmentStatus.Ready, segment.Status);
+        Assert.Equal("zh-quote-v3-semantic-kinds", plan.AlgorithmVersion);
+        AssertReconstructsExactly(body, plan);
+    }
+
+    [Theory]
+    [InlineData(
+        "我把手機放在耳朵旁邊。『你怎麼沒跟著撞車！？』手機的那端突然傳來極度不耐煩的聲音。",
+        "『你怎麼沒跟著撞車！？』")]
+    [InlineData(
+        "『吾家下了結界，請放心。』娃兒奶聲奶氣的說話了。",
+        "『吾家下了結界，請放心。』")]
+    [InlineData(
+        "『與我簽訂契約的物，讓破壞者見識你的型。』其實我聽見學長說的這段不是中文。",
+        "『與我簽訂契約的物，讓破壞者見識你的型。』")]
+    [InlineData(
+        "信件上寫著『立刻撤退』，她大聲念給所有人聽。",
+        "『立刻撤退』")]
+    [InlineData(
+        "她大聲念給所有人聽：『立刻撤退』",
+        "『立刻撤退』")]
+    [InlineData("她回答：『好。』", "『好。』")]
+    [InlineData("夜色裡忽然出現一句。『快走。』風又停了。", "『快走。』")]
+    public void Segment_keeps_spoken_communication_incantations_and_ambiguous_quotes_as_dialogue(
+        string body,
+        string quotedText)
+    {
+        var plan = _segmenter.Segment(null, body);
+
+        var segment = Assert.Single(plan.BodySegments, candidate => Slice(body, candidate) == quotedText);
+        Assert.Equal(SpeechSegmentKind.Dialogue, segment.Kind);
+        AssertReconstructsExactly(body, plan);
+    }
+
+    [Fact]
+    public void Segment_classifies_an_explicit_first_person_thought_as_inner_monologue()
+    {
+        const string body = "我心想：『這不可能。』窗外一片安靜。";
+
+        var plan = _segmenter.Segment(null, body);
+
+        var thought = Assert.Single(plan.BodySegments, segment => Slice(body, segment) == "『這不可能。』");
+        Assert.Equal(SpeechSegmentKind.InnerMonologue, thought.Kind);
+        AssertReconstructsExactly(body, plan);
+    }
+
     [Fact]
     public void Segment_keeps_cross_line_dialogue_and_nested_quotes_in_one_outer_turn()
     {

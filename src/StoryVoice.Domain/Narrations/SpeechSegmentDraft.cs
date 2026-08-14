@@ -1,7 +1,7 @@
 namespace StoryVoice.Domain.Narrations;
 
 /// <summary>
-/// One narrator or dialogue turn inside a <see cref="ChapterSpeechPlanDraft"/>. Only offsets and
+/// One narrator, dialogue or inner-monologue turn inside a <see cref="ChapterSpeechPlanDraft"/>. Only offsets and
 /// a text hash are stored — never the source text itself — matching the same "no duplicated
 /// private text" contract as the Task 5 segmenter output.
 /// </summary>
@@ -54,9 +54,23 @@ public sealed class SpeechSegmentDraft
             throw new ArgumentException("旁白片段不可指定角色。", nameof(characterId));
         }
 
-        if (kind == SpeechSegmentTurnKind.Dialogue && sourceKind != SpeechSegmentSourceKind.Body)
+        if (kind is SpeechSegmentTurnKind.Dialogue or SpeechSegmentTurnKind.InnerMonologue
+            && sourceKind != SpeechSegmentSourceKind.Body)
         {
-            throw new ArgumentException("對白片段必須來自章節正文，不可以是章名。", nameof(sourceKind));
+            throw new ArgumentException("對白或內心片段必須來自章節正文，不可以是章名。", nameof(sourceKind));
+        }
+
+        if (kind == SpeechSegmentTurnKind.InnerMonologue && characterId is null)
+        {
+            throw new ArgumentException("內心／默讀片段必須指定視角角色。", nameof(characterId));
+        }
+
+        if (kind == SpeechSegmentTurnKind.InnerMonologue
+            && (confidence != 100
+                || decisionSource != SpeechSegmentDecisionSource.Rule
+                || reviewStatus != SpeechSegmentReviewStatus.Confirmed))
+        {
+            throw new ArgumentException("內心／默讀片段必須是規則產生、100% 信心且已確認的結果。", nameof(reviewStatus));
         }
 
         Id = Guid.NewGuid();

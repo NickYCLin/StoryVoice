@@ -72,6 +72,8 @@ public sealed class SpeechPlanPersistenceModelTests
         Assert.Contains("CREATE TABLE narration_job_speech_plans", script, StringComparison.Ordinal);
         Assert.Contains("CK_speech_segment_drafts_narrator_no_character", script, StringComparison.Ordinal);
         Assert.Contains("CK_confirmed_speech_segments_narrator_no_character", script, StringComparison.Ordinal);
+        Assert.Contains("CK_speech_segment_drafts_inner_monologue_state", script, StringComparison.Ordinal);
+        Assert.Contains("CK_confirmed_speech_segments_inner_monologue_state", script, StringComparison.Ordinal);
         Assert.Contains("FK_speech_plan_drafts_books_OwnerId_BookId", script, StringComparison.Ordinal);
         Assert.Contains("FK_speech_plan_drafts_chapters_BookId_ChapterId", script, StringComparison.Ordinal);
         Assert.Contains("FK_njob_speech_plans_job_scope", script, StringComparison.Ordinal);
