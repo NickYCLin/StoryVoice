@@ -41,6 +41,37 @@ public sealed class CharacterCandidateExtractorTests
     }
 
     [Fact]
+    public void Complete_chapter_context_surfaces_a_descriptive_speaker_and_first_person_narrator()
+    {
+        var book = Book.Create(Guid.NewGuid(), "完整章節語境測試", "作者", "zh-TW", "story.txt");
+        book.AddChapter(
+            1,
+            "第三話 學長與土著",
+            "「你昏醒了？」死神轉過頭來，口氣非常之不好的對著我問。" +
+            "連忙用力點頭，「我在陰間嗎？」我想，這地方怎麼看都不像人間。" +
+            "眼前的漂亮死神不知道該怎麼辦。紅紅的眼睛瞪了我一眼，居然有點冷笑的，" +
+            "「如果你要當這裡是陰間也無所謂。」");
+
+        var candidates = CharacterCandidateExtractor.Extract(book.Chapters);
+
+        Assert.Collection(
+            candidates,
+            first =>
+            {
+                Assert.Equal("死神", first.Name);
+                Assert.Equal(2, first.OccurrenceCount);
+                Assert.Equal(CharacterCandidateKind.NamedSpeaker, first.Kind);
+                Assert.Equal("第三話 學長與土著", first.SampleChapterTitle);
+            },
+            second =>
+            {
+                Assert.Equal("第一人稱敘事者（我）", second.Name);
+                Assert.Equal(1, second.OccurrenceCount);
+                Assert.Equal(CharacterCandidateKind.FirstPersonNarrator, second.Kind);
+            });
+    }
+
+    [Fact]
     public void Single_character_third_person_pronouns_never_surface_as_candidates()
     {
         var book = Book.Create(Guid.NewGuid(), "代名詞測試", "作者", "zh-TW", "story.txt");

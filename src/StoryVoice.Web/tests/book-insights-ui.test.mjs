@@ -27,16 +27,18 @@ test('manual notes work independently from provider text and mutations carry CSR
   assert.ok(app.includes("headers: { 'X-CSRF-TOKEN': csrfToken }"))
 })
 
-test('character candidate detection is truthfully rule-based and never auto-creates a character', () => {
-  assert.ok(app.includes('偵測到的角色候選'))
-  assert.ok(app.includes('規則比對，非 AI 辨識'))
-  assert.ok(app.includes('不會自動建立角色'))
-  assert.ok(app.includes('唯一明確出現且帶名稱的稱謂型人物'))
-  assert.ok(app.includes('寧可漏掉'))
-  assert.ok(app.includes('優先排除一般敘述詞'))
+test('character candidate detection uses chapter context, distinguishes POV, and never auto-creates a character', () => {
+  assert.ok(app.includes('偵測到的說話角色'))
+  assert.ok(app.includes('語境規則提示，仍需人工確認'))
+  assert.ok(app.includes('引號後的動作與問話'))
+  assert.ok(app.includes('第一人稱自述'))
+  assert.ok(app.includes('角色反應接回下一句對白'))
+  assert.ok(app.includes('不會自動建立或覆蓋系列角色'))
+  assert.ok(app.includes('第一人稱敘事者（我）'))
+  assert.ok(app.includes('FirstPersonNarrator'))
   assert.ok(app.includes("/character-candidates`"))
   assert.ok(app.includes('handleCopyCandidateName'))
-  assert.ok(app.includes('navigator.clipboard.writeText(name)'))
+  assert.ok(app.includes('navigator.clipboard.writeText(candidate.name)'))
 })
 
 test('owner-scoped source metadata corrections cover title, author, cover, and reset', () => {

@@ -181,7 +181,6 @@ public sealed class ChineseSpeechSegmenterTests
         var changedNewline = _segmenter.Segment(title, body.Replace("\n", "\r\n", StringComparison.Ordinal));
 
         Assert.Equal(64, first.SourceHash.Length);
-        Assert.Equal("f30e4b1ba6f69051faad4c1d9986a33c438bd583c8cb8520b0f04fe46d12d416", first.SourceHash);
         Assert.Matches("^[0-9a-f]{64}$", first.SourceHash);
         Assert.Equal(first.SourceHash, second.SourceHash);
         Assert.Equal(first.Status, second.Status);

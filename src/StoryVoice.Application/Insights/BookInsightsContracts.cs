@@ -29,7 +29,8 @@ public sealed record CharacterCandidateResponse(
     string Name,
     int OccurrenceCount,
     string SampleChapterTitle,
-    string? SampleDialogue);
+    string? SampleDialogue,
+    string Kind);
 
 public sealed record CreateReadingNoteRequest(string Body, Guid? ChapterId);
 

@@ -3,11 +3,18 @@ using StoryVoice.Domain.Books;
 
 namespace StoryVoice.Application.Narrations.SpeechPlanning;
 
+public enum CharacterCandidateKind
+{
+    NamedSpeaker,
+    FirstPersonNarrator,
+}
+
 public sealed record CharacterCandidate(
     string Name,
     int OccurrenceCount,
     string SampleChapterTitle,
-    string? SampleDialogue);
+    string? SampleDialogue,
+    CharacterCandidateKind Kind = CharacterCandidateKind.NamedSpeaker);
 
 /// <summary>
 /// Suggests character names for a human to confirm — never assigns anyone as a speaker. It primarily
@@ -44,6 +51,7 @@ public static class CharacterCandidateExtractor
 {
     private const int MaximumCandidates = 30;
     private const int MaximumSampleLength = 120;
+    private const string FirstPersonNarratorLabel = "第一人稱敘事者（我）";
 
     // A real character gets named next to their dialogue repeatedly across a book; a stray
     // function-word mismatch from the regex heuristic almost never recurs at the exact same
@@ -174,6 +182,21 @@ public static class CharacterCandidateExtractor
     private static readonly Regex LatinNamePattern = new(
         $@"^{LatinName}$",
         RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly string StrongReportingVerbPattern = string.Join(
+        '|',
+        ReportingVerbCatalog.Verbs
+            .Where(verb => !StringComparer.Ordinal.Equals(verb, "道"))
+            .OrderByDescending(verb => verb.Length)
+            .Select(Regex.Escape));
+    private static readonly Regex LeadingDescriptiveSpeaker = new(
+        $@"^\s*(?<name>\p{{IsCJKUnifiedIdeographs}}{{2,{MaximumNameLength}}}?)(?<action>[轉回抬低高冷笑怒皺瞪盯看望開對向朝應答問說喊叫][^。！？!?「」『』“”]{{0,72}}?(?:{StrongReportingVerbPattern}))[。！？!?]",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly Regex FirstPersonNarrationTag = new(
+        @"^\s*我(?:心裡想|心想|暗想|想)(?:[，,:：。！？!?]|$)",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly Regex ReactionCueNearConnectorEnd = new(
+        @"(?:瞪|盯|冷笑|笑了|皺眉|回頭|轉頭|望向|看了).{0,36}$",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     private static bool HasPositivePersonEvidence(
         string name,
@@ -282,7 +305,7 @@ public static class CharacterCandidateExtractor
             }
         }
 
-        return counts
+        var reportingCandidates = counts
             .Where(entry => entry.Value >= MinimumOccurrenceCount)
             .OrderByDescending(entry => entry.Value)
             .ThenBy(entry => entry.Key, StringComparer.Ordinal)
@@ -291,9 +314,116 @@ public static class CharacterCandidateExtractor
             {
                 var (chapterTitle, dialogue) = samples[entry.Key];
                 return new CharacterCandidate(entry.Key, entry.Value, chapterTitle, dialogue);
+            });
+
+        // The conservative name+verb candidates above are intentionally high precision, but a
+        // human reader also understands a bridge such as 「…？」死神轉過頭來，對著我問。 The
+        // bridge below captures only that stronger, sentence-bounded form and a clearly marked
+        // first-person speaker. They remain suggestions; nothing here creates a cast member.
+        return reportingCandidates
+            .Concat(ExtractContextualDialogueCandidates(orderedChapters))
+            .GroupBy(candidate => (candidate.Kind, candidate.Name))
+            .Select(group =>
+            {
+                var first = group.First();
+                return first with { OccurrenceCount = group.Sum(candidate => candidate.OccurrenceCount) };
             })
+            .OrderByDescending(candidate => candidate.OccurrenceCount)
+            .ThenBy(candidate => candidate.Kind)
+            .ThenBy(candidate => candidate.Name, StringComparer.Ordinal)
+            .Take(MaximumCandidates)
             .ToArray();
     }
+
+    private static IEnumerable<CharacterCandidate> ExtractContextualDialogueCandidates(
+        IEnumerable<Chapter> orderedChapters)
+    {
+        foreach (var chapter in orderedChapters)
+        {
+            string? lastExplicitNamedSpeaker = null;
+            var body = chapter.OriginalText;
+            var segments = new ChineseSpeechSegmenter().Segment(chapter.Title, body).BodySegments;
+            for (var position = 0; position < segments.Count; position++)
+            {
+                var dialogue = segments[position];
+                if (dialogue.Kind != SpeechSegmentKind.Dialogue)
+                {
+                    continue;
+                }
+
+                var dialogueText = body.Substring(dialogue.StartOffset, dialogue.Length);
+                var before = position > 0 && segments[position - 1].Kind == SpeechSegmentKind.Narrator
+                    ? body.Substring(segments[position - 1].StartOffset, segments[position - 1].Length)
+                    : null;
+                var after = position < segments.Count - 1 && segments[position + 1].Kind == SpeechSegmentKind.Narrator
+                    ? body.Substring(segments[position + 1].StartOffset, segments[position + 1].Length)
+                    : null;
+                var explicitName = after is null ? null : FindLeadingDescriptiveSpeaker(after);
+
+                if (explicitName is not null)
+                {
+                    lastExplicitNamedSpeaker = explicitName;
+                    yield return new CharacterCandidate(
+                        explicitName,
+                        1,
+                        chapter.Title,
+                        Truncate(dialogueText));
+                    continue;
+                }
+
+                if (IsFirstPersonSpeaker(dialogueText, before, after))
+                {
+                    yield return new CharacterCandidate(
+                        FirstPersonNarratorLabel,
+                        1,
+                        chapter.Title,
+                        Truncate(dialogueText),
+                        CharacterCandidateKind.FirstPersonNarrator);
+                    continue;
+                }
+
+                // A reaction bridge may omit the name in its final clause (「…死神不知道怎麼
+                // 辦。紅紅的眼睛瞪了我一眼，冷笑著，『…』」). Reuse only the immediately
+                // preceding explicit speaker label when that label still occurs in this bridge
+                // and the tail contains an unmistakable reaction cue. This is a candidate hint,
+                // not a verified attribution.
+                if (lastExplicitNamedSpeaker is not null
+                    && before is not null
+                    && before.Contains(lastExplicitNamedSpeaker, StringComparison.Ordinal)
+                    && ReactionCueNearConnectorEnd.IsMatch(before))
+                {
+                    yield return new CharacterCandidate(
+                        lastExplicitNamedSpeaker,
+                        1,
+                        chapter.Title,
+                        Truncate(dialogueText));
+                }
+            }
+        }
+    }
+
+    private static string? FindLeadingDescriptiveSpeaker(string narratorText)
+    {
+        var match = LeadingDescriptiveSpeaker.Match(narratorText);
+        if (!match.Success)
+        {
+            return null;
+        }
+
+        var name = match.Groups["name"].Value;
+        return IsSpeakerLabel(name) ? name : null;
+    }
+
+    private static bool IsSpeakerLabel(string label) =>
+        label.Length is >= 2 and <= MaximumNameLength
+        && !BlockedNameWords.Any(word => label.Contains(word, StringComparison.Ordinal))
+        && !IsGenericRole(label);
+
+    private static bool IsFirstPersonSpeaker(string dialogueText, string? before, string? after) =>
+        // A quote followed by 「我想／我說」 is an explicit first-person speech tag. The preceding
+        // connector is intentionally not used: it may begin with the narrator's inner monologue
+        // and then identify another character's reaction before the next quoted response.
+        after is not null && FirstPersonNarrationTag.IsMatch(after);
 
     private static PersonEvidence FindPersonEvidence(IEnumerable<Chapter> chapters)
     {

@@ -102,6 +102,24 @@ public sealed class SpeakerAttributionTests
     }
 
     [Fact]
+    public async Task Bare_first_person_narration_does_not_make_an_adjacent_quote_the_point_of_view_speaker()
+    {
+        var provider = new RuleBasedSpeakerAttributionProvider();
+        var request = new SpeakerAttributionRequest(Cast,
+        [
+            new SpeechSegmentAttributionInput(0, SpeechSegmentKind.Dialogue, "「這裡是哪裡？」"),
+            new SpeechSegmentAttributionInput(1, SpeechSegmentKind.Narrator, "我盯著窗外，沒有回答。"),
+        ], AliceId);
+
+        var results = await provider.AttributeAsync(request, CancellationToken.None);
+
+        var result = Assert.Single(results);
+        Assert.Null(result.CharacterId);
+        Assert.Equal(SpeakerAttributionOutcome.Unknown, result.Outcome);
+        Assert.Equal("unknown_no_reporting_clause", result.ReasonCode);
+    }
+
+    [Fact]
     public async Task Point_of_view_pronoun_competing_with_a_named_character_in_the_same_clause_is_ambiguous()
     {
         var provider = new RuleBasedSpeakerAttributionProvider();
@@ -270,6 +288,71 @@ public sealed class SpeakerAttributionTests
         [
             new SpeechSegmentAttributionInput(0, SpeechSegmentKind.Narrator, "艾莉絲拍了拍鮑伯的肩膀，"),
             new SpeechSegmentAttributionInput(1, SpeechSegmentKind.Dialogue, "「走吧。」"),
+        ]);
+
+        var results = await provider.AttributeAsync(request, CancellationToken.None);
+
+        var result = Assert.Single(results);
+        Assert.Null(result.CharacterId);
+        Assert.Equal(SpeakerAttributionOutcome.Unknown, result.Outcome);
+    }
+
+    [Fact]
+    public async Task Descriptive_reporting_first_person_thought_and_reaction_continuation_are_attributed_in_order()
+    {
+        var deathGodId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+        var narratorId = Guid.Parse("44444444-4444-4444-4444-444444444444");
+        var provider = new RuleBasedSpeakerAttributionProvider();
+        var request = new SpeakerAttributionRequest(
+        [
+            new KnownCharacterIdentity(deathGodId, "死神", []),
+            new KnownCharacterIdentity(narratorId, "主角", []),
+        ],
+        [
+            new SpeechSegmentAttributionInput(0, SpeechSegmentKind.Dialogue, "「你昏醒了？」"),
+            new SpeechSegmentAttributionInput(1, SpeechSegmentKind.Narrator, "死神轉過頭來，口氣非常之不好的對著我問。連忙用力點頭，"),
+            new SpeechSegmentAttributionInput(2, SpeechSegmentKind.Dialogue, "「我在陰間嗎？」"),
+            new SpeechSegmentAttributionInput(3, SpeechSegmentKind.Narrator, "我想，這地方怎麼看都不像人間，一定是我沒死成又昏倒。眼前的漂亮死神不知道該怎麼辦。紅紅的眼睛瞪了我一眼，居然有點冷笑的，"),
+            new SpeechSegmentAttributionInput(4, SpeechSegmentKind.Dialogue, "「如果你要當這裡是陰間也無所謂。」"),
+        ], narratorId);
+
+        var results = await provider.AttributeAsync(request, CancellationToken.None);
+
+        Assert.Collection(
+            results,
+            first =>
+            {
+                Assert.Equal(0, first.SegmentIndex);
+                Assert.Equal(deathGodId, first.CharacterId);
+                Assert.Equal(SpeakerAttributionOutcome.Confirmed, first.Outcome);
+                Assert.Equal("descriptive_reporting_clause_exact_alias", first.ReasonCode);
+            },
+            second =>
+            {
+                Assert.Equal(2, second.SegmentIndex);
+                Assert.Equal(narratorId, second.CharacterId);
+                Assert.Equal(SpeakerAttributionOutcome.Suggested, second.Outcome);
+                Assert.Equal("first_person_dialogue_context_pov", second.ReasonCode);
+            },
+            third =>
+            {
+                Assert.Equal(4, third.SegmentIndex);
+                Assert.Equal(deathGodId, third.CharacterId);
+                Assert.Equal(SpeakerAttributionOutcome.Suggested, third.Outcome);
+                Assert.Equal("named_reaction_continuation_alias", third.ReasonCode);
+            });
+    }
+
+    [Fact]
+    public async Task Reaction_continuation_does_not_reuse_a_name_from_more_than_one_preceding_sentence()
+    {
+        var deathGodId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+        var provider = new RuleBasedSpeakerAttributionProvider();
+        var request = new SpeakerAttributionRequest(
+        [new KnownCharacterIdentity(deathGodId, "死神", [])],
+        [
+            new SpeechSegmentAttributionInput(0, SpeechSegmentKind.Narrator, "死神走到窗邊。過了一會兒，房間安靜下來。有人冷笑了一聲，"),
+            new SpeechSegmentAttributionInput(1, SpeechSegmentKind.Dialogue, "「別再猜了。」"),
         ]);
 
         var results = await provider.AttributeAsync(request, CancellationToken.None);

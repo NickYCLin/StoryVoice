@@ -343,6 +343,42 @@ public sealed class BookInsightsApiTests(ApiFactory factory) : IClassFixture<Api
     }
 
     [Fact]
+    public async Task Character_candidates_use_complete_chapter_context_for_descriptive_speakers_and_first_person_dialogue()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var owner = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        var book = await ImportTextAsync(
+            owner,
+            """
+            第三話 學長與土著
+            「你昏醒了？」死神轉過頭來，口氣非常之不好的對著我問。連忙用力點頭，「我在陰間嗎？」我想，這地方怎麼看都不像人間。眼前的漂亮死神不知道該怎麼辦。紅紅的眼睛瞪了我一眼，居然有點冷笑的，「如果你要當這裡是陰間也無所謂。」
+            """,
+            cancellationToken);
+
+        using var response = await owner.GetAsync(
+            $"/api/books/{book.Id}/character-candidates",
+            cancellationToken);
+        var candidates = await response.Content.ReadFromJsonAsync<CharacterCandidateResponse[]>(cancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.NotNull(candidates);
+        Assert.Collection(
+            candidates,
+            first =>
+            {
+                Assert.Equal("死神", first.Name);
+                Assert.Equal(2, first.OccurrenceCount);
+                Assert.Equal("NamedSpeaker", first.Kind);
+            },
+            second =>
+            {
+                Assert.Equal("第一人稱敘事者（我）", second.Name);
+                Assert.Equal(1, second.OccurrenceCount);
+                Assert.Equal("FirstPersonNarrator", second.Kind);
+            });
+    }
+
+    [Fact]
     public async Task Character_candidates_exclude_homographic_prose_and_generic_roles()
     {
         var cancellationToken = TestContext.Current.CancellationToken;

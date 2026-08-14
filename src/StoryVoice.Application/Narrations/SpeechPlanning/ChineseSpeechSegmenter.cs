@@ -5,7 +5,10 @@ namespace StoryVoice.Application.Narrations.SpeechPlanning;
 
 public sealed class ChineseSpeechSegmenter
 {
-    public const string AlgorithmVersion = "zh-quote-v1";
+    // The source hash doubles as the speech-plan regeneration fingerprint. Bump its discriminator
+    // whenever contextual attribution semantics change, so existing drafts are rebuilt rather than
+    // silently retaining assignments generated under an older rule set.
+    public const string AlgorithmVersion = "zh-quote-v2-context-attribution";
 
     public ChapterSpeechPlan Segment(string? chapterTitle, string body)
     {
@@ -228,7 +231,7 @@ public sealed class ChineseSpeechSegmenter
     private static string ComputeSourceHash(string title, string body)
     {
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        hash.AppendData("StoryVoice.ChapterSpeechSource.v1\0"u8);
+        hash.AppendData("StoryVoice.ChapterSpeechSource.v2-context-attribution\0"u8);
         AppendUtf16(hash, title);
         AppendUtf16(hash, body);
         return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();

@@ -29,6 +29,7 @@ type CharacterCandidate = {
   occurrenceCount: number
   sampleChapterTitle: string
   sampleDialogue: string | null
+  kind: 'NamedSpeaker' | 'FirstPersonNarrator'
 }
 
 type ReadingNote = {
@@ -207,12 +208,16 @@ export function BookInsightsPanel({ book, books, csrfToken, onBookUpdated }: Boo
     }
   }
 
-  async function handleCopyCandidateName(name: string) {
+  async function handleCopyCandidateName(candidate: CharacterCandidate) {
+    if (candidate.kind === 'FirstPersonNarrator') {
+      setCandidatesMessage('這是第一人稱「我」的說話者提示；到系列配音先加入主角實名，再把他設成「視角角色」。')
+      return
+    }
     try {
-      await navigator.clipboard.writeText(name)
-      setCandidatesMessage(`已複製「${name}」；到「多角色系列配音」加入角色時可以直接貼上。`)
+      await navigator.clipboard.writeText(candidate.name)
+      setCandidatesMessage(`已複製「${candidate.name}」；到「多角色系列配音」加入角色時可以直接貼上。`)
     } catch {
-      setCandidatesMessage(`「${name}」：這個瀏覽器不支援自動複製，請手動選取文字。`)
+      setCandidatesMessage(`「${candidate.name}」：這個瀏覽器不支援自動複製，請手動選取文字。`)
     }
   }
 
@@ -317,8 +322,8 @@ export function BookInsightsPanel({ book, books, csrfToken, onBookUpdated }: Boo
       </section>
 
       <section className="rounded-2xl border border-rose-100 bg-rose-50/70 p-4" aria-label="偵測到的角色候選">
-        <h4 className="font-serif text-lg text-stone-800">偵測到的角色候選 <span className="text-xs font-sans text-rose-700">規則比對，非 AI 辨識</span></h4>
-        <p className="mt-2 text-xs leading-6 text-stone-500">找出「名字＋說／問／道」這類對白提示詞，或夾在兩句對白之間、唯一明確出現且帶名稱的稱謂型人物（例如「幸運同學把椅子轉過來」），依對白出現次數排序；不會自動建立角色，只是提示你「這一冊大概有誰在說話」。寧可漏掉只用代名詞或稱謂互相稱呼的角色，也會優先排除一般敘述詞；請自行判斷再到系列配音手動加入角色。</p>
+        <h4 className="font-serif text-lg text-stone-800">偵測到的說話角色 <span className="text-xs font-sans text-rose-700">語境規則提示，仍需人工確認</span></h4>
+        <p className="mt-2 text-xs leading-6 text-stone-500">不只看「名字＋說／問／道」：也會看引號後的動作與問話（如「死神轉過頭來，對著我問」）、第一人稱自述，以及角色反應接回下一句對白。這是角色候選，不會自動建立或覆蓋系列角色；「第一人稱敘事者（我）」請先以主角實名加入系列，再設定為視角角色。</p>
         {!canGenerateSummary && <p className="mt-3 text-xs text-amber-700">等待合法正文：上傳 EPUB／TXT，並在外部書目上明確選擇連結。</p>}
         {candidates.length > 0 && (
           <ul className="mt-4 flex flex-wrap gap-2">
@@ -326,19 +331,20 @@ export function BookInsightsPanel({ book, books, csrfToken, onBookUpdated }: Boo
               <li key={candidate.name}>
                 <button
                   className="rounded-full border border-rose-200 bg-white px-3 py-1.5 text-left text-xs text-stone-600 transition hover:border-rose-400 hover:text-rose-700"
-                  onClick={() => handleCopyCandidateName(candidate.name)}
+                  onClick={() => void handleCopyCandidateName(candidate)}
                   title={candidate.sampleDialogue ? `${candidate.sampleChapterTitle}：${candidate.sampleDialogue}` : candidate.sampleChapterTitle}
                   type="button"
                 >
                   <span className="font-medium text-stone-800">{candidate.name}</span>
-                  <span className="ml-1.5 text-stone-400">× {candidate.occurrenceCount}</span>
+                  {candidate.kind === 'FirstPersonNarrator' && <span className="ml-1.5 text-violet-600">視角提示</span>}
+                  <span className="ml-1.5 text-stone-400">× {candidate.occurrenceCount} 句</span>
                 </button>
               </li>
             ))}
           </ul>
         )}
         {canGenerateSummary && candidatesState === 'ready' && candidates.length === 0 && (
-          <p className="mt-3 text-xs text-stone-400">這一冊沒有偵測到明顯的角色對白提示詞，可能是純第一人稱敘事，或角色都只用代名詞互相稱呼。</p>
+          <p className="mt-3 text-xs text-stone-400">這一冊沒有偵測到足夠明確的說話角色線索；可能是純敘事，或角色都只用代名詞互相稱呼。</p>
         )}
         <p className={`mt-3 min-h-5 text-xs ${candidatesState === 'error' ? 'text-rose-600' : 'text-stone-500'}`} role="status">{candidatesState === 'loading' && !candidatesMessage ? '正在掃描角色候選…' : candidatesMessage}</p>
       </section>

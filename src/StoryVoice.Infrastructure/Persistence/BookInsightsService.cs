@@ -167,7 +167,8 @@ internal sealed class BookInsightsService(
                 candidate.Name,
                 candidate.OccurrenceCount,
                 candidate.SampleChapterTitle,
-                candidate.SampleDialogue))
+                candidate.SampleDialogue,
+                candidate.Kind.ToString()))
             .ToArray();
     }
 
