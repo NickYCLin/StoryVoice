@@ -54,10 +54,10 @@ public sealed class SpeechSegmentDraft
             throw new ArgumentException("旁白片段不可指定角色。", nameof(characterId));
         }
 
-        if (kind is SpeechSegmentTurnKind.Dialogue or SpeechSegmentTurnKind.InnerMonologue
+        if (kind == SpeechSegmentTurnKind.Dialogue
             && sourceKind != SpeechSegmentSourceKind.Body)
         {
-            throw new ArgumentException("對白或內心片段必須來自章節正文，不可以是章名。", nameof(sourceKind));
+            throw new ArgumentException("對白片段必須來自章節正文，不可以是章名。", nameof(sourceKind));
         }
 
         if (kind == SpeechSegmentTurnKind.InnerMonologue && characterId is null)

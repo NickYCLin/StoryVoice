@@ -71,6 +71,36 @@ public sealed class StoryPipelineWorker(
                     .SetProperty(job => job.UpdatedAt, now)
                     .SetProperty(job => job.ConcurrencyStamp, Guid.NewGuid()),
                     cancellationToken);
+            var expiredVoAiJobIds = await SupportedJobs(db.NarrationJobs)
+                .Where(job => job.Status == NarrationJobStatus.Running
+                    && job.LeaseExpiresAt != null
+                    && job.LeaseExpiresAt <= now
+                    && !job.CancellationRequested
+                    && job.Mode == NarrationMode.MultiCharacter
+                    && job.CastRevisionId != null
+                    && db.NarrationCastRevisions.Any(revision =>
+                        revision.Id == job.CastRevisionId
+                        && revision.NarratorProvider == CharacterVoiceProviders.VoAi))
+                .Select(job => job.Id)
+                .ToArrayAsync(cancellationToken);
+            if (expiredVoAiJobIds.Length > 0)
+            {
+                await SupportedJobs(db.NarrationJobs)
+                    .Where(job => expiredVoAiJobIds.Contains(job.Id)
+                        && job.Status == NarrationJobStatus.Running
+                        && job.LeaseExpiresAt != null
+                        && job.LeaseExpiresAt <= now)
+                    .ExecuteUpdateAsync(setters => setters
+                        .SetProperty(job => job.Status, NarrationJobStatus.Failed)
+                        .SetProperty(job => job.ProgressPercent, 0)
+                        .SetProperty(job => job.LeaseOwner, (string?)null)
+                        .SetProperty(job => job.LeaseExpiresAt, (DateTimeOffset?)null)
+                        .SetProperty(job => job.NextAttemptAt, (DateTimeOffset?)null)
+                        .SetProperty(job => job.ErrorCode, "voai_lease_expired")
+                        .SetProperty(job => job.UpdatedAt, now)
+                        .SetProperty(job => job.ConcurrencyStamp, Guid.NewGuid()),
+                        cancellationToken);
+            }
             await SupportedJobs(db.NarrationJobs)
                 .Where(job => job.Status == NarrationJobStatus.Running
                     && job.LeaseExpiresAt != null
@@ -141,6 +171,7 @@ public sealed class StoryPipelineWorker(
     {
         string? temporaryPath = null;
         string? uncommittedAudioPath = null;
+        string? synthesisProviderName = null;
         try
         {
             await using var scope = scopeFactory.CreateAsyncScope();
@@ -222,6 +253,7 @@ public sealed class StoryPipelineWorker(
                         job.SeriesId!.Value,
                         job.CastRevisionId!.Value,
                         stoppingToken);
+                    synthesisProviderName = castRevision.NarratorProvider;
                     var chapterPlans = await LoadChapterPlanSourcesAsync(
                         db,
                         job.OwnerId,
@@ -347,15 +379,33 @@ public sealed class StoryPipelineWorker(
         }
         catch (OperationCanceledException)
         {
-            await RecordFailureAsync(claim, "provider_timeout", CancellationToken.None);
+            var preventAutomaticReplay = string.Equals(
+                synthesisProviderName,
+                CharacterVoiceProviders.VoAi,
+                StringComparison.OrdinalIgnoreCase);
+            await RecordFailureAsync(
+                claim,
+                "provider_timeout",
+                CancellationToken.None,
+                permanent: preventAutomaticReplay);
         }
         catch (Exception exception)
         {
             logger.LogWarning(exception, "Narration job {JobId} failed", claim.JobId);
-            var isPermanentErrorCode = exception.Message is "narration_source_unavailable"
+            var permanentProviderFailure = exception as PermanentNarrationProviderException;
+            var isVoAiJob = string.Equals(
+                synthesisProviderName,
+                CharacterVoiceProviders.VoAi,
+                StringComparison.OrdinalIgnoreCase);
+            var isPermanentErrorCode = permanentProviderFailure is not null
+                || isVoAiJob
+                || exception.Message is "narration_source_unavailable"
                 or "narration_source_changed"
                 or MultiCharacterTurnBuilder.IntegrityMismatchReasonCode;
-            var errorCode = isPermanentErrorCode ? exception.Message : "provider_failed";
+            var errorCode = permanentProviderFailure?.ErrorCode
+                ?? (isVoAiJob
+                    ? "voai_provider_failed"
+                    : isPermanentErrorCode ? exception.Message : "provider_failed");
             await RecordFailureAsync(
                 claim,
                 errorCode,

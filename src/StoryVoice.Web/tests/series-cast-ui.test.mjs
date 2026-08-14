@@ -18,6 +18,49 @@ test('系列配音控制台固定使用 owner-scoped series、角色與 alias AP
   assert.doesNotMatch(panel, /fuzzy|模糊比對/i)
 })
 
+test('聲線選擇以 provider 與 voice 複合 identity 區分，送出時還原 API 欄位', () => {
+  assert.match(panel, /const voiceKey = \(voice: VoiceOption\) => `\$\{voice\.provider\}\\n\$\{voice\.voice\}`/)
+  assert.match(panel, /voiceKey\(option\) === narratorVoiceKey/)
+  assert.match(panel, /voiceKey\(option\) === characterVoiceKey/)
+  assert.match(panel, /narratorProvider: selectedVoice\.provider/)
+  assert.match(panel, /narratorVoice: selectedVoice\.voice/)
+  assert.match(panel, /voiceProvider: selectedVoice\.provider/)
+  assert.match(panel, /voice: selectedVoice\.voice/)
+  assert.match(panel, /value=\{voiceKey\(option\)\}/)
+  assert.match(panel, /voiceLabel\(details\.narratorProvider, details\.narratorVoice, voiceOptions\)/)
+  assert.match(panel, /voiceLabel\(character\.voiceProvider, character\.voice, voiceOptions\)/)
+  assert.doesNotMatch(panel, /option\.voice === narratorVoice/)
+  assert.doesNotMatch(panel, /option\.voice === characterVoice/)
+})
+
+test('角色庫自訂聲線仍固定解析 3wa provider，不出現在手動固定聲線清單', () => {
+  assert.match(panel, /const CUSTOM_VOICE_PROVIDER = '3wa-voxcpm2'/)
+  assert.match(panel, /voiceOptions\.find\(\(option\) => option\.provider === CUSTOM_VOICE_PROVIDER\)/)
+  assert.match(panel, /details\.narratorProvider === CUSTOM_VOICE_PROVIDER/)
+  assert.match(panel, /option\.provider === EDGE_VOICE_PROVIDER/)
+  assert.match(panel, /manualCharacterVoiceOptions\.map/)
+  assert.match(panel, /改用 Edge fallback/)
+  assert.match(panel, /characterProfileId: usingLibraryCharacter \? selectedCharacterProfileId : null/)
+})
+
+test('手動角色聲線受系列 narrator provider 限制，切換系列會清除不相容選擇', () => {
+  assert.match(panel, /option\.provider === details\.narratorProvider/)
+  assert.match(panel, /manualCharacterVoiceOptions\.some\(\(option\) => voiceKey\(option\) === current\)/)
+  assert.match(panel, /manualCharacterVoiceOptions\.find\(\(option\) => voiceKey\(option\) === characterVoiceKey\)/)
+  assert.match(panel, /setSelectedCharacterProfileId\(''\)/)
+  assert.doesNotMatch(panel, /voiceOptions\.find\(\(option\) => voiceKey\(option\) === characterVoiceKey\)/)
+})
+
+test('VoAI 系列禁止 3wa 角色庫並明示伺服器試音，建立系列仍可由完整聲線清單選 VoAI', () => {
+  assert.match(panel, /const VOAI_VOICE_PROVIDER = 'voai'/)
+  assert.match(panel, /這個系列使用 VoAI；不可混用 3wa 角色庫自訂聲線/)
+  assert.match(panel, /VoAI 聲線無法由瀏覽器 speechSynthesis 模擬/)
+  assert.match(panel, /disabled=\{details\.narratorProvider === VOAI_VOICE_PROVIDER\}/)
+  assert.match(panel, /voiceOptions\.map\(\(option\) => <option key=\{voiceKey\(option\)\} value=\{voiceKey\(option\)\}/)
+  assert.match(panel, /narratorProvider: selectedVoice\.provider/)
+  assert.match(panel, /narratorVoice: selectedVoice\.voice/)
+})
+
 test('staged rebuild 狀態以既有系列成員解析書名，不假設 rebuild API 回傳額外 bookTitle', () => {
   assert.match(panel, /members: Array<\{ id: string; bookId: string; status: string/)
   assert.doesNotMatch(panel, /members: Array<\{ id: string; bookTitle: string/)

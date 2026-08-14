@@ -42,6 +42,23 @@ test('local LLM candidates can be checked, merged by canonical name and applied 
   assert.ok(!app.includes('FirstPersonNarrator'))
 })
 
+test('角色候選聲線以 provider 與 voice 複合 identity 選取，API payload 保留兩個欄位', () => {
+  assert.ok(app.includes('const voiceKey = (voice: SeriesVoiceOption) => `${voice.provider}\\n${voice.voice}`'))
+  assert.ok(app.includes('voiceKey(option) === draft.voiceKey'))
+  assert.ok(app.includes('voiceProvider: voice.provider'))
+  assert.ok(app.includes('voice: voice.voice'))
+})
+
+test('角色候選聲線跟隨目標系列 provider，不會由全域 catalog 建立混用 cast', () => {
+  assert.ok(app.includes('narratorProvider: string'))
+  assert.ok(app.includes("voice.provider === selectedSeries.narratorProvider"))
+  assert.ok(app.includes("selectedSeries.narratorProvider === '3wa-voxcpm2' && voice.provider === 'edge'"))
+  assert.ok(app.includes(".filter((voice) => voice.voice !== 'custom')"))
+  assert.ok(app.includes('applicableVoiceOptions.find((option) => voiceKey(option) === draft.voiceKey)'))
+  assert.ok(app.includes('applicableVoiceOptions.map((voice) => <option'))
+  assert.ok(!app.includes('voiceOptions.find((option) => voiceKey(option) === draft.voiceKey)'))
+})
+
 test('owner-scoped source metadata corrections cover title, author, cover, and reset', () => {
   assert.ok(app.includes('書名、作者與封面校正'))
   assert.ok(app.includes('/metadata-corrections`'))

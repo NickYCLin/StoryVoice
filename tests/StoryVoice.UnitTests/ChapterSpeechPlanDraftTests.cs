@@ -11,7 +11,7 @@ public sealed class ChapterSpeechPlanDraftTests
     private static readonly Guid AliceId = Guid.NewGuid();
 
     [Fact]
-    public void Create_requires_the_first_segment_to_be_the_chapter_title_narrator_turn()
+    public void Create_requires_the_first_segment_to_be_a_chapter_title_narration_turn()
     {
         var segments = new[]
         {
@@ -19,6 +19,18 @@ public sealed class ChapterSpeechPlanDraftTests
         };
 
         Assert.Throws<ArgumentException>(() => CreateDraft(segments));
+    }
+
+    [Fact]
+    public void Create_allows_the_chapter_title_to_use_the_point_of_view_inner_voice()
+    {
+        var draft = CreateDraft([PointOfViewTitleTurn()]);
+
+        var title = Assert.Single(draft.Segments);
+        Assert.Equal(SpeechSegmentSourceKind.ChapterTitle, title.SourceKind);
+        Assert.Equal(SpeechSegmentTurnKind.InnerMonologue, title.Kind);
+        Assert.Equal(AliceId, title.CharacterId);
+        Assert.Equal(ChapterSpeechPlanDraftStatus.ReadyToConfirm, draft.Status);
     }
 
     [Fact]
@@ -70,17 +82,12 @@ public sealed class ChapterSpeechPlanDraftTests
     }
 
     [Fact]
-    public void Inner_monologue_segments_require_a_body_source_and_point_of_view_character()
+    public void Inner_monologue_segments_require_a_point_of_view_character_and_generated_confirmed_state()
     {
         var missingCharacter = new[]
         {
             TitleTurn(),
             new DraftSegmentInput(1, SpeechSegmentSourceKind.Body, 0, 5, Hash("thought"), SpeechSegmentTurnKind.InnerMonologue, null, 100, SpeechSegmentDecisionSource.Rule, SpeechSegmentReviewStatus.Confirmed),
-        };
-        var titleSource = new[]
-        {
-            TitleTurn(),
-            new DraftSegmentInput(1, SpeechSegmentSourceKind.ChapterTitle, 0, 5, Hash("thought-title"), SpeechSegmentTurnKind.InnerMonologue, AliceId, 100, SpeechSegmentDecisionSource.Rule, SpeechSegmentReviewStatus.Confirmed),
         };
         var invalidGeneratedState = new[]
         {
@@ -89,7 +96,6 @@ public sealed class ChapterSpeechPlanDraftTests
         };
 
         Assert.Throws<ArgumentException>(() => CreateDraft(missingCharacter));
-        Assert.Throws<ArgumentException>(() => CreateDraft(titleSource));
         Assert.Throws<ArgumentException>(() => CreateDraft(invalidGeneratedState));
     }
 
@@ -210,6 +216,63 @@ public sealed class ChapterSpeechPlanDraftTests
     }
 
     [Fact]
+    public void Regenerating_matching_dialogue_preserves_user_confirmed_and_rejected_decisions()
+    {
+        var confirmedCharacterId = Guid.NewGuid();
+        var draft = CreateDraft(
+        [
+            TitleTurn(),
+            Dialogue(1, AliceId, SpeechSegmentReviewStatus.Suggested),
+            Dialogue(2, AliceId, SpeechSegmentReviewStatus.Suggested),
+        ]);
+        draft.ConfirmSegment(draft.Segments[1].Id, confirmedCharacterId);
+        draft.RejectSegment(draft.Segments[2].Id);
+
+        draft.RegenerateFromSegmentation(
+            Hash("chapter-v2"),
+            [
+                TitleTurn(),
+                Dialogue(1, AliceId, SpeechSegmentReviewStatus.Suggested),
+                Dialogue(2, AliceId, SpeechSegmentReviewStatus.Suggested),
+            ]);
+
+        var confirmed = draft.Segments[1];
+        Assert.Equal(confirmedCharacterId, confirmed.CharacterId);
+        Assert.Equal(100, confirmed.Confidence);
+        Assert.Equal(SpeechSegmentDecisionSource.User, confirmed.DecisionSource);
+        Assert.Equal(SpeechSegmentReviewStatus.Confirmed, confirmed.ReviewStatus);
+
+        var rejected = draft.Segments[2];
+        Assert.Null(rejected.CharacterId);
+        Assert.Equal(0, rejected.Confidence);
+        Assert.Equal(SpeechSegmentDecisionSource.User, rejected.DecisionSource);
+        Assert.Equal(SpeechSegmentReviewStatus.Rejected, rejected.ReviewStatus);
+        Assert.Equal(ChapterSpeechPlanDraftStatus.NeedsReview, draft.Status);
+    }
+
+    [Fact]
+    public void Regenerating_changed_dialogue_does_not_carry_a_user_decision_to_new_text()
+    {
+        var draft = CreateDraft(
+        [
+            TitleTurn(),
+            Dialogue(1, AliceId, SpeechSegmentReviewStatus.Suggested),
+        ]);
+        draft.ConfirmSegment(draft.Segments[1].Id, AliceId);
+        var changedDialogue = Dialogue(1, null, SpeechSegmentReviewStatus.Suggested) with
+        {
+            TextHash = Hash("changed-dialogue"),
+        };
+
+        draft.RegenerateFromSegmentation(Hash("chapter-v2"), [TitleTurn(), changedDialogue]);
+
+        var regenerated = draft.Segments[1];
+        Assert.Null(regenerated.CharacterId);
+        Assert.Equal(SpeechSegmentDecisionSource.Rule, regenerated.DecisionSource);
+        Assert.Equal(SpeechSegmentReviewStatus.Suggested, regenerated.ReviewStatus);
+    }
+
+    [Fact]
     public void Confirm_throws_unless_the_draft_is_ready_and_produces_an_immutable_revision_matching_segments()
     {
         var draft = CreateDraft(
@@ -266,6 +329,9 @@ public sealed class ChapterSpeechPlanDraftTests
 
     private static DraftSegmentInput TitleTurn() =>
         new(0, SpeechSegmentSourceKind.ChapterTitle, 0, 4, Hash("title"), SpeechSegmentTurnKind.Narrator, null, 100, SpeechSegmentDecisionSource.Rule, SpeechSegmentReviewStatus.Confirmed);
+
+    private static DraftSegmentInput PointOfViewTitleTurn() =>
+        new(0, SpeechSegmentSourceKind.ChapterTitle, 0, 4, Hash("title"), SpeechSegmentTurnKind.InnerMonologue, AliceId, 100, SpeechSegmentDecisionSource.Rule, SpeechSegmentReviewStatus.Confirmed);
 
     private static DraftSegmentInput Dialogue(int sortOrder, Guid? characterId, SpeechSegmentReviewStatus reviewStatus) =>
         new(sortOrder, SpeechSegmentSourceKind.Body, 10, 6, Hash($"dialogue-{sortOrder}"), SpeechSegmentTurnKind.Dialogue, characterId, 60, SpeechSegmentDecisionSource.Rule, reviewStatus);

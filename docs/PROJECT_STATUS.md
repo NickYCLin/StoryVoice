@@ -1,6 +1,6 @@
 # StoryVoice 開發進度
 
-最後更新：2026-08-14（區分對話、內心／文件默讀與音效／排版引文）
+最後更新：2026-08-14（系列可選獨立旁白或主角視角敘述）
 
 本文件記錄已由程式碼與測試證實的能力，以及接下來可直接實作的項目。
 產品方向與長期資料模型仍以
@@ -18,12 +18,12 @@
 - 單一聲線朗讀工作：持久化、租約、重試、取消、進度、私有 MP3 與 Range 串流。
 - 系列／冊次／角色／alias domain model 與 PostgreSQL 約束；canonical name 與 alias 共用唯一命名空間。
 - 不可變 cast revision、staged rebuild batch 與全系列 active epoch 原子切換邊界。
-- 以原文 offset 切分章名、旁白、對話與視角角色內心／文件默讀；高信心文件標題、標示與默讀語境不進說話者審核，改用視角角色的中性／基礎聲線，音效／詞中排版引文維持旁白，電話、發話、朗讀給他人聽與咒語仍是對話。所有片段可無遺漏、無重排地重組原文。
-- owner-scoped 系列配音 API：系列建立與查詢、冊次加入、角色與 alias 管理、固定聲線更新、伺服器 voice allowlist。
+- 以原文 offset 切分章名、旁白、對話與視角角色內心／文件默讀。系列可選 `IndependentNarrator` 或 `PointOfViewInnerMonologue`：後者會把章名及所有非真正對白的片段具體存成 POV 角色的 `InnerMonologue`，使用該角色中性／基礎聲線；電話、發話、朗讀給他人聽與咒語仍是對話。所有片段可無遺漏、無重排地重組原文。
+- owner-scoped 系列配音 API：系列建立與查詢、冊次加入、角色與 alias 管理、固定聲線更新、系列敘述模式／POV 原子設定、伺服器 voice allowlist。
 - 書冊（`BookCollection`）：與角色配音系列(`StorySeries`)各自獨立的單純書本分類收藏，可調整成員書籍排序與冊次標籤；書庫的瀏覽器「此裝置標籤」已移除，分類統一使用書冊。
 - 書冊唯讀分享：owner 可依 email 把書冊分享給其他已註冊帳號，被分享者只能唯讀瀏覽書名與章節正文，看不到閱讀筆記、摘要或朗讀音訊；owner 可隨時撤銷。
 - 前端已改為 React Router 多頁面架構（`/library`、`/collections`、`/shared` 等），不再是單一長頁面；`NarrationPanel` 已統一為深色主題。
-- 受限說話者辨識：明確 reporting clause 等強規則維持最高優先，不會被模型覆蓋；其餘對話再整章交給本機 `gpt-oss:20b` 補判。模型 schema 只能輸出目前系列已知角色 ID，≥85 信心才自動確認，中／低信心留在人工審核；逾時、例外、漏答、未知 ID 或卸載失敗都安全退回規則結果／Unknown。系列可另指定第一人稱視角角色。
+- 受限說話者辨識：明確 reporting clause 等強規則維持最高優先，不會被模型覆蓋；其餘對話再整章交給本機 `gpt-oss:20b` 補判。模型 schema 只能輸出目前系列已知角色 ID，≥85 信心才自動確認，中／低信心留在人工審核；逾時、例外、漏答、未知 ID 或卸載失敗都安全退回規則結果／Unknown。主角視角模式只轉換非對白，不改變真正對白的 attribution 上下文。
 - 逐章劇本審核 API：草稿建立／重建、逐片段確認或拒絕、確認為不可變 `ConfirmedSpeechPlanRevision`（含 canonical fingerprint），私人正文不進回應。
 - 多聲線 Edge TTS provider：以 JSON manifest 透過 stdin 傳入每個 turn 的文字／聲線／停頓，ffmpeg concat + ffprobe 驗證後才原子發布；provider registry／dispatcher 讓未來新增供應商不用動到既有系列角色 ID。
 - Worker 已能實際 claim 並處理 `MultiCharacter` 朗讀工作：從鎖定的 speech plan 與 cast revision 組出 turn 序列（相鄰同聲線合併、章界／換人有界停頓），送出合成前重算 fingerprint 與逐片段文字雜湊，任一不符永久失敗為 `speech_plan_integrity_mismatch`。
@@ -60,8 +60,9 @@
 →人工確認文字稿的流程才會就緒）。角色建好之後，在「多角色系列配音」加入角色
 時可以直接從角色庫選入，同一個角色（與其聲線）能跨多個系列重複使用，不用每個
 系列各自重建一次；系列裡的角色也可以不連結角色庫、維持原本手動設定固定 Edge
-聲線的舊流程。合成時依對白情緒查找對應情境聲線，找不到就退回基礎聲線，兩者都
-沒有才安全退回旁白聲線，不會讓整個朗讀工作失敗。
+聲線的舊流程。合成時依對白情緒查找對應情境聲線，找不到就退回基礎聲線；一般
+對白仍可使用旁白 fallback，但 `InnerMonologue` 缺少 POV 角色聲線時會 fail closed，
+不會悄悄改用另一位旁白。
 
 資料模型上，`CharacterVoiceProfile` 掛在 owner-scoped 的 `CharacterProfile`（角色庫
 條目）底下，不再綁死在單一系列的 `SeriesCharacter`；`SeriesCharacter` 有一個可選的

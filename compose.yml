@@ -76,6 +76,8 @@ services:
       BookStorage__RootPath: /data/books
       ThreeWaAiHub__BaseUrl: ${THREEWA_BASE_URL:-https://3wa.tw/3waAIHub/}
       ThreeWaAiHub__ApiToken: ${THREEWA_API_TOKEN:-}
+      VoAi__BaseUrl: ${VOAI_BASE_URL:-https://connect.voai.ai/}
+      VoAi__ApiKey: ${VOAI_API_KEY:-}
       Narration__AudioRootPath: /data/audio
       Narration__Voice: zh-TW-YunJheNeural
       Narration__Rate: -5%

@@ -164,6 +164,73 @@ public sealed class MultiCharacterNarrationApiTests(ApiFactory factory) : IClass
     }
 
     [Fact]
+    public async Task A_voai_series_stages_with_pinned_voice_and_provider_specific_cast_metadata()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var owner = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        var book = await ImportTextAsync(owner, "VoAI synthetic staging text", cancellationToken);
+
+        using var seriesResponse = await owner.PostWithCsrfAsync(
+            "/api/series",
+            new
+            {
+                name = $"VoAI 測試系列 {Guid.NewGuid():N}",
+                narratorProvider = "voai",
+                narratorVoice = "v1:Neo:佑希:預設",
+                narratorRate = "+0%",
+                narratorPitch = "+0Hz",
+                narratorVolume = "+0%",
+                defaultSpeakerPauseMs = 180
+            },
+            cancellationToken);
+        var series = await seriesResponse.Content.ReadFromJsonAsync<StorySeriesDetailsResponse>(cancellationToken);
+        Assert.Equal(HttpStatusCode.Created, seriesResponse.StatusCode);
+        Assert.NotNull(series);
+
+        await AddBookAsync(owner, series.Id, book.Id, cancellationToken);
+        using var characterResponse = await owner.PostWithCsrfAsync(
+            $"/api/series/{series.Id}/characters",
+            new
+            {
+                canonicalName = "VoAI 測試角色",
+                role = "Main",
+                voiceProvider = "voai",
+                voice = "v1:Neo:佑希:預設",
+                rate = "+0%",
+                pitch = "+0Hz",
+                volume = "+0%",
+                notes = (string?)null
+            },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, characterResponse.StatusCode);
+
+        await ConfirmOnlyChapterPlanAsync(owner, series.Id, book, cancellationToken);
+        using var stageResponse = await owner.PostWithCsrfAsync(
+            $"/api/series/{series.Id}/narration-rebuilds",
+            new { rightsAttested = true },
+            cancellationToken);
+        var staged = await stageResponse.Content.ReadFromJsonAsync<SeriesNarrationRebuildResponse>(cancellationToken);
+        Assert.Equal(HttpStatusCode.Created, stageResponse.StatusCode);
+        Assert.NotNull(staged);
+
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+        var revision = await db.NarrationCastRevisions
+            .AsNoTracking()
+            .Include(candidate => candidate.Assignments)
+            .SingleAsync(candidate => candidate.Id == staged.DraftCastRevisionId, cancellationToken);
+        Assert.Equal("voai", revision.NarratorProvider);
+        Assert.Equal("voai-voice-api-v1", revision.NarratorProviderVersion);
+        Assert.Equal("v1:Neo:佑希:預設", revision.NarratorVoice);
+        Assert.Equal("voai-speech-turn-concat-v1", revision.CompositionVersion);
+        Assert.Equal("wav-32khz-to-mp3-concat-v1", revision.FfmpegProfile);
+        var assignment = Assert.Single(revision.Assignments);
+        Assert.Equal("voai", assignment.VoiceProvider);
+        Assert.Equal("voai-voice-api-v1", assignment.ProviderVersion);
+        Assert.Equal("v1:Neo:佑希:預設", assignment.Voice);
+    }
+
+    [Fact]
     public async Task Terminal_replay_repairs_a_batch_whose_members_completed_before_its_ready_transition()
     {
         var cancellationToken = TestContext.Current.CancellationToken;

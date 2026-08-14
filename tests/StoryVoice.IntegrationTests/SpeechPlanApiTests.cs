@@ -1,8 +1,12 @@
 using System.Net;
 using System.Net.Http.Json;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using StoryVoice.Application.Books;
 using StoryVoice.Application.Narrations.SpeechPlanning;
 using StoryVoice.Application.Series;
+using StoryVoice.Domain.Series;
+using StoryVoice.Infrastructure.Persistence;
 
 namespace StoryVoice.IntegrationTests;
 
@@ -139,11 +143,161 @@ public sealed class SpeechPlanApiTests(ApiFactory factory) : IClassFixture<ApiFa
         Assert.Equal("Confirmed", updatedSegment.ReviewStatus);
         Assert.Equal("User", updatedSegment.DecisionSource);
 
+        using var rebuildResponse = await client.PostWithCsrfAsync(
+            $"/api/series/{series.Id}/books/{book.Id}/chapters/{chapterId}/speech-plan",
+            new { },
+            cancellationToken);
+        var rebuiltDraft = await rebuildResponse.Content
+            .ReadFromJsonAsync<ChapterSpeechPlanDraftResponse>(cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, rebuildResponse.StatusCode);
+        Assert.NotNull(rebuiltDraft);
+        var preservedConfirmation = Assert.Single(
+            rebuiltDraft.Segments,
+            segment => segment.Kind == "Dialogue");
+        Assert.Equal(character.Id, preservedConfirmation.CharacterId);
+        Assert.Equal("Confirmed", preservedConfirmation.ReviewStatus);
+        Assert.Equal("User", preservedConfirmation.DecisionSource);
+        Assert.Equal(100, preservedConfirmation.Confidence);
+
+        using var rejectSegmentRequest = new HttpRequestMessage(
+            HttpMethod.Put,
+            $"/api/series/{series.Id}/speech-plan-drafts/{rebuiltDraft.Id}/segments/{preservedConfirmation.Id}/reject");
+        using var rejectSegmentResponse = await client.SendWithCsrfAsync(
+            rejectSegmentRequest,
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, rejectSegmentResponse.StatusCode);
+
+        using var rebuildRejectedResponse = await client.PostWithCsrfAsync(
+            $"/api/series/{series.Id}/books/{book.Id}/chapters/{chapterId}/speech-plan",
+            new { },
+            cancellationToken);
+        var rebuiltRejectedDraft = await rebuildRejectedResponse.Content
+            .ReadFromJsonAsync<ChapterSpeechPlanDraftResponse>(cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, rebuildRejectedResponse.StatusCode);
+        Assert.NotNull(rebuiltRejectedDraft);
+        var preservedRejection = Assert.Single(
+            rebuiltRejectedDraft.Segments,
+            segment => segment.Kind == "Dialogue");
+        Assert.Null(preservedRejection.CharacterId);
+        Assert.Equal("Rejected", preservedRejection.ReviewStatus);
+        Assert.Equal("User", preservedRejection.DecisionSource);
+        Assert.Equal(0, preservedRejection.Confidence);
+
+        using var reconfirmSegmentRequest = new HttpRequestMessage(
+            HttpMethod.Put,
+            $"/api/series/{series.Id}/speech-plan-drafts/{rebuiltRejectedDraft.Id}/segments/{preservedRejection.Id}/confirm")
+        {
+            Content = JsonContent.Create(new ConfirmSpeechSegmentRequest(character.Id)),
+        };
+        using var reconfirmSegmentResponse = await client.SendWithCsrfAsync(
+            reconfirmSegmentRequest,
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, reconfirmSegmentResponse.StatusCode);
+
         using var confirmResponse = await client.PostWithCsrfAsync(
-            $"/api/series/{series.Id}/speech-plan-drafts/{draft.Id}/confirm",
+            $"/api/series/{series.Id}/speech-plan-drafts/{rebuiltRejectedDraft.Id}/confirm",
             new { },
             cancellationToken);
         Assert.Equal(HttpStatusCode.OK, confirmResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task Point_of_view_narrative_mode_maps_title_and_all_raw_narration_after_dialogue_attribution()
+    {
+        const string chapterTitle = "第一章 主角視角";
+        const string chapterBody = "主角走進教室。主角說：「你好。」我心想：『這不可能。』窗外一片安靜。";
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+
+        var series = await CreateSeriesAsync(client, "主角視角劇本系列", cancellationToken);
+        var book = await CreateBookAsync(client, chapterTitle, chapterBody, cancellationToken);
+        await client.PostWithCsrfAsync(
+            $"/api/series/{series.Id}/books",
+            new { bookId = book.Id, volumeLabel = "第一冊", sortOrder = 1 },
+            cancellationToken);
+        var pointOfViewCharacter = await AddCharacterAsync(client, series.Id, "主角", cancellationToken);
+        using var configureResponse = await client.PutWithCsrfAsync(
+            $"/api/series/{series.Id}/narrative-voice",
+            new ConfigureSeriesNarrativeVoiceRequest(
+                NarrativeVoiceMode.PointOfViewInnerMonologue,
+                pointOfViewCharacter.Id),
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, configureResponse.StatusCode);
+
+        var chapterId = book.Chapters.Single().Id;
+        using var buildResponse = await client.PostWithCsrfAsync(
+            $"/api/series/{series.Id}/books/{book.Id}/chapters/{chapterId}/speech-plan",
+            new { },
+            cancellationToken);
+        var draft = await buildResponse.Content
+            .ReadFromJsonAsync<ChapterSpeechPlanDraftResponse>(cancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, buildResponse.StatusCode);
+        Assert.NotNull(draft);
+        Assert.DoesNotContain(draft.Segments, segment => segment.Kind == "Narrator");
+        var title = draft.Segments[0];
+        Assert.Equal("ChapterTitle", title.SourceKind);
+        Assert.Equal("InnerMonologue", title.Kind);
+        Assert.Equal(pointOfViewCharacter.Id, title.CharacterId);
+
+        var dialogue = Assert.Single(draft.Segments, segment => segment.Kind == "Dialogue");
+        Assert.Equal(pointOfViewCharacter.Id, dialogue.CharacterId);
+        Assert.Equal("Confirmed", dialogue.ReviewStatus);
+        Assert.Equal("Rule", dialogue.DecisionSource);
+
+        var innerSegments = draft.Segments
+            .Where(segment => segment.Kind == "InnerMonologue")
+            .ToArray();
+        Assert.True(innerSegments.Length >= 3);
+        Assert.All(innerSegments, segment =>
+        {
+            Assert.Equal(pointOfViewCharacter.Id, segment.CharacterId);
+            Assert.Equal(100, segment.Confidence);
+            Assert.Equal("Rule", segment.DecisionSource);
+            Assert.Equal("Confirmed", segment.ReviewStatus);
+        });
+        Assert.Equal("ReadyToConfirm", draft.Status);
+    }
+
+    [Fact]
+    public async Task Point_of_view_narrative_mode_fails_closed_when_its_character_is_not_valid()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        var series = await CreateSeriesAsync(client, "無效主角視角系列", cancellationToken);
+        var book = await CreateBookAsync(client, "第一章", "窗外一片安靜。", cancellationToken);
+        await client.PostWithCsrfAsync(
+            $"/api/series/{series.Id}/books",
+            new { bookId = book.Id, volumeLabel = "第一冊", sortOrder = 1 },
+            cancellationToken);
+
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+            var storedSeries = await dbContext.StorySeries.SingleAsync(
+                candidate => candidate.Id == series.Id,
+                cancellationToken);
+            dbContext.Entry(storedSeries)
+                .Property(candidate => candidate.NarrativeVoiceMode)
+                .CurrentValue = NarrativeVoiceMode.PointOfViewInnerMonologue;
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        var chapterId = book.Chapters.Single().Id;
+        using var buildResponse = await client.PostWithCsrfAsync(
+            $"/api/series/{series.Id}/books/{book.Id}/chapters/{chapterId}/speech-plan",
+            new { },
+            cancellationToken);
+
+        Assert.Equal(HttpStatusCode.BadRequest, buildResponse.StatusCode);
+        var problem = await buildResponse.Content.ReadAsStringAsync(cancellationToken);
+        Assert.Contains("requires a valid series character", problem, StringComparison.Ordinal);
+
+        await using var verificationScope = factory.Services.CreateAsyncScope();
+        var verificationDb = verificationScope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+        Assert.False(await verificationDb.ChapterSpeechPlanDrafts.AnyAsync(
+            draft => draft.SeriesId == series.Id,
+            cancellationToken));
     }
 
     [Fact]

@@ -10,6 +10,8 @@ public static class CharacterVoiceProviders
 {
     public const string Edge = "edge";
 
+    public const string VoAi = "voai";
+
     /// <summary>The provider whose <see cref="StoryVoice.Domain.Narrations.CharacterVoiceProfile"/>-backed
     /// synthesis can also fall back to plain Edge voices turn-by-turn — see
     /// <c>ThreeWaVoxCpm2NarrationProvider</c> in the Worker project.</summary>

@@ -303,6 +303,11 @@ internal sealed class PostgreSqlCastEpochActivationPublisher(StoryVoiceDbContext
             Reject(CastEpochActivationFailure.StaleBaseRevision);
         }
 
+        if (series.UpdatedAt > batch.CreatedAt)
+        {
+            Reject(CastEpochActivationFailure.StaleBaseRevision);
+        }
+
         var draft = revisions.SingleOrDefault(revision => revision.Id == batch.DraftCastRevisionId);
         if (draft is null
             || draft.OwnerId != batch.OwnerId

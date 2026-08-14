@@ -1,3 +1,5 @@
+using StoryVoice.Domain.Narrations;
+
 namespace StoryVoice.Infrastructure.Persistence;
 
 public sealed class SeriesVoiceCatalogOptions
@@ -55,6 +57,15 @@ public sealed class SeriesVoiceCatalogOptions
             Provider = "edge",
             Voice = "zh-TW-HsiaoYuNeural",
             DisplayName = "曉雨（女聲）",
+            Locale = "zh-TW"
+        },
+        new()
+        {
+            // VoAI's public VoiceAPI documentation uses this exact model, speaker, and style in
+            // its synthesis examples. Keep all three pinned in the provider-scoped reference.
+            Provider = CharacterVoiceProviders.VoAi,
+            Voice = "v1:Neo:佑希:預設",
+            DisplayName = "VoAI 佑希（Neo／預設）",
             Locale = "zh-TW"
         },
         new()

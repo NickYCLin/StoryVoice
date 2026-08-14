@@ -19,7 +19,7 @@ Phase 1 Foundation 已建立：
 - 單一神經語音 MVP：持久化工作、租約與重試、取消、私有 MP3 與 owner-scoped Range 串流
 - 全書庫處理狀態矩陣：分開標示官方 TTS、合法正文、筆記與 StoryVoice 音訊
 - 跨冊系列／固定角色／alias、不可變 cast revision 與整批原子啟用資料邊界
-- 章名、旁白、對話與視角角色內心／文件默讀的 deterministic offset segmentation
+- 章名、獨立旁白、對話與視角角色內心／文件默讀的 deterministic offset segmentation；系列可選擇獨立旁白或「所有非對白皆由 POV 主角朗讀」
 - owner-scoped 系列配音管理 API 與伺服器 voice allowlist
 - 本機 LLM 角色與 alias 分析、候選勾選／合併、原子套用系列角色表
 - 規則優先、本機 LLM 補判的逐句說話者草稿；只有高信心自動確認，其餘進人工審核
@@ -232,6 +232,9 @@ tests/
 - Process only content you own or have the right to transform.
 - 建立神經語音時，合法正文會送往設定的外部 Microsoft Edge 語音服務；StoryVoice 不會把博客來官方 TTS 標記當成已生成音訊。
 - API keys belong in environment variables or a secret manager, never Git.
+- 使用 VoAI 雲端 API 時，待合成文字會透過網路傳送至 VoAI；啟用前請確認內容授權、隱私需求與供應商條款。
+- 對外提供 VoAI 產物時，應依適用法規與平台規範揭露該語音由 AI 生成或合成。
+- VoAI 免費試用音訊含背景音樂或浮水印，只供串接測試、不可作為商用成品；商用前須購買適用方案並確認聲線授權。
 - Uploaded books, generated audio, analysis results and runtime volumes are ignored by Git.
 - Generated audio is not automatically licensed for redistribution.
 

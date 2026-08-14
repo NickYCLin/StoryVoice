@@ -13,7 +13,7 @@
 ## Product decisions
 
 1. **聲線屬於系列角色，不屬於單本書。** 新一冊遇到同一角色時，必須解析至既有 `SeriesCharacter.Id`，並沿用同一 voice profile。
-2. **旁白也是系列固定聲線。** `StorySeries` 有獨立 narrator profile；不與任何角色共用預設聲線。
+2. **敘述方式由系列明確決定。** `StorySeries` 可使用獨立 narrator profile，或指定 POV 角色承擔章名與所有非對白敘述；不得在合成時臨時猜測或偷換聲線。
 3. **聲線不會自動重抽。** 自動建議只在角色第一次建立時執行一次；寫入後保持固定。
 4. **別名不等於新角色。** 本名、稱號、暱稱與代稱透過 `CharacterAlias` 指回同一角色。
 5. **換聲必須以系列 epoch 原子切換。** cast 變更先建立 `Draft` revision；同一系列所有已發布多角色冊次完成新版重製後，才能在單一交易切換 active epoch。舊 revision／MP3 轉為歷史版本，不得與新版混列為目前系列聲線。
@@ -36,7 +36,7 @@
 
 ## End-to-end flow
 
-1. 使用者建立系列，設定系列名稱、旁白聲線與預設停頓。
+1. 使用者建立系列，設定系列名稱、敘述模式、旁白／備援聲線與預設停頓；POV 模式必須同時指定系列內角色。
 2. 將每本 content book 加入系列並設定卷次／排序；同一 content book 最多屬於一個系列。
 3. 系統從首冊建立角色名冊草稿：明確 reporting clause、已知 alias 與本機 attribution provider 產生 speaker suggestions。
 4. 使用者確認角色、別名與聲線；主角／配角一旦確認，後續冊次直接沿用。
@@ -490,7 +490,7 @@
 
 - 同一系列目前公開的所有多角色冊次必須指向同一 Active cast epoch；相同 `SeriesCharacter.Id` 的 voice fingerprint 完全一致。Historical 音訊不得混列為目前系列版本。
 - 新冊分析不會為既有 canonical／alias identity key 建立第二個角色，也不會重新抽選 voice。
-- 旁白有獨立且固定的系列聲線。
+- 系列可固定使用獨立旁白，或由指定 POV 角色以中性聲線朗讀所有非對白；模式與 POV 變更會讓既有草稿失效，舊已發布音訊保持不可變。
 - 使用者可明確建立新 cast revision；舊 MP3／job 仍保留舊 revision。
 - 未知／低信心 speaker 不會被偽裝成確定角色。
 - 多角色音訊維持章名＋正文順序；章名恰好一次，正文 offsets 完整覆蓋且所有文字恰好朗讀一次，無遺漏、重複或跨章錯置。

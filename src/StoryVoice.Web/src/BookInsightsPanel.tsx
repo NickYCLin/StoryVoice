@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 
 import { apiUrl, responseProblem } from './api'
@@ -37,6 +37,7 @@ type ReadingNote = {
 type StorySeriesSummary = {
   id: string
   name: string
+  narratorProvider: string
   bookCount: number
   characterCount: number
 }
@@ -96,6 +97,13 @@ export function BookInsightsPanel({ book, books, csrfToken, onBookUpdated }: Boo
   const eligibleContentBooks = books.filter((candidate) => candidate.id !== book.id
     && candidate.authorizedTextAvailable)
   const canAnalyzeText = book.authorizedTextAvailable || linkedContentId !== ''
+  const selectedSeries = seriesOptions.find((series) => series.id === selectedSeriesId)
+  const applicableVoiceOptions = useMemo(() => {
+    if (!selectedSeries) return []
+    return voiceOptions.filter((voice) => voice.provider === selectedSeries.narratorProvider
+      || (selectedSeries.narratorProvider === '3wa-voxcpm2' && voice.provider === 'edge'))
+      .filter((voice) => voice.voice !== 'custom')
+  }, [selectedSeries, voiceOptions])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -169,16 +177,19 @@ export function BookInsightsPanel({ book, books, csrfToken, onBookUpdated }: Boo
   useEffect(() => {
     if (!characterAnalysis) return
     setCandidateDrafts((current) => Object.fromEntries(characterAnalysis.candidates.map((candidate, index) => {
-      const fallbackVoice = voiceOptions[index % Math.max(voiceOptions.length, 1)]
-      return [candidate.name, current[candidate.name] ?? {
-        selected: candidate.confidence === 'high',
-        canonicalName: candidate.name,
-        aliases: (candidate.aliases ?? []).join('、'),
-        role: candidate.confidence === 'high' ? 'Supporting' : 'Minor',
-        voiceKey: fallbackVoice ? voiceKey(fallbackVoice) : '',
+      const existing = current[candidate.name]
+      const fallbackVoice = applicableVoiceOptions[index % Math.max(applicableVoiceOptions.length, 1)]
+      return [candidate.name, {
+        selected: existing?.selected ?? candidate.confidence === 'high',
+        canonicalName: existing?.canonicalName ?? candidate.name,
+        aliases: existing?.aliases ?? (candidate.aliases ?? []).join('、'),
+        role: existing?.role ?? (candidate.confidence === 'high' ? 'Supporting' : 'Minor'),
+        voiceKey: existing && applicableVoiceOptions.some((voice) => voiceKey(voice) === existing.voiceKey)
+          ? existing.voiceKey
+          : fallbackVoice ? voiceKey(fallbackVoice) : '',
       }]
     })))
-  }, [characterAnalysis, voiceOptions])
+  }, [applicableVoiceOptions, characterAnalysis])
 
   async function handleMetadataCorrection(clear = false) {
     setMetadataState('loading')
@@ -266,7 +277,7 @@ export function BookInsightsPanel({ book, books, csrfToken, onBookUpdated }: Boo
       .filter((candidate) => candidateDrafts[candidate.name]?.selected)
       .map((candidate) => {
         const draft = candidateDrafts[candidate.name]
-        const voice = voiceOptions.find((option) => voiceKey(option) === draft.voiceKey)
+        const voice = applicableVoiceOptions.find((option) => voiceKey(option) === draft.voiceKey)
         if (!draft.canonicalName.trim() || !voice) throw new Error(`請補齊「${candidate.name}」的 canonical 名稱與聲線。`)
         return {
           sourceName: candidate.name,
@@ -410,12 +421,13 @@ export function BookInsightsPanel({ book, books, csrfToken, onBookUpdated }: Boo
                       <label className="text-[10px] text-stone-500">Canonical 名稱<input className="auth-input mt-1" maxLength={80} onChange={(event) => updateCandidate(candidate.name, { canonicalName: event.target.value })} value={candidateDrafts[candidate.name]?.canonicalName ?? candidate.name} /></label>
                       <label className="text-[10px] text-stone-500">Aliases（以、分隔）<input className="auth-input mt-1" maxLength={500} onChange={(event) => updateCandidate(candidate.name, { aliases: event.target.value })} value={candidateDrafts[candidate.name]?.aliases ?? (candidate.aliases ?? []).join('、')} /></label>
                       <label className="text-[10px] text-stone-500">角色層級<select className="auth-input mt-1" onChange={(event) => updateCandidate(candidate.name, { role: event.target.value as CandidateDraft['role'] })} value={candidateDrafts[candidate.name]?.role ?? 'Minor'}><option value="Main">主要角色</option><option value="Supporting">次要角色</option><option value="Minor">小角色</option></select></label>
-                      <label className="text-[10px] text-stone-500">聲線<select className="auth-input mt-1" onChange={(event) => updateCandidate(candidate.name, { voiceKey: event.target.value })} value={candidateDrafts[candidate.name]?.voiceKey ?? ''}><option value="">選擇聲線</option>{voiceOptions.map((voice) => <option key={voiceKey(voice)} value={voiceKey(voice)}>{voice.displayName} · {voice.locale}</option>)}</select></label>
+                      <label className="text-[10px] text-stone-500">聲線<select className="auth-input mt-1" onChange={(event) => updateCandidate(candidate.name, { voiceKey: event.target.value })} value={candidateDrafts[candidate.name]?.voiceKey ?? ''}><option value="">選擇聲線</option>{applicableVoiceOptions.map((voice) => <option key={voiceKey(voice)} value={voiceKey(voice)}>{voice.displayName} · {voice.locale}</option>)}</select></label>
                     </div>
                   </article>
                 ))}
                 <div className="rounded-xl border border-stone-200 bg-stone-50 p-3">
                   <label className="text-xs text-stone-500">套用到系列<select className="auth-input mt-2" onChange={(event) => setSelectedSeriesId(event.target.value)} value={selectedSeriesId}><option value="">選擇系列</option>{seriesOptions.map((series) => <option key={series.id} value={series.id}>{series.name} · {series.characterCount} 位角色</option>)}</select></label>
+                  {selectedSeries && <p className="mt-2 text-xs text-stone-500">角色聲線已限制為系列 provider：{selectedSeries.narratorProvider}，避免建立無法合成的混用 cast。</p>}
                   {seriesOptions.length === 0 && <p className="mt-2 text-xs text-amber-700">尚無系列，請先到「系列配音」建立系列與旁白聲線。</p>}
                   <div className="mt-3 flex flex-wrap items-center gap-3">
                     <button className="secondary-button disabled:opacity-40" disabled={!selectedSeriesId || applyState === 'loading' || Object.values(candidateDrafts).every((draft) => !draft.selected)} onClick={() => void handleApplyAnalyzedCharacters()} type="button">{applyState === 'loading' ? '套用中…' : '建立／合併系列角色表'}</button>

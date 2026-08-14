@@ -6,6 +6,7 @@ using StoryVoice.Application.Authentication;
 using StoryVoice.Application.Insights;
 using StoryVoice.Application.Series;
 using StoryVoice.Domain.Books;
+using StoryVoice.Domain.Narrations;
 using StoryVoice.Domain.Series;
 
 namespace StoryVoice.Infrastructure.Persistence;
@@ -31,6 +32,7 @@ internal sealed class SeriesService(
             .Select(series => new StorySeriesSummaryResponse(
                 series.Id,
                 series.Name,
+                series.NarratorProvider,
                 series.Books.Count,
                 series.Characters.Count,
                 series.ActiveCastRevisionId,
@@ -212,9 +214,86 @@ internal sealed class SeriesService(
             return null;
         }
 
-        series.SetPointOfViewCharacter(request.CharacterId);
-        await SaveChangesAsync(cancellationToken);
+        await ConfigureNarrativeVoiceAsync(
+            series,
+            series.NarrativeVoiceMode,
+            request.CharacterId,
+            cancellationToken);
         return await ToDetailsAsync(series, cancellationToken);
+    }
+
+    public async Task<StorySeriesDetailsResponse?> ConfigureNarrativeVoiceAsync(
+        Guid seriesId,
+        ConfigureSeriesNarrativeVoiceRequest request,
+        CancellationToken cancellationToken)
+    {
+        EnsureId(seriesId, nameof(seriesId));
+        ArgumentNullException.ThrowIfNull(request);
+        var series = await repository.GetForMutationAsync(seriesId, cancellationToken);
+        if (series is null)
+        {
+            return null;
+        }
+
+        await ConfigureNarrativeVoiceAsync(
+            series,
+            request.Mode,
+            request.PointOfViewCharacterId,
+            cancellationToken);
+        return await ToDetailsAsync(series, cancellationToken);
+    }
+
+    private async Task ConfigureNarrativeVoiceAsync(
+        StorySeries series,
+        NarrativeVoiceMode mode,
+        Guid? pointOfViewCharacterId,
+        CancellationToken cancellationToken)
+    {
+        var changed = series.NarrativeVoiceMode != mode
+            || series.PointOfViewCharacterId != pointOfViewCharacterId;
+        series.ConfigureNarrativeVoice(mode, pointOfViewCharacterId);
+        if (!changed)
+        {
+            return;
+        }
+
+        var drafts = await dbContext.ChapterSpeechPlanDrafts
+            .Where(draft => draft.OwnerId == series.OwnerId && draft.SeriesId == series.Id)
+            .ToListAsync(cancellationToken);
+        foreach (var draft in drafts)
+        {
+            draft.MarkStale();
+        }
+
+        var batches = await dbContext.SeriesCastRebuildBatches
+            .Where(batch => batch.OwnerId == series.OwnerId
+                && batch.SeriesId == series.Id
+                && (batch.Status == SeriesCastRebuildBatchStatus.Draft
+                    || batch.Status == SeriesCastRebuildBatchStatus.Building
+                    || batch.Status == SeriesCastRebuildBatchStatus.ReadyToActivate))
+            .ToListAsync(cancellationToken);
+        var batchIds = batches.Select(batch => batch.Id).ToArray();
+        if (batchIds.Length > 0)
+        {
+            var jobs = await dbContext.NarrationJobs
+                .Where(job => job.OwnerId == series.OwnerId
+                    && job.SeriesId == series.Id
+                    && job.RebuildBatchId != null
+                    && batchIds.Contains(job.RebuildBatchId.Value))
+                .ToListAsync(cancellationToken);
+            foreach (var job in jobs)
+            {
+                job.RequestCancellation();
+            }
+
+            var invalidatedAt = DateTimeOffset.UtcNow;
+            foreach (var batch in batches)
+            {
+                batch.Invalidate(invalidatedAt);
+            }
+        }
+
+        await SaveChangesAsync(cancellationToken);
     }
 
     public async Task<StorySeriesDetailsResponse?> ApplyAnalyzedCharactersAsync(
@@ -424,6 +503,7 @@ internal sealed class SeriesService(
             series.DefaultSpeakerPauseMs,
             series.ActiveCastRevisionId,
             series.PointOfViewCharacterId,
+            series.NarrativeVoiceMode.ToString(),
             series.Books
                 .OrderBy(book => book.SortOrder)
                 .Select(book => new StorySeriesBookResponse(

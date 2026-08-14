@@ -62,6 +62,7 @@ public sealed class StorySeries
             SeriesFieldLimits.SynthesisParameter,
             nameof(narratorVolume));
         DefaultSpeakerPauseMs = defaultSpeakerPauseMs;
+        NarrativeVoiceMode = StoryVoice.Domain.Series.NarrativeVoiceMode.IndependentNarrator;
         CreatedAt = DateTimeOffset.UtcNow;
         UpdatedAt = CreatedAt;
         ConcurrencyStamp = Guid.NewGuid();
@@ -80,6 +81,7 @@ public sealed class StorySeries
     public int DefaultSpeakerPauseMs { get; private set; }
     public Guid? ActiveCastRevisionId { get; private set; }
     public Guid? PointOfViewCharacterId { get; private set; }
+    public NarrativeVoiceMode NarrativeVoiceMode { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
     public Guid ConcurrencyStamp { get; private set; }
@@ -304,13 +306,42 @@ public sealed class StorySeries
     /// </summary>
     public void SetPointOfViewCharacter(Guid? characterId)
     {
+        ConfigureNarrativeVoice(NarrativeVoiceMode, characterId);
+    }
+
+    public void ConfigureNarrativeVoice(
+        NarrativeVoiceMode mode,
+        Guid? pointOfViewCharacterId)
+    {
         EnsureMutationAggregateComplete();
-        if (characterId is Guid id && _characters.All(character => character.Id != id))
+        if (!Enum.IsDefined(mode))
+        {
+            throw new ArgumentOutOfRangeException(nameof(mode), "不支援指定的敘事聲線模式。");
+        }
+
+        if (pointOfViewCharacterId == Guid.Empty)
+        {
+            throw new ArgumentException("視角角色識別碼不可為空值。", nameof(pointOfViewCharacterId));
+        }
+
+        if (pointOfViewCharacterId is Guid id && _characters.All(character => character.Id != id))
         {
             throw new InvalidOperationException("視角角色必須是這個系列裡已經存在的角色。");
         }
 
-        PointOfViewCharacterId = characterId;
+        if (mode == StoryVoice.Domain.Series.NarrativeVoiceMode.PointOfViewInnerMonologue
+            && pointOfViewCharacterId is null)
+        {
+            throw new InvalidOperationException("視角角色內心敘事模式必須指定系列內角色。");
+        }
+
+        if (NarrativeVoiceMode == mode && PointOfViewCharacterId == pointOfViewCharacterId)
+        {
+            return;
+        }
+
+        NarrativeVoiceMode = mode;
+        PointOfViewCharacterId = pointOfViewCharacterId;
         Touch();
     }
 

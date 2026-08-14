@@ -26,6 +26,24 @@ public sealed class SeriesApiTests(ApiFactory factory) : IClassFixture<ApiFactor
     }
 
     [Fact]
+    public async Task Voice_catalog_includes_the_official_voai_example()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        using var response = await client.GetAsync("/api/series/voice-options", cancellationToken);
+        var voices = await response.Content.ReadFromJsonAsync<SeriesVoiceOptionResponse[]>(
+            cancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.NotNull(voices);
+        Assert.Contains(voices, voice =>
+            voice.Provider == "voai"
+            && voice.Voice == "v1:Neo:佑希:預設"
+            && voice.DisplayName == "VoAI 佑希（Neo／預設）"
+            && voice.Locale == "zh-TW");
+    }
+
+    [Fact]
     public async Task Series_queries_are_owner_scoped_and_duplicate_names_are_rejected()
     {
         var cancellationToken = TestContext.Current.CancellationToken;

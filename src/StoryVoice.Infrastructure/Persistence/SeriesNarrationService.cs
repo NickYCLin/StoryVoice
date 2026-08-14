@@ -1,5 +1,7 @@
 using System.Data;
 using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Options;
@@ -74,6 +76,13 @@ internal sealed class SeriesNarrationService(
                 throw new InvalidOperationException("系列至少要先設定一位角色與固定聲線，才能建立多聲線朗讀批次。");
             }
 
+            if (series.NarrativeVoiceMode == NarrativeVoiceMode.PointOfViewInnerMonologue
+                && (series.PointOfViewCharacterId is not Guid pointOfViewCharacterId
+                    || series.Characters.All(character => character.Id != pointOfViewCharacterId)))
+            {
+                throw new InvalidOperationException("主角視角敘述模式必須指定系列內有效的視角角色。");
+            }
+
             if (await dbContext.SeriesCastRebuildBatches.AnyAsync(
                     batch => batch.OwnerId == ownerId
                         && batch.SeriesId == seriesId
@@ -103,10 +112,18 @@ internal sealed class SeriesNarrationService(
                 memberships,
                 sourceBooks,
                 confirmedPlans,
+                series.NarrativeVoiceMode,
                 cancellationToken);
 
             var configuration = compositionOptions.Value;
-            ValidateComposition(configuration);
+            ValidateComposition(configuration, series);
+            var narratorProviderVersion = configuration.ResolveProviderVersion(series.NarratorProvider);
+            var compositionVersion = configuration.ResolveCompositionVersion(series.NarratorProvider);
+            var ffmpegProfile = configuration.ResolveFfmpegProfile(series.NarratorProvider);
+            var effectiveCompositionVersion = BuildEffectiveCompositionVersion(
+                compositionVersion,
+                series.NarrativeVoiceMode,
+                series.PointOfViewCharacterId);
             var now = DateTimeOffset.UtcNow;
             var tentativeCastRevisionId = Guid.NewGuid();
             var tentativeAssignments = series.Characters
@@ -119,7 +136,7 @@ internal sealed class SeriesNarrationService(
                     character.Id,
                     character.CanonicalName,
                     character.VoiceProvider,
-                    configuration.ProviderVersion,
+                    configuration.ResolveProviderVersion(character.VoiceProvider),
                     character.Voice,
                     character.Rate,
                     character.Pitch,
@@ -132,15 +149,15 @@ internal sealed class SeriesNarrationService(
                 .ToArray();
             var prospectiveFingerprint = NarrationCastRevision.ComputeFingerprint(
                 series.NarratorProvider,
-                configuration.ProviderVersion,
+                narratorProviderVersion,
                 series.NarratorVoice,
                 series.NarratorRate,
                 series.NarratorPitch,
                 series.NarratorVolume,
                 series.DefaultSpeakerPauseMs,
                 configuration.ChapterPauseMs,
-                configuration.CompositionVersion,
-                configuration.FfmpegProfile,
+                effectiveCompositionVersion,
+                ffmpegProfile,
                 canonicalAssignments);
 
             // A voice cast that hasn't changed since a previous (e.g. failed) attempt hashes to
@@ -173,15 +190,15 @@ internal sealed class SeriesNarrationService(
                     seriesId,
                     nextCastRevisionNumber,
                     series.NarratorProvider,
-                    configuration.ProviderVersion,
+                    narratorProviderVersion,
                     series.NarratorVoice,
                     series.NarratorRate,
                     series.NarratorPitch,
                     series.NarratorVolume,
                     series.DefaultSpeakerPauseMs,
                     configuration.ChapterPauseMs,
-                    configuration.CompositionVersion,
-                    configuration.FfmpegProfile,
+                    effectiveCompositionVersion,
+                    ffmpegProfile,
                     now,
                     tentativeAssignments);
                 dbContext.NarrationCastRevisions.Add(castRevision);
@@ -393,20 +410,46 @@ internal sealed class SeriesNarrationService(
     {
         var revisions = await dbContext.ConfirmedSpeechPlanRevisions
             .AsNoTracking()
+            .AsSplitQuery()
+            .Include(revision => revision.Segments)
             .Where(revision => revision.OwnerId == ownerId
                 && revision.SeriesId == seriesId
                 && bookIds.Contains(revision.BookId))
             .OrderByDescending(revision => revision.RevisionNumber)
             .ToListAsync(cancellationToken);
-        return revisions
-            .GroupBy(revision => (revision.BookId, revision.ChapterId))
-            .ToDictionary(group => group.Key, group => group.First());
+        var drafts = await dbContext.ChapterSpeechPlanDrafts
+            .AsNoTracking()
+            .AsSplitQuery()
+            .Include(draft => draft.Segments)
+            .Where(draft => draft.OwnerId == ownerId
+                && draft.SeriesId == seriesId
+                && bookIds.Contains(draft.BookId))
+            .ToDictionaryAsync(draft => (draft.BookId, draft.ChapterId), cancellationToken);
+
+        var result = new Dictionary<(Guid BookId, Guid ChapterId), ConfirmedSpeechPlanRevision>();
+        foreach (var group in revisions.GroupBy(revision => (revision.BookId, revision.ChapterId)))
+        {
+            if (!drafts.TryGetValue(group.Key, out var draft)
+                || draft.Status != ChapterSpeechPlanDraftStatus.ReadyToConfirm)
+            {
+                continue;
+            }
+
+            var matchingRevision = group.FirstOrDefault(revision => revision.MatchesDraft(draft));
+            if (matchingRevision is not null)
+            {
+                result.Add(group.Key, matchingRevision);
+            }
+        }
+
+        return result;
     }
 
     private Dictionary<Guid, SourceAndPlanSnapshot> BuildSourceAndPlanSnapshots(
         IReadOnlyCollection<SeriesBook> memberships,
         IReadOnlyDictionary<Guid, Book> sourceBooks,
         IReadOnlyDictionary<(Guid BookId, Guid ChapterId), ConfirmedSpeechPlanRevision> confirmedPlans,
+        NarrativeVoiceMode narrativeVoiceMode,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -426,6 +469,12 @@ internal sealed class SeriesNarrationService(
                 if (!string.Equals(currentPlan.SourceHash, revision.SourceHash, StringComparison.Ordinal))
                 {
                     throw new InvalidOperationException("至少一份確認過的 speech plan 已經過期，請重新產生並確認後再建立多聲線批次。");
+                }
+
+                if (narrativeVoiceMode == NarrativeVoiceMode.PointOfViewInnerMonologue
+                    && revision.Segments.Any(segment => segment.Kind == SpeechSegmentTurnKind.Narrator))
+                {
+                    throw new InvalidOperationException("主角視角敘述模式仍存在旁白片段，請重新產生並確認該章劇本。");
                 }
 
                 chapterPlans.Add(new ChapterPlanSnapshot(chapter.SortOrder, revision));
@@ -466,15 +515,38 @@ internal sealed class SeriesNarrationService(
         }
     }
 
-    private static void ValidateComposition(MultiCharacterNarrationOptions options)
+    private static void ValidateComposition(MultiCharacterNarrationOptions options, StorySeries series)
     {
-        if (string.IsNullOrWhiteSpace(options.ProviderVersion)
-            || string.IsNullOrWhiteSpace(options.CompositionVersion)
-            || string.IsNullOrWhiteSpace(options.FfmpegProfile)
-            || options.ChapterPauseMs < 0)
+        if (options.ChapterPauseMs is < 0 or > 5_000)
         {
             throw new InvalidOperationException("多聲線合成設定不完整。");
         }
+
+        _ = options.ResolveProviderVersion(series.NarratorProvider);
+        _ = options.ResolveCompositionVersion(series.NarratorProvider);
+        _ = options.ResolveFfmpegProfile(series.NarratorProvider);
+        foreach (var provider in series.Characters
+            .Select(character => character.VoiceProvider)
+            .Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            _ = options.ResolveProviderVersion(provider);
+        }
+    }
+
+    private static string BuildEffectiveCompositionVersion(
+        string compositionVersion,
+        NarrativeVoiceMode narrativeVoiceMode,
+        Guid? pointOfViewCharacterId)
+    {
+        if (narrativeVoiceMode == NarrativeVoiceMode.IndependentNarrator)
+        {
+            return compositionVersion;
+        }
+
+        var policy = $"{narrativeVoiceMode}:{pointOfViewCharacterId?.ToString("N", CultureInfo.InvariantCulture) ?? "none"}";
+        var policyHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(policy)))
+            .ToLowerInvariant()[..12];
+        return $"{compositionVersion}-nv-{policyHash}";
     }
 
     private static SeriesNarrationRebuildResponse ToResponse(SeriesCastRebuildBatch batch) =>

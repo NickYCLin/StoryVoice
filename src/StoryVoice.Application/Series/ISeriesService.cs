@@ -45,5 +45,10 @@ public interface ISeriesService
         SetSeriesPointOfViewCharacterRequest request,
         CancellationToken cancellationToken);
 
+    Task<StorySeriesDetailsResponse?> ConfigureNarrativeVoiceAsync(
+        Guid seriesId,
+        ConfigureSeriesNarrativeVoiceRequest request,
+        CancellationToken cancellationToken);
+
     IReadOnlyList<SeriesVoiceOptionResponse> ListVoiceOptions();
 }

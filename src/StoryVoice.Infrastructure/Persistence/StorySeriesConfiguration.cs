@@ -14,6 +14,12 @@ internal sealed class StorySeriesConfiguration : IEntityTypeConfiguration<StoryS
             table.HasCheckConstraint(
                 "CK_story_series_default_speaker_pause_ms",
                 $"\"DefaultSpeakerPauseMs\" >= 0 AND \"DefaultSpeakerPauseMs\" <= {SeriesFieldLimits.MaximumSpeakerPauseMs}");
+            table.HasCheckConstraint(
+                "CK_story_series_narrative_voice_mode",
+                "\"NarrativeVoiceMode\" IN ('IndependentNarrator', 'PointOfViewInnerMonologue')");
+            table.HasCheckConstraint(
+                "CK_story_series_pov_mode_requires_character",
+                "\"NarrativeVoiceMode\" <> 'PointOfViewInnerMonologue' OR \"PointOfViewCharacterId\" IS NOT NULL");
         });
         builder.HasKey(series => series.Id);
         builder.Property(series => series.Id).ValueGeneratedNever();
@@ -38,6 +44,11 @@ internal sealed class StorySeriesConfiguration : IEntityTypeConfiguration<StoryS
             .IsRequired();
         builder.Property(series => series.NarratorVolume)
             .HasMaxLength(SeriesFieldLimits.SynthesisParameter)
+            .IsRequired();
+        builder.Property(series => series.NarrativeVoiceMode)
+            .HasConversion<string>()
+            .HasMaxLength(40)
+            .HasDefaultValue(NarrativeVoiceMode.IndependentNarrator)
             .IsRequired();
         builder.Property(series => series.ConcurrencyStamp).IsConcurrencyToken();
         builder.HasIndex(series => new { series.OwnerId, series.NormalizedName }).IsUnique();

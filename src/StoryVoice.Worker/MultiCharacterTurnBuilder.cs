@@ -184,10 +184,16 @@ public static class MultiCharacterTurnBuilder
                         }
                     }
 
+                    if (segment.Kind == SpeechSegmentTurnKind.InnerMonologue)
+                    {
+                        throw new SpeechPlanIntegrityException(IntegrityMismatchReasonCode);
+                    }
+
                     // A custom-provider character with no Ready profile yet has no usable Voice
                     // value at all (unlike Edge, assignment.Voice isn't a real voice id for this
-                    // provider) — falls all the way through to the narrator fallback below
-                    // instead of the Edge-style delta branch.
+                    // provider). Dialogue keeps its narrator fallback below; inner monologue must
+                    // fail closed because silently changing the POV voice would corrupt the
+                    // confirmed plan's delivery semantics.
                 }
                 else
                 {
@@ -201,10 +207,16 @@ public static class MultiCharacterTurnBuilder
             }
         }
 
-        // Narrator segments, and any dialogue/inner segment a human explicitly confirmed as narrator
-        // fallback (or whose assigned character was somehow removed from the cast revision, or
-        // whose custom-provider profile isn't Ready yet), safely default to the narrator's own
-        // fixed voice rather than guessing.
+        if (segment.Kind == SpeechSegmentTurnKind.InnerMonologue)
+        {
+            throw new SpeechPlanIntegrityException(IntegrityMismatchReasonCode);
+        }
+
+        // Narrator segments, and dialogue a human explicitly confirmed as narrator fallback (or
+        // whose assigned character was removed from the cast revision, or whose custom-provider
+        // profile isn't Ready yet), safely default to the narrator's own fixed voice rather than
+        // guessing. Inner monologue is deliberately excluded above: its confirmed POV voice is
+        // part of the plan and must never be replaced silently.
         return (
             castRevision.NarratorVoice,
             castRevision.NarratorRate,

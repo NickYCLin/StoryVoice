@@ -35,10 +35,23 @@ internal sealed class SpeechPlanService(
         }
 
         var knownCharacters = await LoadKnownCharactersAsync(ownerId, seriesId, cancellationToken);
-        var pointOfViewCharacterId = await LoadPointOfViewCharacterIdAsync(
+        var narrativeVoice = await LoadNarrativeVoiceConfigurationAsync(
             ownerId,
             seriesId,
             cancellationToken);
+        var pointOfViewCharacterId = narrativeVoice.PointOfViewCharacterId;
+        var knownPointOfViewCharacterId = pointOfViewCharacterId is Guid povCharacterId
+            && knownCharacters.Any(character => character.CharacterId == povCharacterId)
+                ? povCharacterId
+                : (Guid?)null;
+        var usesPointOfViewInnerVoice =
+            narrativeVoice.Mode == NarrativeVoiceMode.PointOfViewInnerMonologue;
+        if (usesPointOfViewInnerVoice && knownPointOfViewCharacterId is null)
+        {
+            throw new InvalidOperationException(
+                "Point-of-view inner-monologue narration requires a valid series character.");
+        }
+
         var hasDialogue = plan.BodySegments.Any(segment => segment.Kind == SpeechSegmentKind.Dialogue);
         var attributionResults = hasDialogue
             ? await attributionProvider.AttributeAsync(
@@ -59,8 +72,10 @@ internal sealed class SpeechPlanService(
                 plan.TitleTurn.StartOffset,
                 plan.TitleTurn.Length,
                 HashSlice(titleText),
-                SpeechSegmentTurnKind.Narrator,
-                null,
+                usesPointOfViewInnerVoice
+                    ? SpeechSegmentTurnKind.InnerMonologue
+                    : SpeechSegmentTurnKind.Narrator,
+                usesPointOfViewInnerVoice ? knownPointOfViewCharacterId : null,
                 100,
                 SpeechSegmentDecisionSource.Rule,
                 SpeechSegmentReviewStatus.Confirmed),
@@ -70,36 +85,21 @@ internal sealed class SpeechPlanService(
         {
             var sortOrder = segments.Count;
             var text = chapter.OriginalText.Substring(bodySegment.StartOffset, bodySegment.Length);
-            if (bodySegment.Kind == SpeechSegmentKind.Narrator)
+            if (bodySegment.Kind != SpeechSegmentKind.Dialogue)
             {
+                var usePointOfViewCharacter = usesPointOfViewInnerVoice
+                    || (bodySegment.Kind == SpeechSegmentKind.InnerMonologue
+                        && knownPointOfViewCharacterId is not null);
                 segments.Add(new DraftSegmentInput(
                     sortOrder,
                     SpeechSegmentSourceKind.Body,
                     bodySegment.StartOffset,
                     bodySegment.Length,
                     HashSlice(text),
-                    SpeechSegmentTurnKind.Narrator,
-                    null,
-                    100,
-                    SpeechSegmentDecisionSource.Rule,
-                    SpeechSegmentReviewStatus.Confirmed));
-                continue;
-            }
-
-            if (bodySegment.Kind == SpeechSegmentKind.InnerMonologue)
-            {
-                var hasKnownPointOfViewCharacter = pointOfViewCharacterId is Guid povCharacterId
-                    && knownCharacters.Any(character => character.CharacterId == povCharacterId);
-                segments.Add(new DraftSegmentInput(
-                    sortOrder,
-                    SpeechSegmentSourceKind.Body,
-                    bodySegment.StartOffset,
-                    bodySegment.Length,
-                    HashSlice(text),
-                    hasKnownPointOfViewCharacter
+                    usePointOfViewCharacter
                         ? SpeechSegmentTurnKind.InnerMonologue
                         : SpeechSegmentTurnKind.Narrator,
-                    hasKnownPointOfViewCharacter ? pointOfViewCharacterId : null,
+                    usePointOfViewCharacter ? knownPointOfViewCharacterId : null,
                     100,
                     SpeechSegmentDecisionSource.Rule,
                     SpeechSegmentReviewStatus.Confirmed));
@@ -285,15 +285,26 @@ internal sealed class SpeechPlanService(
         return bookOwned ? chapter : null;
     }
 
-    private async Task<Guid?> LoadPointOfViewCharacterIdAsync(
+    private async Task<NarrativeVoiceConfiguration> LoadNarrativeVoiceConfigurationAsync(
         Guid ownerId,
         Guid seriesId,
-        CancellationToken cancellationToken) =>
-        await dbContext.StorySeries
+        CancellationToken cancellationToken)
+    {
+        var configuration = await dbContext.StorySeries
             .AsNoTracking()
             .Where(series => series.OwnerId == ownerId && series.Id == seriesId)
-            .Select(series => series.PointOfViewCharacterId)
+            .Select(series => new
+            {
+                series.NarrativeVoiceMode,
+                series.PointOfViewCharacterId,
+            })
             .SingleOrDefaultAsync(cancellationToken);
+        return configuration is null
+            ? throw new InvalidOperationException("The speech plan series no longer exists.")
+            : new NarrativeVoiceConfiguration(
+                configuration.NarrativeVoiceMode,
+                configuration.PointOfViewCharacterId);
+    }
 
     private async Task<IReadOnlyList<KnownCharacterIdentity>> LoadKnownCharactersAsync(
         Guid ownerId,
@@ -408,4 +419,8 @@ internal sealed class SpeechPlanService(
     }
 
     private sealed record ChapterContext(string Title, string OriginalText);
+
+    private sealed record NarrativeVoiceConfiguration(
+        NarrativeVoiceMode Mode,
+        Guid? PointOfViewCharacterId);
 }

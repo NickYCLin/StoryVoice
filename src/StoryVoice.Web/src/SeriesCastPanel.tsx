@@ -9,6 +9,8 @@ import { SpeechPlanReview, type SeriesCharacterChoice, type SpeechPlanDraft } fr
 import type { BookDetails, BookSummary } from './types'
 
 const CUSTOM_VOICE_PROVIDER = '3wa-voxcpm2'
+const EDGE_VOICE_PROVIDER = 'edge'
+const VOAI_VOICE_PROVIDER = 'voai'
 
 type CharacterProfileSummary = {
   id: string
@@ -79,9 +81,10 @@ type LoadState = 'idle' | 'loading' | 'ready' | 'error'
 
 const profileDefaults = { rate: '+0%', pitch: '+0Hz', volume: '+0%' }
 const previewSentence = '這是一段不含書籍正文的聲線示範。'
+const voiceKey = (voice: VoiceOption) => `${voice.provider}\n${voice.voice}`
 
-function voiceLabel(voice: string, options: VoiceOption[]) {
-  const option = options.find((candidate) => candidate.voice === voice)
+function voiceLabel(provider: string, voice: string, options: VoiceOption[]) {
+  const option = options.find((candidate) => voiceKey(candidate) === `${provider}\n${voice}`)
   return option ? `${option.displayName}（${option.locale}）` : '已設定的固定聲線'
 }
 
@@ -99,12 +102,12 @@ export function SeriesCastPanel() {
   const [message, setMessage] = useState('')
 
   const [seriesName, setSeriesName] = useState('')
-  const [narratorVoice, setNarratorVoice] = useState('')
+  const [narratorVoiceKey, setNarratorVoiceKey] = useState('')
   const [bookId, setBookId] = useState('')
   const [volumeLabel, setVolumeLabel] = useState('')
   const [characterName, setCharacterName] = useState('')
   const [characterRole, setCharacterRole] = useState<SeriesCharacter['role']>('Supporting')
-  const [characterVoice, setCharacterVoice] = useState('')
+  const [characterVoiceKey, setCharacterVoiceKey] = useState('')
   const [selectedCharacterProfileId, setSelectedCharacterProfileId] = useState('')
   const [aliasCharacterId, setAliasCharacterId] = useState('')
   const [alias, setAlias] = useState('')
@@ -129,8 +132,7 @@ export function SeriesCastPanel() {
       setVoiceOptions(voices)
       setLibraryBooks(books)
       setCharacterProfiles(profiles)
-      setNarratorVoice((current) => current || voices[0]?.voice || '')
-      setCharacterVoice((current) => current || voices[0]?.voice || '')
+      setNarratorVoiceKey((current) => current || (voices[0] ? voiceKey(voices[0]) : ''))
       setSelectedSeriesId((current) => current || (
         items.some((item) => item.id === requestedSeriesId)
           ? requestedSeriesId
@@ -218,6 +220,23 @@ export function SeriesCastPanel() {
     return libraryBooks.filter((book) => book.authorizedTextAvailable && book.status !== 'Linked' && !memberIds.has(book.id))
   }, [details, libraryBooks])
 
+  const manualCharacterVoiceOptions = useMemo(() => {
+    if (!details) return []
+    return voiceOptions.filter((option) => option.provider !== CUSTOM_VOICE_PROVIDER
+      && (option.provider === details.narratorProvider
+        || (details.narratorProvider === CUSTOM_VOICE_PROVIDER && option.provider === EDGE_VOICE_PROVIDER)))
+  }, [details, voiceOptions])
+
+  useEffect(() => {
+    if (!details) return
+    setCharacterVoiceKey((current) => manualCharacterVoiceOptions.some((option) => voiceKey(option) === current)
+      ? current
+      : manualCharacterVoiceOptions[0] ? voiceKey(manualCharacterVoiceOptions[0]) : '')
+    if (details.narratorProvider !== CUSTOM_VOICE_PROVIDER) {
+      setSelectedCharacterProfileId('')
+    }
+  }, [details, manualCharacterVoiceOptions])
+
   const reviewEntries = useMemo(() => {
     if (!details) return []
     return details.books
@@ -229,7 +248,11 @@ export function SeriesCastPanel() {
       })
   }, [bookDetails, details, draftsByChapter])
 
-  function previewVoice(voice: string) {
+  function previewVoice(provider: string, voice: string) {
+    if (provider === VOAI_VOICE_PROVIDER) {
+      setMessage('VoAI 聲線無法由瀏覽器 speechSynthesis 模擬；尚需伺服器試音功能，請以正式配音成品為準。')
+      return
+    }
     if (!('speechSynthesis' in window)) {
       setMessage('這個瀏覽器不支援安全的固定示範句 preview。')
       return
@@ -245,8 +268,8 @@ export function SeriesCastPanel() {
 
   async function createSeries(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!seriesName.trim() || !narratorVoice) return
-    const selectedVoice = voiceOptions.find((option) => option.voice === narratorVoice)
+    if (!seriesName.trim() || !narratorVoiceKey) return
+    const selectedVoice = voiceOptions.find((option) => voiceKey(option) === narratorVoiceKey)
     if (!selectedVoice) return
     setFormState('loading')
     try {
@@ -256,7 +279,7 @@ export function SeriesCastPanel() {
         body: {
           name: seriesName.trim(),
           narratorProvider: selectedVoice.provider,
-          narratorVoice,
+          narratorVoice: selectedVoice.voice,
           narratorRate: profileDefaults.rate,
           narratorPitch: profileDefaults.pitch,
           narratorVolume: profileDefaults.volume,
@@ -298,16 +321,17 @@ export function SeriesCastPanel() {
 
   async function addCharacter(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const usingLibraryCharacter = Boolean(selectedCharacterProfileId)
+    const usingLibraryCharacter = details?.narratorProvider === CUSTOM_VOICE_PROVIDER
+      && Boolean(selectedCharacterProfileId)
     const libraryCharacter = characterProfiles.find((profile) => profile.id === selectedCharacterProfileId)
     const resolvedName = usingLibraryCharacter ? libraryCharacter?.canonicalName ?? '' : characterName.trim()
     if (!details || !resolvedName) return
-    if (!usingLibraryCharacter && !characterVoice) return
+    if (!usingLibraryCharacter && !characterVoiceKey) return
 
     const customVoice = voiceOptions.find((option) => option.provider === CUSTOM_VOICE_PROVIDER)
     const selectedVoice = usingLibraryCharacter
       ? customVoice
-      : voiceOptions.find((option) => option.voice === characterVoice)
+      : manualCharacterVoiceOptions.find((option) => voiceKey(option) === characterVoiceKey)
     if (!selectedVoice) return
 
     setFormState('loading')
@@ -411,8 +435,8 @@ export function SeriesCastPanel() {
 
         <form className="mt-6 grid grid-cols-1 gap-3 border-t border-stone-200 pt-5 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end" onSubmit={createSeries}>
           <label className="text-xs text-stone-500">新系列名稱<input className="auth-input mt-2" maxLength={200} onChange={(event) => setSeriesName(event.target.value)} required value={seriesName} /></label>
-          <label className="text-xs text-stone-500">固定旁白聲線<select className="auth-input mt-2" onChange={(event) => setNarratorVoice(event.target.value)} value={narratorVoice}><option value="">選擇聲線</option>{voiceOptions.map((option) => <option key={`${option.provider}:${option.voice}`} value={option.voice}>{option.displayName}（{option.locale}）</option>)}</select></label>
-          <button className="secondary-button disabled:cursor-wait disabled:opacity-60" disabled={formState === 'loading' || !seriesName.trim() || !narratorVoice} type="submit">建立系列</button>
+          <label className="text-xs text-stone-500">固定旁白聲線<select className="auth-input mt-2" onChange={(event) => setNarratorVoiceKey(event.target.value)} value={narratorVoiceKey}><option value="">選擇聲線</option>{voiceOptions.map((option) => <option key={voiceKey(option)} value={voiceKey(option)}>{option.displayName}（{option.locale}）</option>)}</select></label>
+          <button className="secondary-button disabled:cursor-wait disabled:opacity-60" disabled={formState === 'loading' || !seriesName.trim() || !narratorVoiceKey} type="submit">建立系列</button>
         </form>
       </section>
 
@@ -430,7 +454,7 @@ export function SeriesCastPanel() {
           {details && (
             <>
               <div className="rounded-3xl border border-stone-200 bg-white p-5 sm:p-7">
-                <div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs text-stone-500">系列</p><h2 className="mt-1 font-serif text-3xl text-stone-900">{details.name}</h2><p className="mt-2 text-sm text-stone-500">旁白：{voiceLabel(details.narratorVoice, voiceOptions)} · 對白間隔 {details.defaultSpeakerPauseMs}ms</p></div><button className="secondary-button px-3 py-2 text-xs" onClick={() => previewVoice(details.narratorVoice)} type="button">播放固定示範句</button></div>
+                <div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs text-stone-500">系列</p><h2 className="mt-1 font-serif text-3xl text-stone-900">{details.name}</h2><p className="mt-2 text-sm text-stone-500">旁白：{voiceLabel(details.narratorProvider, details.narratorVoice, voiceOptions)} · 對白間隔 {details.defaultSpeakerPauseMs}ms</p></div><button className="secondary-button px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-60" disabled={details.narratorProvider === VOAI_VOICE_PROVIDER} onClick={() => previewVoice(details.narratorProvider, details.narratorVoice)} type="button">{details.narratorProvider === VOAI_VOICE_PROVIDER ? 'VoAI 需伺服器試音' : '播放固定示範句'}</button></div>
 
                 <section className="mt-6 border-t border-stone-200 pt-5" aria-label="系列書籍"><h3 className="font-serif text-xl text-stone-900">系列書籍</h3><div className="mt-3 space-y-2">{details.books.slice().sort((left, right) => left.sortOrder - right.sortOrder).map((member) => <div className="rounded-xl border border-stone-200 bg-stone-50 p-3" key={member.id}><p className="text-sm text-stone-800">{member.volumeLabel} · {member.bookTitle}</p><p className="mt-1 text-xs text-stone-500">membership revision {member.membershipRevision}</p></div>)}{details.books.length === 0 && <p className="text-sm text-stone-500">尚未加入正文書籍。</p>}</div>
                   <form className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end" onSubmit={addBook}><label className="text-xs text-stone-500">從可用正文加入<select className="auth-input mt-2" onChange={(event) => setBookId(event.target.value)} value={bookId}><option value="">選擇書籍</option>{eligibleBooks.map((book) => <option key={book.id} value={book.id}>{book.title}</option>)}</select></label><label className="text-xs text-stone-500">冊次標籤<input className="auth-input mt-2" maxLength={100} onChange={(event) => setVolumeLabel(event.target.value)} placeholder="第一冊" value={volumeLabel} /></label><button className="secondary-button" disabled={formState === 'loading' || !bookId} type="submit">加入系列</button></form>
@@ -456,7 +480,7 @@ export function SeriesCastPanel() {
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <p className="text-sm text-stone-800">{character.canonicalName} · {character.role}</p>
                           <div className="flex items-center gap-3">
-                            <button className="text-xs text-amber-700" onClick={() => previewVoice(character.voice)} type="button">播放固定示範句</button>
+                            <button className="text-xs text-amber-700 disabled:cursor-not-allowed disabled:text-stone-400" disabled={character.voiceProvider === VOAI_VOICE_PROVIDER} onClick={() => previewVoice(character.voiceProvider, character.voice)} type="button">{character.voiceProvider === VOAI_VOICE_PROVIDER ? 'VoAI 需伺服器試音' : '播放固定示範句'}</button>
                             {character.characterProfileId && (
                               <button
                                 className="text-xs text-amber-700"
@@ -468,7 +492,7 @@ export function SeriesCastPanel() {
                             )}
                           </div>
                         </div>
-                        <p className="mt-1 text-xs text-stone-500">{voiceLabel(character.voice, voiceOptions)} · 別名：{character.aliases.map((item) => item.value).join('、') || '—'}</p>
+                        <p className="mt-1 text-xs text-stone-500">{voiceLabel(character.voiceProvider, character.voice, voiceOptions)} · 別名：{character.aliases.map((item) => item.value).join('、') || '—'}</p>
                         {expandedCharacterId === character.id && character.characterProfileId && (
                           <div className="mt-3">
                             <CharacterVoiceProfilesPanel
@@ -482,17 +506,25 @@ export function SeriesCastPanel() {
                     ))}
                   </div>
                   <form className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3" onSubmit={addCharacter}>
-                    <label className="text-xs text-stone-500 sm:col-span-3">
-                      從角色庫選擇（可選，選了就沿用角色庫的自訂聲線）
-                      <select
-                        className="auth-input mt-2"
-                        onChange={(event) => setSelectedCharacterProfileId(event.target.value)}
-                        value={selectedCharacterProfileId}
-                      >
-                        <option value="">不使用角色庫，手動設定</option>
-                        {characterProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.canonicalName}</option>)}
-                      </select>
-                    </label>
+                    {details.narratorProvider === CUSTOM_VOICE_PROVIDER ? (
+                      <label className="text-xs text-stone-500 sm:col-span-3">
+                        從角色庫選擇（可選，選了就沿用角色庫的 3wa 自訂聲線）
+                        <select
+                          className="auth-input mt-2"
+                          onChange={(event) => setSelectedCharacterProfileId(event.target.value)}
+                          value={selectedCharacterProfileId}
+                        >
+                          <option value="">不使用角色庫，改用 Edge fallback</option>
+                          {characterProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.canonicalName}</option>)}
+                        </select>
+                      </label>
+                    ) : (
+                      <p className="rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-xs leading-5 text-stone-500 sm:col-span-3">
+                        {details.narratorProvider === VOAI_VOICE_PROVIDER
+                          ? '這個系列使用 VoAI；不可混用 3wa 角色庫自訂聲線，請從下方選擇 VoAI 聲線。'
+                          : '角色庫自訂聲線只支援 3wa 系列；請從下方選擇與旁白相同 provider 的聲線。'}
+                      </p>
+                    )}
                     <label className="text-xs text-stone-500">
                       角色名稱
                       <input
@@ -519,18 +551,18 @@ export function SeriesCastPanel() {
                       <select
                         className="auth-input mt-2 disabled:opacity-60"
                         disabled={Boolean(selectedCharacterProfileId)}
-                        onChange={(event) => setCharacterVoice(event.target.value)}
-                        value={selectedCharacterProfileId ? '' : characterVoice}
+                        onChange={(event) => setCharacterVoiceKey(event.target.value)}
+                        value={selectedCharacterProfileId ? '' : characterVoiceKey}
                       >
                         {selectedCharacterProfileId && <option value="">沿用角色庫自訂聲線</option>}
-                        {voiceOptions.filter((option) => option.provider !== CUSTOM_VOICE_PROVIDER).map((option) => (
-                          <option key={`${option.provider}:${option.voice}`} value={option.voice}>{option.displayName}（{option.locale}）</option>
+                        {manualCharacterVoiceOptions.map((option) => (
+                          <option key={voiceKey(option)} value={voiceKey(option)}>{option.displayName}（{option.locale}）</option>
                         ))}
                       </select>
                     </label>
                     <button
                       className="secondary-button sm:col-span-3"
-                      disabled={formState === 'loading' || (!selectedCharacterProfileId && (!characterName.trim() || !characterVoice))}
+                      disabled={formState === 'loading' || (!selectedCharacterProfileId && (!characterName.trim() || !characterVoiceKey))}
                       type="submit"
                     >
                       加入角色與固定聲線

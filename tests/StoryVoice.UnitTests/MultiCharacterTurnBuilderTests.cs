@@ -134,6 +134,25 @@ public sealed class MultiCharacterTurnBuilderTests
     }
 
     [Fact]
+    public void Inner_monologue_with_no_matching_cast_assignment_fails_closed_instead_of_using_the_narrator_voice()
+    {
+        var castRevision = BuildCastRevision(narratorVoice: "narrator-voice", aliceVoice: "alice-voice");
+        var removedCharacterId = Guid.NewGuid();
+        var chapter = BuildConfirmedChapter(
+            0,
+            "序章",
+            "最厚的一迭資料叫做『新生入學介紹與如何自保』。我繼續往下看。",
+            removedCharacterId);
+
+        var exception = Assert.Throws<SpeechPlanIntegrityException>(
+            () => MultiCharacterTurnBuilder.BuildTurns(castRevision, [chapter]));
+
+        Assert.Equal(
+            MultiCharacterTurnBuilder.IntegrityMismatchReasonCode,
+            exception.ReasonCode);
+    }
+
+    [Fact]
     public void Throws_integrity_exception_when_the_chapter_title_changed_after_confirmation()
     {
         var castRevision = BuildCastRevision(narratorVoice: "narrator-voice", aliceVoice: "alice-voice");
@@ -284,6 +303,37 @@ public sealed class MultiCharacterTurnBuilderTests
     }
 
     [Fact]
+    public void Inner_monologue_for_a_custom_provider_with_no_ready_neutral_or_base_profile_fails_closed()
+    {
+        var castRevision = BuildCastRevision(
+            narratorVoice: "narrator-voice",
+            aliceVoice: "alice-voice",
+            aliceProvider: "3wa-voxcpm2");
+        var chapter = BuildConfirmedChapter(
+            0,
+            "序章",
+            "封口上面怒氣沖沖地用紅筆寫了幾個大字。『摔者死！！』多麼簡潔。",
+            AliceId);
+        var pendingBaseProfile = BuildPendingProfile(CharacterVoiceProfileKind.Base, sceneCode: null);
+        var readyAngryProfile = BuildReadyProfile(
+            CharacterVoiceProfileKind.Scene,
+            CharacterVoiceSceneCodes.Angry,
+            taskId: "angry-task");
+        var characterProfileIdsByCharacterId = new Dictionary<Guid, Guid> { [AliceId] = AliceCharacterProfileId };
+
+        var exception = Assert.Throws<SpeechPlanIntegrityException>(
+            () => MultiCharacterTurnBuilder.BuildTurns(
+                castRevision,
+                [chapter],
+                [pendingBaseProfile, readyAngryProfile],
+                characterProfileIdsByCharacterId));
+
+        Assert.Equal(
+            MultiCharacterTurnBuilder.IntegrityMismatchReasonCode,
+            exception.ReasonCode);
+    }
+
+    [Fact]
     public void A_custom_provider_character_with_no_ready_profile_at_all_safely_falls_back_to_the_narrator_voice()
     {
         var castRevision = BuildCastRevision(
@@ -407,6 +457,22 @@ public sealed class MultiCharacterTurnBuilderTests
         profile.AttachDraftTranscript(taskId, "draft transcript", now);
         profile.ConfirmTranscript("confirmed transcript", now);
         return profile;
+    }
+
+    private static CharacterVoiceProfile BuildPendingProfile(CharacterVoiceProfileKind kind, string? sceneCode)
+    {
+        return CharacterVoiceProfile.CreateClone(
+            Guid.NewGuid(),
+            OwnerId,
+            AliceCharacterProfileId,
+            kind,
+            sceneCode,
+            CharacterVoiceConsentTypes.SelfRecorded,
+            referenceAudioRelativePath: "2026/08/reference.wav",
+            referenceAudioSha256: new string('a', 64),
+            referenceAudioDurationSeconds: 8.0,
+            rightsConfirmedByUserId: OwnerId,
+            DateTimeOffset.UtcNow);
     }
 
     private static string HashSlice(string text) =>

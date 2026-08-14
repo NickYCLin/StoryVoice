@@ -67,14 +67,15 @@ public sealed class ChapterSpeechPlanDraft
     }
 
     /// <summary>
-    /// Rebuilds the draft after the chapter's source text changed (new segmenter output),
-    /// discarding whatever review progress existed on the previous version.
+    /// Rebuilds the draft from new segmenter/attribution output. Exact matching dialogue keeps an
+    /// explicit user confirmation or rejection; generated suggestions are replaced.
     /// </summary>
     public void RegenerateFromSegmentation(string newSourceHash, IReadOnlyList<DraftSegmentInput> segments)
     {
+        var regeneratedSegments = PreserveUserDialogueDecisions(segments);
         SourceHash = RequireHash(newSourceHash);
         PlanVersion = checked(PlanVersion + 1);
-        ReplaceSegments(segments);
+        ReplaceSegments(regeneratedSegments);
     }
 
     public void ConfirmSegment(Guid segmentId, Guid? characterId)
@@ -150,7 +151,9 @@ public sealed class ChapterSpeechPlanDraft
         var first = inputs[0];
         if (first.SortOrder != 0
             || first.SourceKind != SpeechSegmentSourceKind.ChapterTitle
-            || first.Kind != SpeechSegmentTurnKind.Narrator)
+            || first.Kind is not (
+                SpeechSegmentTurnKind.Narrator or
+                SpeechSegmentTurnKind.InnerMonologue))
         {
             throw new ArgumentException("第一個片段必須是章名的旁白 turn。", nameof(inputs));
         }
@@ -176,6 +179,49 @@ public sealed class ChapterSpeechPlanDraft
         _segments.Clear();
         _segments.AddRange(segments);
         RecomputeStatus();
+    }
+
+    private IReadOnlyList<DraftSegmentInput> PreserveUserDialogueDecisions(
+        IReadOnlyList<DraftSegmentInput> regeneratedSegments)
+    {
+        ArgumentNullException.ThrowIfNull(regeneratedSegments);
+
+        var userDecisions = _segments
+            .Where(segment => segment.Kind == SpeechSegmentTurnKind.Dialogue
+                && segment.DecisionSource == SpeechSegmentDecisionSource.User
+                && segment.ReviewStatus is SpeechSegmentReviewStatus.Confirmed
+                    or SpeechSegmentReviewStatus.Rejected)
+            .ToDictionary(
+                segment => new DialogueMatchKey(
+                    segment.SourceKind,
+                    segment.StartOffset,
+                    segment.Length,
+                    segment.TextHash));
+
+        return regeneratedSegments
+            .Select(segment =>
+            {
+                if (segment.Kind != SpeechSegmentTurnKind.Dialogue
+                    || !userDecisions.TryGetValue(
+                        new DialogueMatchKey(
+                            segment.SourceKind,
+                            segment.StartOffset,
+                            segment.Length,
+                            segment.TextHash),
+                        out var userDecision))
+                {
+                    return segment;
+                }
+
+                return segment with
+                {
+                    CharacterId = userDecision.CharacterId,
+                    Confidence = userDecision.Confidence,
+                    DecisionSource = SpeechSegmentDecisionSource.User,
+                    ReviewStatus = userDecision.ReviewStatus,
+                };
+            })
+            .ToArray();
     }
 
     private void RecomputeStatus()
@@ -220,4 +266,10 @@ public sealed class ChapterSpeechPlanDraft
             throw new ArgumentException("識別碼不可為空白。", parameterName);
         }
     }
+
+    private readonly record struct DialogueMatchKey(
+        SpeechSegmentSourceKind SourceKind,
+        int StartOffset,
+        int Length,
+        string TextHash);
 }

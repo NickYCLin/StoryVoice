@@ -57,6 +57,10 @@ public sealed record ApplyAnalyzedSeriesCharactersRequest(
 
 public sealed record SetSeriesPointOfViewCharacterRequest(Guid? CharacterId);
 
+public sealed record ConfigureSeriesNarrativeVoiceRequest(
+    NarrativeVoiceMode Mode,
+    Guid? PointOfViewCharacterId);
+
 public sealed record SeriesVoiceOptionResponse(
     string Provider,
     string Voice,
@@ -66,6 +70,7 @@ public sealed record SeriesVoiceOptionResponse(
 public sealed record StorySeriesSummaryResponse(
     Guid Id,
     string Name,
+    string NarratorProvider,
     int BookCount,
     int CharacterCount,
     Guid? ActiveCastRevisionId,
@@ -111,6 +116,7 @@ public sealed record StorySeriesDetailsResponse(
     int DefaultSpeakerPauseMs,
     Guid? ActiveCastRevisionId,
     Guid? PointOfViewCharacterId,
+    string NarrativeVoiceMode,
     IReadOnlyList<StorySeriesBookResponse> Books,
     IReadOnlyList<StorySeriesCharacterResponse> Characters,
     DateTimeOffset CreatedAt,
