@@ -11,6 +11,7 @@ using StoryVoice.Domain.Narrations;
 using StoryVoice.Domain.Series;
 using StoryVoice.Infrastructure.Identity;
 using StoryVoice.Infrastructure.Persistence;
+using StoryVoice.Infrastructure.Persistence.Migrations;
 using Testcontainers.PostgreSql;
 
 namespace StoryVoice.IntegrationTests;
@@ -610,43 +611,71 @@ public sealed class CastEpochActivationPublisherPostgreSqlTests
             },
             cancellationToken);
 
-        var omittedBook = Book.Create(
+        await using (var upgrade = CreateContext(connectionString))
+        {
+            await upgrade.Database.ExecuteSqlRawAsync(
+                PendingSeriesBookOnboardingSql.Up,
+                Array.Empty<object>(),
+                cancellationToken);
+        }
+
+        var pendingBook = Book.Create(
             current.OwnerId,
-            "strict deferred omitted synthetic book",
+            "pending-onboarding synthetic book",
             "Synthetic author",
             "en",
-            "strict-deferred-omitted.txt");
-        await using (var omittedBookSetup = CreateContext(connectionString))
+            "pending-onboarding.txt");
+        await using (var pendingBookSetup = CreateContext(connectionString))
         {
-            omittedBookSetup.Books.Add(omittedBook);
-            await omittedBookSetup.SaveChangesAsync(cancellationToken);
+            pendingBookSetup.Books.Add(pendingBook);
+            await pendingBookSetup.SaveChangesAsync(cancellationToken);
         }
-        var omittedSeriesBookId = Guid.NewGuid();
-        var omittedVolumeLabel = "Omitted synthetic volume";
-        await AssertDeferredFailureAsync(
-            connectionString,
-            db => db.Database.ExecuteSqlInterpolatedAsync($"""
+
+        var pendingSeriesBookId = Guid.NewGuid();
+        var pendingVolumeLabel = "Pending onboarding synthetic volume";
+        await using (var addPendingMembership = CreateContext(connectionString))
+        {
+            await using var transaction = await addPendingMembership.Database.BeginTransactionAsync(cancellationToken);
+            await addPendingMembership.Database.ExecuteSqlInterpolatedAsync($"""
                 INSERT INTO series_books
                     ("Id", "OwnerId", "SeriesId", "BookId", "VolumeLabel", "SortOrder",
                      "MembershipRevision", "ActiveNarrationJobId")
                 VALUES
-                    ({omittedSeriesBookId}, {current.OwnerId}, {current.SeriesId}, {omittedBook.Id},
-                     {omittedVolumeLabel}, 1000, {current.Members.Length + 1}, NULL)
-                """, cancellationToken),
-            PostgresErrorCodes.CheckViolation,
-            "CK_cast_epoch_full_cohort",
-            async db =>
-            {
-                Assert.True(await db.Books.AsNoTracking()
-                    .AnyAsync(book => book.Id == omittedBook.Id, cancellationToken));
-                Assert.False(await db.SeriesBooks.AsNoTracking()
-                    .AnyAsync(book => book.Id == omittedSeriesBookId, cancellationToken));
-                Assert.Equal(
-                    current.Members.Length,
-                    await db.SeriesBooks.AsNoTracking()
-                        .CountAsync(book => book.SeriesId == current.SeriesId, cancellationToken));
-            },
+                    ({pendingSeriesBookId}, {current.OwnerId}, {current.SeriesId}, {pendingBook.Id},
+                     {pendingVolumeLabel}, 1000, {current.Members.Length + 1}, NULL)
+                """, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+
+        await using (var pendingProof = CreateContext(connectionString))
+        {
+            var pendingMembership = await pendingProof.SeriesBooks.AsNoTracking().SingleAsync(
+                book => book.Id == pendingSeriesBookId,
+                cancellationToken);
+            Assert.Equal(pendingBook.Id, pendingMembership.BookId);
+            Assert.Equal(current.Members.Length + 1, pendingMembership.MembershipRevision);
+            Assert.Null(pendingMembership.ActiveNarrationJobId);
+        }
+        await AssertCurrentEpochAsync(
+            connectionString,
+            current,
+            expectedEpoch: 1,
+            expectedRevisionStatus: NarrationCastRevisionStatus.Active,
+            expectedJobVisibility: NarrationArtifactVisibility.Published,
             cancellationToken);
+
+        await using (var downGuard = CreateContext(connectionString))
+        {
+            var exception = await Assert.ThrowsAsync<PostgresException>(() =>
+                downGuard.Database.ExecuteSqlRawAsync(
+                    PendingSeriesBookOnboardingSql.Down,
+                    Array.Empty<object>(),
+                    cancellationToken));
+            Assert.Equal(PostgresErrorCodes.RaiseException, exception.SqlState);
+            Assert.Equal(
+                "Cannot roll back pending series-book onboarding while an active epoch has pending memberships.",
+                exception.MessageText);
+        }
 
         await AssertDeferredFailureAsync(
             connectionString,
@@ -762,6 +791,75 @@ public sealed class CastEpochActivationPublisherPostgreSqlTests
             async db => Assert.True(
                 (await db.NarrationJobs.AsNoTracking().SingleAsync(job => job.Id == legacyPredecessorId, cancellationToken)).AudioBytes > 0),
             cancellationToken);
+    }
+
+    [Fact]
+    public async Task Pending_onboarding_down_restores_the_full_cohort_fence_when_no_pending_membership_exists()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        await using var postgres = await StartPostgresAsync(cancellationToken);
+        var current = await CreateReadyGraphAsync(
+            postgres.GetConnectionString(),
+            "epoch-pending-onboarding-down",
+            useLegacyPredecessors: false,
+            migration: CurrentMigration,
+            cancellationToken);
+        await ActivateAsync(current, cancellationToken);
+
+        await using (var migration = CreateContext(current.ConnectionString))
+        {
+            await migration.Database.ExecuteSqlRawAsync(
+                PendingSeriesBookOnboardingSql.Up,
+                Array.Empty<object>(),
+                cancellationToken);
+            await migration.Database.ExecuteSqlRawAsync(
+                PendingSeriesBookOnboardingSql.Down,
+                Array.Empty<object>(),
+                cancellationToken);
+        }
+
+        await using (var definitionProof = CreateContext(current.ConnectionString))
+        {
+            var definition = await definitionProof.Database.SqlQueryRaw<string>(
+                """
+                SELECT pg_get_functiondef(procedure.oid) AS "Value"
+                FROM pg_proc AS procedure
+                INNER JOIN pg_namespace AS schema_name ON schema_name.oid = procedure.pronamespace
+                WHERE procedure.proname = 'assert_cast_epoch_integrity'
+                    AND schema_name.nspname = 'public'
+                """)
+                .SingleAsync(cancellationToken);
+            Assert.DoesNotContain(
+                "series_book.\"MembershipRevision\" <= batch.\"CohortMembershipRevision\"",
+                definition,
+                StringComparison.Ordinal);
+        }
+
+        var pendingBook = Book.Create(
+            current.OwnerId,
+            "rollback-fence synthetic book",
+            "Synthetic author",
+            "en",
+            "rollback-fence.txt");
+        await using (var setup = CreateContext(current.ConnectionString))
+        {
+            setup.Books.Add(pendingBook);
+            await setup.SaveChangesAsync(cancellationToken);
+        }
+
+        await using var proof = CreateContext(current.ConnectionString);
+        await using var transaction = await proof.Database.BeginTransactionAsync(cancellationToken);
+        await proof.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO series_books
+                ("Id", "OwnerId", "SeriesId", "BookId", "VolumeLabel", "SortOrder",
+                 "MembershipRevision", "ActiveNarrationJobId")
+            VALUES
+                ({Guid.NewGuid()}, {current.OwnerId}, {current.SeriesId}, {pendingBook.Id},
+                 'rollback fence', 1000, {current.Members.Length + 1}, NULL)
+            """, cancellationToken);
+        var exception = await Assert.ThrowsAsync<PostgresException>(() => transaction.CommitAsync(cancellationToken));
+        Assert.Equal(PostgresErrorCodes.CheckViolation, exception.SqlState);
+        Assert.Equal("CK_cast_epoch_full_cohort", exception.ConstraintName);
     }
 
     [Fact]

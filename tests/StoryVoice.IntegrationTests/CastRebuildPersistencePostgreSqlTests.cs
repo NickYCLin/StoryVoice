@@ -561,12 +561,10 @@ public sealed class CastRebuildPersistencePostgreSqlTests
         await db.Database.ExecuteSqlInterpolatedAsync(
             $"UPDATE series_cast_rebuild_batches SET \"Status\" = 'ReadyToActivate', \"UpdatedAt\" = {now} WHERE \"Id\" = {graphA.BatchId}",
             cancellationToken);
-        // graphA's series has two series books (the pointer-candidate machinery earlier in this test
-        // needs the second one for cross-book FK checks), but graphA.BatchId only ever staged a
-        // member for the first book. assert_cast_epoch_integrity's CK_cast_epoch_full_cohort trigger
-        // now correctly rejects activating a batch that doesn't cover every current series book —
-        // exactly what a real PostgreSqlCastEpochActivationPublisher.ActivateOnceAsync call would
-        // also refuse. Assert that rejection instead of pretending a partial-cohort batch can go live.
+        // graphA's second book has membership revision 2 while graphA.BatchId captured
+        // revision 1. It is a pending onboarding member: epoch 1 may publish the exact snapshot
+        // it staged, while the new book remains without an active artifact until a full rebuild
+        // captures revision 2.
         await using (var activation = await db.Database.BeginTransactionAsync(cancellationToken))
         {
             await db.Database.ExecuteSqlInterpolatedAsync(
@@ -584,23 +582,37 @@ public sealed class CastRebuildPersistencePostgreSqlTests
             await db.Database.ExecuteSqlInterpolatedAsync(
                 $"UPDATE story_series SET \"ActiveCastRevisionId\" = {graphA.RevisionId}, \"UpdatedAt\" = {now} WHERE \"Id\" = {graphA.SeriesId}",
                 cancellationToken);
-            var exception = await Assert.ThrowsAsync<PostgresException>(
-                () => activation.CommitAsync(cancellationToken));
-            Assert.Equal(PostgresErrorCodes.CheckViolation, exception.SqlState);
-            Assert.Equal("CK_cast_epoch_full_cohort", exception.ConstraintName);
+            await activation.CommitAsync(cancellationToken);
         }
 
         Assert.Equal(
-            NarrationArtifactVisibility.Staged,
+            NarrationArtifactVisibility.Published,
             await db.NarrationJobs
                 .Where(job => job.Id == graphA.PrimaryJobId.Value)
                 .Select(job => job.Visibility)
                 .SingleAsync(cancellationToken));
         Assert.Equal(
-            SeriesCastRebuildBatchStatus.ReadyToActivate,
+            SeriesCastRebuildBatchStatus.Activated,
             await db.SeriesCastRebuildBatches
                 .Where(batch => batch.Id == graphA.BatchId)
                 .Select(batch => batch.Status)
+                .SingleAsync(cancellationToken));
+        Assert.Equal(
+            graphA.RevisionId,
+            await db.StorySeries
+                .Where(series => series.Id == graphA.SeriesId)
+                .Select(series => series.ActiveCastRevisionId)
+                .SingleAsync(cancellationToken));
+        Assert.Equal(
+            graphA.PrimaryJobId,
+            await db.SeriesBooks
+                .Where(book => book.Id == graphA.SeriesBookId)
+                .Select(book => book.ActiveNarrationJobId)
+                .SingleAsync(cancellationToken));
+        Assert.Null(
+            await db.SeriesBooks
+                .Where(book => book.Id == graphA.OtherSeriesBookId)
+                .Select(book => book.ActiveNarrationJobId)
                 .SingleAsync(cancellationToken));
     }
 
