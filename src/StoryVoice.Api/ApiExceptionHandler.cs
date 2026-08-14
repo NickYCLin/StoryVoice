@@ -24,6 +24,9 @@ public sealed class ApiExceptionHandler(
             SingleVoiceNarrationRetiredException => StatusCodes.Status409Conflict,
             NarrationAdmissionDisabledException => StatusCodes.Status409Conflict,
             NarrationRightsRequiredException => StatusCodes.Status400BadRequest,
+            LocalLlmCharacterAnalysisInputTooLargeException => StatusCodes.Status413PayloadTooLarge,
+            LocalLlmCharacterAnalysisSourceChangedException => StatusCodes.Status409Conflict,
+            LocalLlmCharacterAnalysisUnavailableException => StatusCodes.Status503ServiceUnavailable,
             AntiforgeryValidationException => StatusCodes.Status400BadRequest,
             ArgumentException or InvalidOperationException => StatusCodes.Status400BadRequest,
             _ => StatusCodes.Status500InternalServerError
@@ -41,7 +44,9 @@ public sealed class ApiExceptionHandler(
             {
                 StatusCodes.Status400BadRequest => "Request validation failed",
                 StatusCodes.Status409Conflict => "Book text is unavailable",
+                StatusCodes.Status413PayloadTooLarge => "Book text exceeds local LLM analysis limits",
                 StatusCodes.Status415UnsupportedMediaType => "Book format is not supported",
+                StatusCodes.Status503ServiceUnavailable => "Local LLM analysis is temporarily unavailable",
                 _ => "The service could not complete the request"
             },
             Detail = statusCode < StatusCodes.Status500InternalServerError
@@ -51,6 +56,18 @@ public sealed class ApiExceptionHandler(
         if (exception is BookTextUnavailableException)
         {
             problemDetails.Extensions["code"] = BookTextUnavailableException.StableCode;
+        }
+        else if (exception is LocalLlmCharacterAnalysisInputTooLargeException)
+        {
+            problemDetails.Extensions["code"] = LocalLlmCharacterAnalysisInputTooLargeException.StableCode;
+        }
+        else if (exception is LocalLlmCharacterAnalysisSourceChangedException)
+        {
+            problemDetails.Extensions["code"] = LocalLlmCharacterAnalysisSourceChangedException.StableCode;
+        }
+        else if (exception is LocalLlmCharacterAnalysisUnavailableException)
+        {
+            problemDetails.Extensions["code"] = LocalLlmCharacterAnalysisUnavailableException.StableCode;
         }
         else if (exception is NarrationTextUnavailableException)
         {

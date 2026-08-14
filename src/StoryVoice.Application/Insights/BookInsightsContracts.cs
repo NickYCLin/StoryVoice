@@ -25,13 +25,6 @@ public sealed record ExtractiveBookSummaryResponse(
     DateTimeOffset GeneratedAt,
     IReadOnlyList<SummaryExcerptResponse> Excerpts);
 
-public sealed record CharacterCandidateResponse(
-    string Name,
-    int OccurrenceCount,
-    string SampleChapterTitle,
-    string? SampleDialogue,
-    string Kind);
-
 public sealed record CreateReadingNoteRequest(string Body, Guid? ChapterId);
 
 public sealed record UpdateReadingNoteRequest(string Body);
@@ -51,7 +44,8 @@ public interface IBookInsightsService
     Task<bool> RemoveContentLinkAsync(Guid bookId, CancellationToken cancellationToken);
     Task<ExtractiveBookSummaryResponse?> GetSummaryAsync(Guid bookId, CancellationToken cancellationToken);
     Task<ExtractiveBookSummaryResponse?> GenerateSummaryAsync(Guid bookId, CancellationToken cancellationToken);
-    Task<IReadOnlyList<CharacterCandidateResponse>?> ListCharacterCandidatesAsync(Guid bookId, CancellationToken cancellationToken);
+    Task<LocalLlmCharacterAnalysisResponse?> GetCharacterAnalysisAsync(Guid bookId, CancellationToken cancellationToken);
+    Task<LocalLlmCharacterAnalysisResponse?> GenerateCharacterAnalysisAsync(Guid bookId, CancellationToken cancellationToken);
     Task<IReadOnlyList<ReadingNoteResponse>?> ListNotesAsync(Guid bookId, CancellationToken cancellationToken);
     Task<ReadingNoteResponse?> CreateNoteAsync(Guid bookId, CreateReadingNoteRequest request, CancellationToken cancellationToken);
     Task<ReadingNoteResponse?> UpdateNoteAsync(Guid bookId, Guid noteId, UpdateReadingNoteRequest request, CancellationToken cancellationToken);

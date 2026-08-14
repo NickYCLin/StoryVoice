@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using StoryVoice.Application.Insights;
 using StoryVoice.Domain.Series;
 using StoryVoice.Infrastructure.Persistence;
 
@@ -50,6 +51,8 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
                 options
                     .UseInMemoryDatabase(_databaseName)
                     .AddInterceptors(new ComputedCanonicalKindInterceptor()));
+            services.RemoveAll<ILocalLlmCharacterAnalysisProvider>();
+            services.AddSingleton<ILocalLlmCharacterAnalysisProvider, FakeLocalLlmCharacterAnalysisProvider>();
         });
     }
 
@@ -59,6 +62,48 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
         if (disposing && Directory.Exists(_storageRoot))
         {
             Directory.Delete(_storageRoot, recursive: true);
+        }
+    }
+
+    private sealed class FakeLocalLlmCharacterAnalysisProvider(IServiceScopeFactory serviceScopeFactory)
+        : ILocalLlmCharacterAnalysisProvider
+    {
+        public string Model => "fake-local-llm";
+
+        public async Task<IReadOnlyList<LocalLlmChapterCharacterAnalysis>> AnalyzeAsync(
+            LocalLlmCharacterAnalysisRequest request,
+            CancellationToken cancellationToken)
+        {
+            if (request.Chapters.Any(chapter => chapter.Text.Contains("模型失敗", StringComparison.Ordinal)))
+            {
+                throw new LocalLlmCharacterAnalysisUnavailableException();
+            }
+
+            if (request.Chapters.Any(chapter => chapter.Text.Contains("正文在分析中變更", StringComparison.Ordinal)))
+            {
+                await UnlinkAuthorizedContentDuringAnalysisAsync(cancellationToken);
+            }
+
+            return request.Chapters.Select(chapter => new LocalLlmChapterCharacterAnalysis(
+                chapter.ChapterNumber,
+                chapter.Text.Contains("測試角色", StringComparison.Ordinal)
+                    ? [new LocalLlmCharacterCandidate("測試角色", "high", 2)]
+                    : [])).ToArray();
+        }
+
+        private async Task UnlinkAuthorizedContentDuringAnalysisAsync(CancellationToken cancellationToken)
+        {
+            await using var scope = serviceScopeFactory.CreateAsyncScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+            var content = await dbContext.Books
+                .Include(book => book.Chapters)
+                .SingleAsync(
+                    book => book.Chapters.Any(chapter => chapter.OriginalText.Contains("正文在分析中變更", StringComparison.Ordinal)),
+                    cancellationToken);
+            var linkedBook = await dbContext.Books
+                .SingleAsync(book => book.ContentBookId == content.Id, cancellationToken);
+            linkedBook.UnlinkAuthorizedContent();
+            await dbContext.SaveChangesAsync(cancellationToken);
         }
     }
 

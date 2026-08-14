@@ -298,7 +298,7 @@ public sealed class BookInsightsApiTests(ApiFactory factory) : IClassFixture<Api
     }
 
     [Fact]
-    public async Task Character_candidates_are_extracted_owner_scoped_and_ranked_by_frequency()
+    public async Task Local_LLM_character_analysis_is_explicitly_generated_saved_and_owner_scoped()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         using var owner = await factory.CreateAuthenticatedClientAsync(cancellationToken);
@@ -306,229 +306,120 @@ public sealed class BookInsightsApiTests(ApiFactory factory) : IClassFixture<Api
         var book = await ImportTextAsync(
             owner,
             """
-            第一章 起點
-            我叫李小華。
-            我叫王小明。
-            「李小華，請先等等。」
-            李小華問道：「你要走了？」
-            李小華問道：「真的嗎？」
-            李小華問道：「你確定？」
-            「王小明，先別走。」
-            王小明說：「再見。」
-            王小明說：「保重。」
+            第一章 本機分析
+            測試角色說：「這是可由本機模型確認的對白。」
             """,
             cancellationToken);
 
-        using var response = await owner.GetAsync(
-            $"/api/books/{book.Id}/character-candidates",
-            cancellationToken);
-        var candidates = await response.Content.ReadFromJsonAsync<CharacterCandidateResponse[]>(cancellationToken);
+        using var beforeGenerate = await owner.GetAsync($"/api/books/{book.Id}/character-analysis", cancellationToken);
+        using var generate = await PutWithCsrfAsync(owner, $"/api/books/{book.Id}/character-analysis", cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, generate.StatusCode);
+        var generated = await generate.Content.ReadFromJsonAsync<LocalLlmCharacterAnalysisResponse>(cancellationToken);
+        using var cached = await owner.GetAsync($"/api/books/{book.Id}/character-analysis", cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, cached.StatusCode);
+        var cachedResult = await cached.Content.ReadFromJsonAsync<LocalLlmCharacterAnalysisResponse>(cancellationToken);
+        using var otherResponse = await other.GetAsync($"/api/books/{book.Id}/character-analysis", cancellationToken);
+        using var retiredEndpoint = await owner.GetAsync($"/api/books/{book.Id}/character-candidates", cancellationToken);
 
-        using var otherResponse = await other.GetAsync(
-            $"/api/books/{book.Id}/character-candidates",
-            cancellationToken);
-        using var missingResponse = await owner.GetAsync(
-            $"/api/books/{Guid.NewGuid()}/character-candidates",
-            cancellationToken);
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.NotNull(candidates);
-        Assert.Equal(2, candidates.Length);
-        Assert.Equal("李小華", candidates[0].Name);
-        Assert.Equal(3, candidates[0].OccurrenceCount);
-        Assert.Equal("王小明", candidates[1].Name);
-        Assert.Equal(2, candidates[1].OccurrenceCount);
+        Assert.Equal(HttpStatusCode.NotFound, beforeGenerate.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, generate.StatusCode);
+        Assert.NotNull(generated);
+        Assert.Equal("local-ollama", generated.Generator);
+        Assert.Equal("fake-local-llm", generated.Model);
+        var candidate = Assert.Single(generated.Candidates);
+        Assert.Equal("測試角色", candidate.Name);
+        Assert.Equal("high", candidate.Confidence);
+        Assert.Equal(2, candidate.DialogueEvidenceCount);
+        Assert.Equal([1], candidate.EvidenceChapterNumbers);
+        Assert.Equal(HttpStatusCode.OK, cached.StatusCode);
+        Assert.NotNull(cachedResult);
+        Assert.Equal(generated.SourceHash, cachedResult.SourceHash);
         Assert.Equal(HttpStatusCode.NotFound, otherResponse.StatusCode);
-        Assert.Equal(HttpStatusCode.NotFound, missingResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, retiredEndpoint.StatusCode);
     }
 
     [Fact]
-    public async Task Character_candidates_use_complete_chapter_context_for_descriptive_speakers_and_first_person_dialogue()
+    public async Task Local_LLM_failure_returns_503_and_does_not_save_a_partial_analysis()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         using var owner = await factory.CreateAuthenticatedClientAsync(cancellationToken);
         var book = await ImportTextAsync(
             owner,
             """
-            第三話 學長與土著
-            「你昏醒了？」死神轉過頭來，口氣非常之不好的對著我問。連忙用力點頭，「我在陰間嗎？」我想，這地方怎麼看都不像人間。眼前的漂亮死神不知道該怎麼辦。紅紅的眼睛瞪了我一眼，居然有點冷笑的，「如果你要當這裡是陰間也無所謂。」
+            第一章 本機分析失敗
+            模型失敗說：「這是測試用的受控 provider failure。」
             """,
             cancellationToken);
 
-        using var response = await owner.GetAsync(
-            $"/api/books/{book.Id}/character-candidates",
-            cancellationToken);
-        var candidates = await response.Content.ReadFromJsonAsync<CharacterCandidateResponse[]>(cancellationToken);
+        using var generate = await PutWithCsrfAsync(owner, $"/api/books/{book.Id}/character-analysis", cancellationToken);
+        using var cached = await owner.GetAsync($"/api/books/{book.Id}/character-analysis", cancellationToken);
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.NotNull(candidates);
-        Assert.Collection(
-            candidates,
-            first =>
-            {
-                Assert.Equal("死神", first.Name);
-                Assert.Equal(2, first.OccurrenceCount);
-                Assert.Equal("NamedSpeaker", first.Kind);
-            },
-            second =>
-            {
-                Assert.Equal("第一人稱敘事者（我）", second.Name);
-                Assert.Equal(1, second.OccurrenceCount);
-                Assert.Equal("FirstPersonNarrator", second.Kind);
-            });
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, generate.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, cached.StatusCode);
     }
-
     [Fact]
-    public async Task Character_candidates_exclude_homographic_prose_and_generic_roles()
+    public async Task Local_LLM_character_analysis_rejects_oversized_full_context_without_truncation()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
-        using var owner = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
         var book = await ImportTextAsync(
-            owner,
-            """
-            第一章 候選精度
-            「前句。」天知道，「後句。」
-            「前句。」天知道，「後句。」
-            「前句。」說實話，「後句。」
-            「前句。」說實話，「後句。」
-            「前句。」等到學長說，「後句。」
-            「前句。」等到學長說，「後句。」
-            「前句。」男生說，「後句。」
-            「前句。」男生說，「後句。」
-            「前句。」經知道，「後句。」
-            「前句。」經知道，「後句。」
-            出口說：「前句。」
-            出口說：「後句。」
-            出口處說：「前句。」
-            出口處說：「後句。」
-            成績單說：「前句。」
-            成績單說：「後句。」
-            恐怖說：「前句。」
-            恐怖說：「後句。」
-            所謂說：「前句。」
-            所謂說：「後句。」
-            時候說：「前句。」
-            時候說：「後句。」
-            話題說：「前句。」
-            話題說：「後句。」
-            「前句。」說小心，「後句。」
-            「前句。」說小心，「後句。」
-            「小心，快跑。」
-            小心說：「前句。」
-            小心說：「後句。」
-            「慢慢，快一點。」
-            「慢慢，別停。」
-            「慢慢，繼續走。」
-            慢慢這樣說：「前句。」
-            慢慢這樣說：「後句。」
-            白色說：「前句。」
-            白色說：「後句。」
-            小學生說：「前句。」
-            小學生說：「後句。」
-            「高中同學，請先等等。」
-            高中同學說：「前句。」
-            高中同學說：「後句。」
-            高中生說：「前句。」
-            高中生說：「後句。」
-            「慢慢，快一點。」
-            慢慢這樣說：「前句。」
-
-            第二章 慢慢對抗語料
-            「慢慢，別停。」
-            「慢慢，繼續走。」
-            慢慢這樣說：「後句。」
-            我叫王小明。
-            「王小明，這才是人名。」
-            王小明說：「這才是人名。」
-            王小明說：「不要把一般詞當角色。」
-            """,
+            client,
+            $"第一章 上限\n{new string('字', 6_001)}",
             cancellationToken);
 
-        using var response = await owner.GetAsync(
-            $"/api/books/{book.Id}/character-candidates",
+        using var response = await PutWithCsrfAsync(
+            client,
+            $"/api/books/{book.Id}/character-analysis",
             cancellationToken);
-        var candidates = await response.Content.ReadFromJsonAsync<CharacterCandidateResponse[]>(cancellationToken);
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStreamAsync(cancellationToken));
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var candidate = Assert.Single(candidates!);
-        Assert.Equal("王小明", candidate.Name);
-        Assert.Equal(2, candidate.OccurrenceCount);
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
+        Assert.Equal(LocalLlmCharacterAnalysisInputTooLargeException.StableCode, problem.RootElement.GetProperty("code").GetString());
     }
 
     [Fact]
-    public async Task Character_candidates_retain_conventional_names_and_a_sole_bridge_actor_while_unverified_aliases_remain_out()
+    public async Task Local_LLM_analysis_discards_result_when_authorized_content_changes_mid_analysis()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
-        using var owner = await factory.CreateAuthenticatedClientAsync(cancellationToken);
-        var book = await ImportTextAsync(
-            owner,
+        using var sessionClient = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        using var companionClient = await CreateCompanionClientAsync(sessionClient, cancellationToken);
+        var content = await ImportTextAsync(
+            sessionClient,
             """
-            第一章 正向候選
-            我叫千冬歲。
-            千冬歲說：「先走。」
-            千冬歲說：「等等我。」
-            「喵喵，先過來。」
-            喵喵這樣問道：「要吃飯嗎？」
-            「這樣喔。」幸運同學把椅子轉過來，「那就這麼辦。」
-
-            第二章 別名證據
-            「喵喵，等等我。」
-            「喵喵，先坐下。」
-            喵喵則問道：「還是要喝茶？」
+            第一章 變更防護
+            正文在分析中變更，這段文字只供受控 race test 使用。
             """,
             cancellationToken);
-
-        using var response = await owner.GetAsync(
-            $"/api/books/{book.Id}/character-candidates",
+        var linked = await ImportLinkedBookAsync(companionClient, cancellationToken);
+        using var link = await PutWithCsrfAsync(
+            sessionClient,
+            $"/api/books/{linked.Id}/content-link",
+            new SetBookContentLinkRequest(content.Id),
             cancellationToken);
-        var candidates = await response.Content.ReadFromJsonAsync<CharacterCandidateResponse[]>(cancellationToken);
+        using var generate = await PutWithCsrfAsync(
+            sessionClient,
+            $"/api/books/{linked.Id}/character-analysis",
+            cancellationToken);
+        using var cached = await sessionClient.GetAsync($"/api/books/{linked.Id}/character-analysis", cancellationToken);
+        using var problem = JsonDocument.Parse(await generate.Content.ReadAsStreamAsync(cancellationToken));
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.NotNull(candidates);
-        Assert.Equal(2, candidates.Length);
-        Assert.Equal(2, candidates.Single(candidate => candidate.Name == "千冬歲").OccurrenceCount);
-        Assert.Equal(2, candidates.Single(candidate => candidate.Name == "幸運同學").OccurrenceCount);
-        Assert.DoesNotContain(candidates, candidate => candidate.Name == "喵喵");
+        Assert.Equal(HttpStatusCode.OK, link.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, generate.StatusCode);
+        Assert.Equal(LocalLlmCharacterAnalysisSourceChangedException.StableCode, problem.RootElement.GetProperty("code").GetString());
+        Assert.Equal(HttpStatusCode.NotFound, cached.StatusCode);
     }
 
     [Fact]
-    public async Task Character_candidates_recognize_a_sole_title_bearing_actor_in_a_dialogue_bridge_without_adding_grammar_as_people()
-    {
-        var cancellationToken = TestContext.Current.CancellationToken;
-        using var owner = await factory.CreateAuthenticatedClientAsync(cancellationToken);
-        var book = await ImportTextAsync(
-            owner,
-            """
-            第一章 相約
-            「這樣喔，我聽說中縣有間學校工科感覺還不錯。」幸運同學乾脆把椅子轉過來，拿了原子筆就畫圈圈，「如果你也申請能過，我們還可以再當三年同學哩。」
-            「你先忙。」繼續說了一會兒，「嗯。」
-            「我走了。」繼續說了一會兒，「路上小心。」
-            """,
-            cancellationToken);
-
-        using var response = await owner.GetAsync(
-            $"/api/books/{book.Id}/character-candidates",
-            cancellationToken);
-        var candidates = await response.Content.ReadFromJsonAsync<CharacterCandidateResponse[]>(cancellationToken);
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.NotNull(candidates);
-        var candidate = Assert.Single(candidates);
-        Assert.Equal("幸運同學", candidate.Name);
-        Assert.Equal(2, candidate.OccurrenceCount);
-        Assert.DoesNotContain(candidates, item => item.Name == "繼續");
-    }
-
-    [Fact]
-    public async Task Character_candidates_require_processable_authorized_text()
+    public async Task Local_LLM_character_analysis_requires_processable_authorized_text()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         using var sessionClient = await factory.CreateAuthenticatedClientAsync(cancellationToken);
         using var companionClient = await CreateCompanionClientAsync(sessionClient, cancellationToken);
         var linked = await ImportLinkedBookAsync(companionClient, cancellationToken);
 
-        using var response = await sessionClient.GetAsync(
-            $"/api/books/{linked.Id}/character-candidates",
+        using var response = await PutWithCsrfAsync(
+            sessionClient,
+            $"/api/books/{linked.Id}/character-analysis",
             cancellationToken);
         using var problem = JsonDocument.Parse(await response.Content.ReadAsStreamAsync(cancellationToken));
 

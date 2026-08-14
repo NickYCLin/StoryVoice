@@ -14,6 +14,7 @@ using StoryVoice.Application.Series;
 using StoryVoice.Infrastructure.BookImports;
 using StoryVoice.Infrastructure.Characters;
 using StoryVoice.Infrastructure.Identity;
+using StoryVoice.Infrastructure.Insights;
 using StoryVoice.Infrastructure.Narrations;
 using StoryVoice.Infrastructure.Persistence;
 
@@ -54,6 +55,16 @@ public static class DependencyInjection
         services.AddOptions<NarrationAdmissionOptions>()
             .Bind(configuration.GetSection(NarrationAdmissionOptions.SectionName))
             .ValidateOnStart();
+        services.AddOptions<LocalLlmCharacterAnalysisOptions>()
+            .Bind(configuration.GetSection(LocalLlmCharacterAnalysisOptions.SectionName))
+            .Validate(options => Uri.TryCreate(options.BaseUrl, UriKind.Absolute, out _), "本機 LLM base URL 無效。")
+            .Validate(options => !string.IsNullOrWhiteSpace(options.Model), "本機 LLM model 不可空白。")
+            .Validate(options => string.Equals(options.Model, "gpt-oss:20b", StringComparison.Ordinal),
+                "本機 LLM 角色分析只允許核准的 gpt-oss:20b 模型。")
+            .Validate(options => options.TimeoutSeconds is >= 30 and <= 1_800, "本機 LLM timeout 必須介於 30 至 1800 秒。")
+            .Validate(options => options.UnloadTimeoutSeconds is >= 3 and <= 60, "本機 LLM unload timeout 必須介於 3 至 60 秒。")
+            .Validate(options => options.MaximumResponseBytes is >= 1_024 and <= 65_536, "本機 LLM response 上限必須介於 1 KiB 至 64 KiB。")
+            .ValidateOnStart();
         services.AddOptions<MultiCharacterNarrationOptions>()
             .Bind(configuration.GetSection(MultiCharacterNarrationOptions.SectionName))
             .Validate(options => !string.IsNullOrWhiteSpace(options.ProviderVersion)
@@ -86,6 +97,13 @@ public static class DependencyInjection
             .ValidateOnStart();
         services.AddScoped<IBookRepository, BookRepository>();
         services.AddScoped<IBookMetadataCorrectionService, BookMetadataCorrectionService>();
+        services.AddHttpClient<ILocalLlmCharacterAnalysisProvider, OllamaCharacterAnalysisProvider>((provider, client) =>
+        {
+            var localLlmOptions = provider.GetRequiredService<IOptions<LocalLlmCharacterAnalysisOptions>>().Value;
+            client.BaseAddress = new Uri(localLlmOptions.BaseUrl, UriKind.Absolute);
+            client.Timeout = TimeSpan.FromSeconds(localLlmOptions.TimeoutSeconds);
+        })
+        .ConfigurePrimaryHttpMessageHandler(static () => new SocketsHttpHandler { UseProxy = false });
         services.AddScoped<IBookInsightsService, BookInsightsService>();
         services.AddScoped<ILibraryStatusService, LibraryStatusService>();
         services.AddScoped<INarrationService, NarrationService>();

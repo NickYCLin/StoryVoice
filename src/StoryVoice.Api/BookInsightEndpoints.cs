@@ -58,14 +58,24 @@ public static class BookInsightEndpoints
         })
         .AddEndpointFilter<AntiforgeryEndpointFilter>();
 
-        group.MapGet("/character-candidates", async (
+        group.MapGet("/character-analysis", async (
             Guid bookId,
             IBookInsightsService service,
             CancellationToken cancellationToken) =>
         {
-            var candidates = await service.ListCharacterCandidatesAsync(bookId, cancellationToken);
-            return candidates is null ? Results.NotFound() : Results.Ok(candidates);
+            var analysis = await service.GetCharacterAnalysisAsync(bookId, cancellationToken);
+            return analysis is null ? Results.NotFound() : Results.Ok(analysis);
         });
+
+        group.MapPut("/character-analysis", async (
+            Guid bookId,
+            IBookInsightsService service,
+            CancellationToken cancellationToken) =>
+        {
+            var analysis = await service.GenerateCharacterAnalysisAsync(bookId, cancellationToken);
+            return analysis is null ? Results.NotFound() : Results.Ok(analysis);
+        })
+        .AddEndpointFilter<AntiforgeryEndpointFilter>();
 
         group.MapGet("/notes", async (
             Guid bookId,

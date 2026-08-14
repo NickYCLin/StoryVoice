@@ -11,7 +11,8 @@ namespace StoryVoice.Infrastructure.Persistence;
 
 internal sealed class BookInsightsService(
     StoryVoiceDbContext dbContext,
-    ICurrentUser currentUser) : IBookInsightsService
+    ICurrentUser currentUser,
+    ILocalLlmCharacterAnalysisProvider localLlmCharacterAnalysisProvider) : IBookInsightsService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -53,6 +54,7 @@ internal sealed class BookInsightsService(
         {
             target.LinkAuthorizedContent(contentBookId);
             await RemoveExistingSummaryAsync(bookId, cancellationToken);
+            await RemoveExistingCharacterAnalysisAsync(bookId, cancellationToken);
             await DetachChapterNotesAsync(bookId, cancellationToken);
         }
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -75,6 +77,7 @@ internal sealed class BookInsightsService(
 
         target.UnlinkAuthorizedContent();
         await RemoveExistingSummaryAsync(bookId, cancellationToken);
+        await RemoveExistingCharacterAnalysisAsync(bookId, cancellationToken);
         await DetachChapterNotesAsync(bookId, cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
         return true;
@@ -144,7 +147,25 @@ internal sealed class BookInsightsService(
         return ToResponse(summary);
     }
 
-    public async Task<IReadOnlyList<CharacterCandidateResponse>?> ListCharacterCandidatesAsync(
+    public async Task<LocalLlmCharacterAnalysisResponse?> GetCharacterAnalysisAsync(
+        Guid bookId,
+        CancellationToken cancellationToken)
+    {
+        var targetExists = await OwnedBooks().AnyAsync(book => book.Id == bookId, cancellationToken);
+        if (!targetExists)
+        {
+            return null;
+        }
+
+        var analysis = await dbContext.BookLocalLlmCharacterAnalyses
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                item => item.BookId == bookId && item.OwnerId == currentUser.UserId,
+                cancellationToken);
+        return analysis is null ? null : ToResponse(analysis);
+    }
+
+    public async Task<LocalLlmCharacterAnalysisResponse?> GenerateCharacterAnalysisAsync(
         Guid bookId,
         CancellationToken cancellationToken)
     {
@@ -162,14 +183,76 @@ internal sealed class BookInsightsService(
             : target;
         EnsureProcessable(content);
 
-        return CharacterCandidateExtractor.Extract(content!.Chapters)
-            .Select(candidate => new CharacterCandidateResponse(
-                candidate.Name,
-                candidate.OccurrenceCount,
-                candidate.SampleChapterTitle,
-                candidate.SampleDialogue,
-                candidate.Kind.ToString()))
-            .ToArray();
+        var source = LocalLlmCharacterAnalysisSource.Create(content!.Chapters);
+        var chapterCandidates = await localLlmCharacterAnalysisProvider.AnalyzeAsync(source, cancellationToken);
+        var mergedCandidates = LocalLlmCharacterAnalysisSource.Merge(
+            chapterCandidates.Select(item => (item.ChapterNumber, item.Candidates)));
+        var candidatesJson = JsonSerializer.Serialize(mergedCandidates, JsonOptions);
+
+        await using var transaction = dbContext.Database.IsRelational()
+            ? await dbContext.Database.BeginTransactionAsync(cancellationToken)
+            : null;
+        var currentTarget = await GetLockedOwnedBookForCharacterAnalysisAsync(bookId, cancellationToken);
+        if (currentTarget is null)
+        {
+            if (transaction is not null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+            }
+
+            return null;
+        }
+
+        var currentContent = currentTarget.ContentBookId is Guid currentContentBookId
+            ? await OwnedBooks().Include(book => book.Chapters)
+                .SingleOrDefaultAsync(book => book.Id == currentContentBookId, cancellationToken)
+            : await OwnedBooks().Include(book => book.Chapters)
+                .SingleOrDefaultAsync(book => book.Id == currentTarget.Id, cancellationToken);
+        if (currentContent is null || currentContent.Id != content.Id)
+        {
+            throw new LocalLlmCharacterAnalysisSourceChangedException();
+        }
+
+        EnsureProcessable(currentContent);
+        var currentSource = LocalLlmCharacterAnalysisSource.Create(currentContent.Chapters);
+        if (!string.Equals(currentSource.SourceHash, source.SourceHash, StringComparison.Ordinal))
+        {
+            throw new LocalLlmCharacterAnalysisSourceChangedException();
+        }
+
+        var analysis = await dbContext.BookLocalLlmCharacterAnalyses
+            .SingleOrDefaultAsync(
+                item => item.BookId == bookId && item.OwnerId == currentUser.UserId,
+                cancellationToken);
+        if (analysis is null)
+        {
+            analysis = BookLocalLlmCharacterAnalysis.Create(
+                currentUser.UserId,
+                target.Id,
+                content.Id,
+                localLlmCharacterAnalysisProvider.Model,
+                LocalLlmCharacterAnalysisSource.PromptVersion,
+                source.SourceHash,
+                candidatesJson);
+            dbContext.BookLocalLlmCharacterAnalyses.Add(analysis);
+        }
+        else
+        {
+            analysis.Replace(
+                content.Id,
+                localLlmCharacterAnalysisProvider.Model,
+                LocalLlmCharacterAnalysisSource.PromptVersion,
+                source.SourceHash,
+                candidatesJson);
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        if (transaction is not null)
+        {
+            await transaction.CommitAsync(cancellationToken);
+        }
+
+        return ToResponse(analysis);
     }
 
     public async Task<IReadOnlyList<ReadingNoteResponse>?> ListNotesAsync(
@@ -250,6 +333,21 @@ internal sealed class BookInsightsService(
         return true;
     }
 
+    private async Task<Book?> GetLockedOwnedBookForCharacterAnalysisAsync(
+        Guid bookId,
+        CancellationToken cancellationToken)
+    {
+        if (!dbContext.Database.IsRelational())
+        {
+            return await OwnedBooks(tracking: true)
+                .SingleOrDefaultAsync(book => book.Id == bookId, cancellationToken);
+        }
+
+        return await dbContext.Books
+            .FromSqlInterpolated($"SELECT * FROM books WHERE \"Id\" = {bookId} AND \"OwnerId\" = {currentUser.UserId} FOR UPDATE")
+            .SingleOrDefaultAsync(cancellationToken);
+    }
+
     private IQueryable<Book> OwnedBooks(bool tracking = false)
     {
         var query = dbContext.Books.Where(book => book.OwnerId == currentUser.UserId);
@@ -297,6 +395,16 @@ internal sealed class BookInsightsService(
         }
     }
 
+    private async Task RemoveExistingCharacterAnalysisAsync(Guid bookId, CancellationToken cancellationToken)
+    {
+        var analysis = await dbContext.BookLocalLlmCharacterAnalyses
+            .SingleOrDefaultAsync(item => item.BookId == bookId, cancellationToken);
+        if (analysis is not null)
+        {
+            dbContext.BookLocalLlmCharacterAnalyses.Remove(analysis);
+        }
+    }
+
     private async Task DetachChapterNotesAsync(Guid bookId, CancellationToken cancellationToken)
     {
         var notes = await dbContext.ReadingNotes
@@ -315,6 +423,17 @@ internal sealed class BookInsightsService(
 
     private static ReadingNoteResponse ToResponse(ReadingNote note) =>
         new(note.Id, note.BookId, note.ChapterId, note.Body, note.CreatedAt, note.UpdatedAt);
+
+    private static LocalLlmCharacterAnalysisResponse ToResponse(BookLocalLlmCharacterAnalysis analysis) =>
+        new(
+            analysis.BookId,
+            analysis.ContentBookId,
+            analysis.Generator,
+            analysis.Model,
+            analysis.PromptVersion,
+            analysis.SourceHash,
+            analysis.GeneratedAt,
+            JsonSerializer.Deserialize<LocalLlmCharacterAnalysisCandidateResponse[]>(analysis.CandidatesJson, JsonOptions) ?? []);
 
     private static ExtractiveBookSummaryResponse ToResponse(BookExtractiveSummary summary) =>
         new(

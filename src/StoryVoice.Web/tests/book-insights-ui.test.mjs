@@ -27,18 +27,20 @@ test('manual notes work independently from provider text and mutations carry CSR
   assert.ok(app.includes("headers: { 'X-CSRF-TOKEN': csrfToken }"))
 })
 
-test('character candidate detection uses chapter context, distinguishes POV, and never auto-creates a character', () => {
-  assert.ok(app.includes('偵測到的說話角色'))
-  assert.ok(app.includes('語境規則提示，仍需人工確認'))
-  assert.ok(app.includes('引號後的動作與問話'))
-  assert.ok(app.includes('第一人稱自述'))
-  assert.ok(app.includes('角色反應接回下一句對白'))
-  assert.ok(app.includes('不會自動建立或覆蓋系列角色'))
-  assert.ok(app.includes('第一人稱敘事者（我）'))
-  assert.ok(app.includes('FirstPersonNarrator'))
-  assert.ok(app.includes("/character-candidates`"))
-  assert.ok(app.includes('handleCopyCandidateName'))
+test('local LLM character analysis is explicit, review-only, and does not retain the rule-based screen', () => {
+  assert.ok(app.includes('本機 LLM 角色分析'))
+  assert.ok(app.includes('分析建議，待人工確認'))
+  assert.ok(app.includes('每章完整交給本機模型閱讀後再匯總'))
+  assert.ok(app.includes('不會自動建立角色、覆蓋系列資料、指派聲線或產生音檔'))
+  assert.ok(app.includes("/character-analysis`"))
+  assert.ok(app.includes('handleGenerateCharacterAnalysis'))
+  assert.ok(app.includes("method: 'PUT'"))
+  assert.ok(app.includes('本機 LLM 正在逐章讀取完整正文'))
+  assert.ok(app.includes('完成後立即卸載'))
   assert.ok(app.includes('navigator.clipboard.writeText(candidate.name)'))
+  assert.ok(!app.includes('/character-candidates`'))
+  assert.ok(!app.includes('偵測到的說話角色'))
+  assert.ok(!app.includes('FirstPersonNarrator'))
 })
 
 test('owner-scoped source metadata corrections cover title, author, cover, and reset', () => {

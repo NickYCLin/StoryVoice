@@ -22,6 +22,9 @@ public sealed class StoryVoiceDbContext(DbContextOptions<StoryVoiceDbContext> op
 
     public DbSet<BookExtractiveSummary> BookExtractiveSummaries => Set<BookExtractiveSummary>();
 
+    public DbSet<BookLocalLlmCharacterAnalysis> BookLocalLlmCharacterAnalyses =>
+        Set<BookLocalLlmCharacterAnalysis>();
+
     public DbSet<NarrationJob> NarrationJobs => Set<NarrationJob>();
 
     public DbSet<NarrationCastRevision> NarrationCastRevisions => Set<NarrationCastRevision>();

@@ -1,9 +1,9 @@
 namespace StoryVoice.Application.Narrations.SpeechPlanning;
 
 /// <summary>
-/// The reporting verbs ("說", "問道", …) that both <c>RuleBasedSpeakerAttributionProvider</c> (to
-/// confirm a known character next to one) and <c>CharacterCandidateExtractor</c> (to notice an
-/// unregistered name next to one) treat as evidence that the adjacent name is a speaker.
+/// The reporting verbs ("說", "問道", …) used by <c>RuleBasedSpeakerAttributionProvider</c>
+/// only to confirm an already-known character next to dialogue. Unknown roles belong to the
+/// separately versioned local-LLM character-analysis workflow.
 /// </summary>
 public static class ReportingVerbCatalog
 {
