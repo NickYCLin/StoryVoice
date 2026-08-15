@@ -98,9 +98,12 @@ public static class DependencyInjection
             .Validate(options => options.SynthesisWatchdogSeconds is >= 30 and <= 3_600,
                 "BlueMagpie synthesis watchdog 必須介於 30 至 3600 秒。")
             .Validate(options => options.RequestTimeoutSeconds
-                    >= options.QueueTimeoutSeconds + options.SynthesisWatchdogSeconds + 15
+                    >= options.ConnectTimeoutSeconds
+                        + options.QueueTimeoutSeconds
+                        + options.SynthesisWatchdogSeconds
+                        + 15
                     && options.RequestTimeoutSeconds <= 3_900,
-                "BlueMagpie API request timeout 必須涵蓋 queue、synthesis watchdog 與安全餘裕。")
+                "BlueMagpie API request timeout 必須涵蓋 connect、queue、synthesis watchdog 與安全餘裕。")
             .Validate(options => options.MaximumResponseBytes is >= 64 * 1024 and <= 16 * 1024 * 1024,
                 "BlueMagpie response 上限必須介於 64 KiB 至 16 MiB。")
             .ValidateOnStart();
