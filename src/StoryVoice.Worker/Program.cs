@@ -40,8 +40,13 @@ builder.Services.AddSingleton<IVoAiTtsClient, VoAiTtsClient>();
 builder.Services.AddSingleton<INarrationProvider, EdgeTtsNarrationProvider>();
 builder.Services.AddSingleton<IMultiVoiceNarrationProvider, EdgeTtsMultiVoiceNarrationProvider>();
 builder.Services.AddSingleton<IMultiVoiceNarrationProvider, ThreeWaVoxCpm2NarrationProvider>();
-builder.Services.AddSingleton<IVoAiAudioComposer, FfmpegVoAiAudioComposer>();
+builder.Services.AddSingleton<FfmpegVoAiAudioComposer>();
+builder.Services.AddSingleton<IVoAiAudioComposer>(services =>
+    services.GetRequiredService<FfmpegVoAiAudioComposer>());
+builder.Services.AddSingleton<IFfmpegAudioComposer>(services =>
+    services.GetRequiredService<FfmpegVoAiAudioComposer>());
 builder.Services.AddSingleton<IMultiVoiceNarrationProvider, VoAiMultiVoiceNarrationProvider>();
+builder.Services.AddSingleton<IMultiVoiceNarrationProvider, BlueMagpieMultiVoiceNarrationProvider>();
 builder.Services.AddSingleton<INarrationProviderRegistry, NarrationProviderRegistry>();
 builder.Services.AddSingleton<NarrationProviderDispatcher>();
 builder.Services.AddHostedService<StoryPipelineWorker>();

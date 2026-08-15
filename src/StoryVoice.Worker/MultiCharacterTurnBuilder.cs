@@ -164,6 +164,22 @@ public static class MultiCharacterTurnBuilder
                     assignment.VoiceProvider,
                     CharacterVoiceProviders.ThreeWaVoxCpm2,
                     StringComparison.OrdinalIgnoreCase);
+                var isBlueMagpieProvider = string.Equals(
+                    assignment.VoiceProvider,
+                    CharacterVoiceProviders.BlueMagpie,
+                    StringComparison.Ordinal);
+
+                if (isBlueMagpieProvider)
+                {
+                    // BlueMagpie has no native rate/pitch controls. Its production contract uses
+                    // neutral fixed cast parameters, and emotion must never inject an unsupported
+                    // delta that the provider would either ignore or interpret inconsistently.
+                    return (
+                        assignment.Voice,
+                        assignment.Rate,
+                        assignment.Pitch,
+                        assignment.Volume);
+                }
 
                 if (isCustomVoiceProvider)
                 {

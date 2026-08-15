@@ -121,6 +121,22 @@ public sealed class NarrationCastRevisionTests
     }
 
     [Fact]
+    public void Verify_fingerprint_is_order_independent_and_detects_materialized_assignment_tampering()
+    {
+        var revision = CreateFixture().Revision.Create();
+        var assignmentsField = typeof(NarrationCastRevision).GetField(
+            "_assignments",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        var assignments = Assert.IsType<List<NarrationCastAssignment>>(assignmentsField!.GetValue(revision));
+
+        assignments.Reverse();
+        Assert.True(revision.VerifyFingerprint());
+
+        assignments.RemoveAt(0);
+        Assert.False(revision.VerifyFingerprint());
+    }
+
+    [Fact]
     public void Every_canonical_snapshot_field_class_changes_the_fingerprint()
     {
         var fixture = CreateFixture();

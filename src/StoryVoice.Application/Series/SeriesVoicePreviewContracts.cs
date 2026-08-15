@@ -17,17 +17,38 @@ public interface ISeriesVoicePreviewService
         CancellationToken cancellationToken);
 }
 
+public enum SeriesVoicePreviewFailureKind
+{
+    Unavailable = 0,
+    ContractViolation = 1,
+}
+
 public sealed class SeriesVoicePreviewUnavailableException : Exception
 {
     public const string StableCode = "series_voice_preview_unavailable";
 
     public SeriesVoicePreviewUnavailableException()
-        : base("本機台灣華語試音暫時無法使用，請稍後再試。")
+        : this(SeriesVoicePreviewFailureKind.Unavailable)
     {
     }
 
     public SeriesVoicePreviewUnavailableException(Exception innerException)
-        : base("本機台灣華語試音暫時無法使用，請稍後再試。", innerException)
+        : this(SeriesVoicePreviewFailureKind.Unavailable, innerException)
     {
     }
+
+    public SeriesVoicePreviewUnavailableException(SeriesVoicePreviewFailureKind failureKind)
+        : this(failureKind, null)
+    {
+    }
+
+    public SeriesVoicePreviewUnavailableException(
+        SeriesVoicePreviewFailureKind failureKind,
+        Exception? innerException)
+        : base("本機台灣華語試音暫時無法使用，請稍後再試。", innerException)
+    {
+        FailureKind = failureKind;
+    }
+
+    public SeriesVoicePreviewFailureKind FailureKind { get; }
 }

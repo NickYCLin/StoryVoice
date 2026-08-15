@@ -6,17 +6,38 @@ namespace StoryVoice.Worker;
 
 public sealed class FfmpegVoAiAudioComposer(
     IOptions<VoAiOptions> options,
-    ILogger<FfmpegVoAiAudioComposer> logger) : IVoAiAudioComposer
+    ILogger<FfmpegVoAiAudioComposer> logger) : IVoAiAudioComposer, IFfmpegAudioComposer
 {
-    public async Task ComposeAsync(
+    public Task ComposeAsync(
         IReadOnlyList<VoAiAudioSegment> segments,
         string outputPath,
+        CancellationToken cancellationToken) =>
+        ComposeCoreAsync(
+            segments.Select(segment => new FfmpegAudioSegment(
+                segment.InputWavPath,
+                segment.Volume,
+                segment.PauseBeforeMs)).ToArray(),
+            outputPath,
+            options.Value.SampleRate,
+            cancellationToken);
+
+    Task IFfmpegAudioComposer.ComposeAsync(
+        IReadOnlyList<FfmpegAudioSegment> segments,
+        string outputPath,
+        int outputSampleRate,
+        CancellationToken cancellationToken) =>
+        ComposeCoreAsync(segments, outputPath, outputSampleRate, cancellationToken);
+
+    private async Task ComposeCoreAsync(
+        IReadOnlyList<FfmpegAudioSegment> segments,
+        string outputPath,
+        int outputSampleRate,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(segments);
         if (segments.Count == 0)
         {
-            throw new ArgumentException("At least one VoAI audio segment is required.", nameof(segments));
+            throw new ArgumentException("At least one audio segment is required.", nameof(segments));
         }
 
         if (string.IsNullOrWhiteSpace(outputPath))
@@ -24,9 +45,16 @@ public sealed class FfmpegVoAiAudioComposer(
             throw new ArgumentException("An output path is required.", nameof(outputPath));
         }
 
+        if (outputSampleRate is < 8_000 or > 192_000)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(outputSampleRate),
+                "The output sample rate must be between 8000 and 192000 Hz.");
+        }
+
         var outputDirectory = Path.GetDirectoryName(Path.GetFullPath(outputPath))!;
         Directory.CreateDirectory(outputDirectory);
-        var workDirectory = Path.Combine(outputDirectory, $"voai-compose-{Guid.NewGuid():N}");
+        var workDirectory = Path.Combine(outputDirectory, $"audio-compose-{Guid.NewGuid():N}");
         Directory.CreateDirectory(workDirectory);
         try
         {
@@ -37,12 +65,12 @@ public sealed class FfmpegVoAiAudioComposer(
                 var segment = segments[index];
                 if (string.IsNullOrWhiteSpace(segment.InputWavPath) || !File.Exists(segment.InputWavPath))
                 {
-                    throw new InvalidOperationException("A VoAI WAV segment is missing.");
+                    throw new InvalidOperationException("An input WAV segment is missing.");
                 }
 
                 if (segment.PauseBeforeMs < 0)
                 {
-                    throw new ArgumentOutOfRangeException(nameof(segments), "VoAI pause must not be negative.");
+                    throw new ArgumentOutOfRangeException(nameof(segments), "Audio pause must not be negative.");
                 }
 
                 var normalizedPath = Path.Combine(workDirectory, $"{index:00000}.wav");
@@ -52,7 +80,7 @@ public sealed class FfmpegVoAiAudioComposer(
                         "-y", "-hide_banner", "-loglevel", "error",
                         "-i", segment.InputWavPath,
                         "-af", filter,
-                        "-ar", options.Value.SampleRate.ToString(CultureInfo.InvariantCulture),
+                        "-ar", outputSampleRate.ToString(CultureInfo.InvariantCulture),
                         "-ac", "1",
                         "-c:a", "pcm_s16le",
                         normalizedPath
@@ -78,16 +106,18 @@ public sealed class FfmpegVoAiAudioComposer(
                 cancellationToken);
             if (!File.Exists(candidatePath) || new FileInfo(candidatePath).Length < 1)
             {
-                throw new InvalidOperationException("VoAI audio composition produced no MP3 output.");
+                throw new InvalidOperationException("Audio composition produced no MP3 output.");
             }
 
             var duration = await ProbeDurationSecondsAsync(candidatePath, cancellationToken);
             if (duration <= 0)
             {
-                throw new InvalidOperationException("VoAI audio composition produced a zero-duration MP3.");
+                throw new InvalidOperationException("Audio composition produced a zero-duration MP3.");
             }
 
-            File.Copy(candidatePath, outputPath, overwrite: true);
+            // candidatePath and outputPath share a filesystem, so the final rename exposes either
+            // the previous complete artifact or the new complete artifact, never a partial MP3.
+            File.Move(candidatePath, outputPath, overwrite: true);
         }
         finally
         {
@@ -108,13 +138,13 @@ public sealed class FfmpegVoAiAudioComposer(
     {
         if (string.IsNullOrWhiteSpace(volume))
         {
-            throw new ArgumentException("VoAI volume is required.", nameof(volume));
+            throw new ArgumentException("Audio volume is required.", nameof(volume));
         }
 
         var value = volume.Trim();
         if (!value.EndsWith('%'))
         {
-            throw new ArgumentException("VoAI volume must be a signed percentage.", nameof(volume));
+            throw new ArgumentException("Audio volume must be a signed percentage.", nameof(volume));
         }
 
         value = value[..^1];
@@ -126,7 +156,7 @@ public sealed class FfmpegVoAiAudioComposer(
                 out var percent)
             || !double.IsFinite(percent))
         {
-            throw new ArgumentException("VoAI volume must be a signed percentage.", nameof(volume));
+            throw new ArgumentException("Audio volume must be a signed percentage.", nameof(volume));
         }
 
         return Math.Clamp(1 + (percent / 100), 0, 2);
@@ -175,7 +205,7 @@ public sealed class FfmpegVoAiAudioComposer(
         using var process = new Process { StartInfo = startInfo };
         if (!process.Start())
         {
-            throw new InvalidOperationException($"Unable to start {fileName} for VoAI audio composition.");
+            throw new InvalidOperationException($"Unable to start {fileName} for audio composition.");
         }
 
         var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
@@ -188,7 +218,7 @@ public sealed class FfmpegVoAiAudioComposer(
             if (process.ExitCode != 0)
             {
                 throw new InvalidOperationException(
-                    $"{fileName} failed while composing VoAI audio (exit code {process.ExitCode}).");
+                    $"{fileName} failed while composing audio (exit code {process.ExitCode}).");
             }
 
             return stdout;
@@ -214,7 +244,7 @@ public sealed class FfmpegVoAiAudioComposer(
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            logger.LogWarning(exception, "Unable to remove a VoAI audio composition working directory");
+            logger.LogWarning(exception, "Unable to remove an audio composition working directory");
         }
     }
 

@@ -1,6 +1,6 @@
 # StoryVoice 開發進度
 
-最後更新：2026-08-14（系列可選獨立旁白或主角視角敘述）
+最後更新：2026-08-15（BlueMagpie 私人短篇 staged canary 路徑）
 
 本文件記錄已由程式碼與測試證實的能力，以及接下來可直接實作的項目。
 產品方向與長期資料模型仍以
@@ -25,10 +25,11 @@
 - 前端已改為 React Router 多頁面架構（`/library`、`/collections`、`/shared` 等），不再是單一長頁面；`NarrationPanel` 已統一為深色主題。
 - 受限說話者辨識：明確 reporting clause 等強規則維持最高優先，不會被模型覆蓋；其餘對話再整章交給本機 `gpt-oss:20b` 補判。模型 schema 只能輸出目前系列已知角色 ID，≥85 信心才自動確認，中／低信心留在人工審核；逾時、例外、漏答、未知 ID 或卸載失敗都安全退回規則結果／Unknown。主角視角模式只轉換非對白，不改變真正對白的 attribution 上下文。
 - 逐章劇本審核 API：草稿建立／重建、逐片段確認或拒絕、確認為不可變 `ConfirmedSpeechPlanRevision`（含 canonical fingerprint），私人正文不進回應。
-- 多聲線 Edge TTS provider：以 JSON manifest 透過 stdin 傳入每個 turn 的文字／聲線／停頓，ffmpeg concat + ffprobe 驗證後才原子發布；provider registry／dispatcher 讓未來新增供應商不用動到既有系列角色 ID。
+- 多聲線 provider registry／dispatcher：Edge TTS 以 JSON manifest 透過 stdin 傳入每個 turn 的文字／聲線／停頓，ffmpeg concat + ffprobe 驗證後才原子發布；新增供應商不用改動既有系列角色 ID。
+- BlueMagpie BM1 本機正式 provider 已接上同一套不可變 speech plan、cast revision、staged rebuild 與原子 MP3 發布流程。固定句試音由 `BLUEMAGPIE_ENABLED` 控制；正式系列 catalog 與工作 admission 另由預設關閉的 `BLUEMAGPIE_FORMAL_NARRATION_ENABLED` 控制。目前只提供 `female_voice`、`hung_yi_lee` 兩個內建聲線，且固定使用中性 rate／pitch／volume，不套用 Edge 的情緒參數差值。
 - Worker 已能實際 claim 並處理 `MultiCharacter` 朗讀工作：從鎖定的 speech plan 與 cast revision 組出 turn 序列（相鄰同聲線合併、章界／換人有界停頓），送出合成前重算 fingerprint 與逐片段文字雜湊，任一不符永久失敗為 `speech_plan_integrity_mismatch`。
 - 建立／推進全系列 `SeriesCastRebuildBatch` 的 Application 服務已完成並串接前端：owner 可在 `/series` 頁面對已確認劇本的系列建立 staged 多角色朗讀批次，逐冊完成後原子切換 active cast epoch；重試會自動清除同系列失敗的舊批次與孤兒 draft cast revision，不會撞唯一鍵。
-- 對白依情緒（緊張／開心／生氣／難過）微調 Edge TTS 的 rate/pitch/volume，規則式判斷只讀取合成當下已合法取得的正文與 reporting clause，不做情感分析宣稱。
+- Edge 對白依情緒（緊張／開心／生氣／難過）微調 rate/pitch/volume，規則式判斷只讀取合成當下已合法取得的正文與 reporting clause，不做情感分析宣稱；BlueMagpie 維持固定中性參數。
 - 角色庫（Character Library，見下方獨立章節）：owner-scoped、跨系列共用的角色管理頁面（`/characters`），角色的基本資料（頭像、年齡、性別、生日、個性、口頭禪、人物背景、說話風格）與自訂聲線（Character Voice Studio）都掛在角色庫上，任何系列的多角色配音都能直接選用同一個角色，不用每個系列各自重建。
 
 ## 多角色系列配音進度
@@ -43,11 +44,11 @@
 | Task 5：deterministic speech segmentation | 已完成 | offset、source hash、巢狀／未閉合引號、對話／內心默讀語意分類與完整重組 |
 | Task 6：受限說話者辨識 | 已完成 | 規則優先、本機 LLM 補判、known identity schema、高信心自動確認、unknown／review fallback |
 | Task 7：speech plan 保存與審核 | 已完成 | draft、confirmed revision、stale 與 immutable job binding |
-| Task 8：多聲線 Edge TTS | 已完成 | provider dispatcher、分段合成、ffmpeg／ffprobe（含真實二進位檔驗證）、原子發布 |
+| Task 8：多聲線 TTS provider | 已完成；BlueMagpie 限短篇 canary | Edge provider dispatcher、分段合成、ffmpeg／ffprobe 與原子發布；BlueMagpie 版本鎖定、兩聲線、120 scalar 分塊與正式 admission gate |
 | Task 9：staged multi-character jobs | 已完成 | active cast 載入、confirmed plan 載入、turn 合併與停頓、完整性重驗證、staged batch 建立與原子 epoch 切換 API |
 | Task 10：系列 cast 與 speech-plan UI | 已完成 | LLM 候選勾選／alias 合併／套用、系列管理、低信心劇本審核、staged rebuild 狀態與啟用、角色自訂聲線工作室 |
 | Task 11：私有書庫 backfill | 營運工作，未開始 | 必須在 Git 外執行，不可留下私人內容或識別資訊 |
-| Task 12：兩階段正式發布 | 未開始 | 備份、candidate、canary、drift check、監控與 rollback proof |
+| Task 12：兩階段正式發布 | 短篇 canary 待驗證 | 備份、candidate、私人 staged canary、drift check、監控與 rollback proof；不得直接用完整書籍 |
 
 ## 角色庫（Character Library）與角色自訂聲線工作室（Character Voice Studio）
 
@@ -100,8 +101,13 @@ URL 展開），但正式啟用前務必先用一個測試角色實際跑一次 
   聲線與 3wa 自訂聲線，但旁白本身永遠只能是 Edge 聲線。
 - 角色基本資料的「AI 補完」／「AI 全部重寫」按鈕只是預留位置，沒有接 LLM（3wa
   Cluster API 目前沒有對應的 chat/生成 mode）。
-- 沒有串接 GPT-SoVITS 或其他第二個聲音引擎（`IMultiVoiceNarrationProvider` 的擴充點
-  讓這件事之後可以純新增，不用重構既有 provider）。
+- 已新增 BlueMagpie BM1 作為第二個固定聲線引擎，但目前只允許私人短篇 staged
+  canary：只有內建女聲 `female_voice` 與男聲 `hung_yi_lee`，模型權重 license 標示
+  為 `other`，不代表可公開、重新散布或商業使用。完整書籍啟用前仍必須完成 durable
+  deterministic chunk cache/resume，以及包含 Worker 重啟、暫時性失敗與 GPU 壓力的長篇
+  benchmark；在那之前 `BLUEMAGPIE_FORMAL_NARRATION_ENABLED` 應維持 `false`。
+- BlueMagpie 自架 canary 不需要 VoAI；`VOAI_API_KEY` 與 `VOAI_PAID_API_KEY` 都必須保持
+  空值。Worker 只認獨立 opt-in 的 `VOAI_PAID_API_KEY`，避免舊 key 意外產生付費呼叫。
 - 沒有匿名／公開的角色或聲線建立入口，一律維持既有的 owner-scoped 私有資料邊界。
 
 ## 公開 repository 邊界

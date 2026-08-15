@@ -128,6 +128,21 @@ public static class SeriesEndpoints
         .AddEndpointFilter<AntiforgeryEndpointFilter>()
         .WithName("ConfigureStorySeriesNarrativeVoice");
 
+        group.MapPut("/{seriesId:guid}/voices", async (
+            Guid seriesId,
+            ConfigureSeriesVoicesRequest request,
+            ISeriesService service,
+            CancellationToken cancellationToken) =>
+        {
+            var series = await service.ConfigureVoicesAsync(
+                seriesId,
+                request,
+                cancellationToken);
+            return series is null ? Results.NotFound() : Results.Ok(series);
+        })
+        .AddEndpointFilter<AntiforgeryEndpointFilter>()
+        .WithName("ConfigureStorySeriesVoices");
+
         group.MapPost("/{seriesId:guid}/characters/{characterId:guid}/aliases", async (
             Guid seriesId,
             Guid characterId,

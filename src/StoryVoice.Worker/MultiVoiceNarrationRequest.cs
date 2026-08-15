@@ -14,4 +14,14 @@ public sealed record NarrationTurn(
     string Volume,
     int PauseBeforeMs);
 
-public sealed record MultiVoiceNarrationRequest(IReadOnlyList<NarrationTurn> Turns);
+/// <summary>
+/// The immutable provider identity captured with a cast revision. Keeping this beside the turns
+/// lets a version-pinned provider reject stale or mixed cast snapshots before it makes any
+/// synthesis request.
+/// </summary>
+public sealed record NarrationProviderContract(string ProviderName, string ProviderVersion);
+
+public sealed record MultiVoiceNarrationRequest(
+    IReadOnlyList<NarrationTurn> Turns,
+    NarrationProviderContract? NarratorProvider = null,
+    IReadOnlyList<NarrationProviderContract>? CharacterProviders = null);

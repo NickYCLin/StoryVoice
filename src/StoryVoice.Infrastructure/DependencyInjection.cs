@@ -80,6 +80,8 @@ public static class DependencyInjection
             .ValidateOnStart();
         services.AddOptions<BlueMagpieOptions>()
             .Bind(configuration.GetSection(BlueMagpieOptions.SectionName))
+            .Validate(options => !options.FormalNarrationEnabled || options.Enabled,
+                "BlueMagpie 正式配音只能在固定句試音 gateway 已啟用時開放。")
             .Validate(options => !options.Enabled || IsValidBlueMagpieBaseUrl(options.BaseUrl),
                 "BlueMagpie base URL 無效。")
             .Validate(options => !options.Enabled

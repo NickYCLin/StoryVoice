@@ -417,6 +417,22 @@ public sealed class BookInsightsApiTests(ApiFactory factory) : IClassFixture<Api
                     "+0%"),
             ]);
 
+        using var mixedProviderApply = await owner.PostWithCsrfAsync(
+            $"/api/series/{created.Id}/analyzed-characters",
+            request with
+            {
+                Characters =
+                [
+                    request.Characters[0] with
+                    {
+                        VoiceProvider = "voai",
+                        Voice = "v1:Neo:佑希:預設"
+                    }
+                ]
+            },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, mixedProviderApply.StatusCode);
+
         using var apply = await owner.PostWithCsrfAsync(
             $"/api/series/{created.Id}/analyzed-characters",
             request,

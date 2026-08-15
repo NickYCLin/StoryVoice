@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Buffers.Binary;
+using System.Net;
 using System.Net.Http.Json;
 using Microsoft.Extensions.Options;
 using StoryVoice.Application.Series;
@@ -12,6 +13,7 @@ public sealed class BlueMagpieTtsClient(
 {
     private const string TokenHeader = "X-StoryVoice-Internal-Token";
     private const string RevisionHeader = "X-BlueMagpie-Model-Revision";
+    private const string ProviderVersionHeader = "X-BlueMagpie-Provider-Version";
     private const string VoiceHeader = "X-BlueMagpie-Voice";
 
     public async Task<BlueMagpieSynthesisResult> SynthesizeAsync(
@@ -34,28 +36,34 @@ public sealed class BlueMagpieTtsClient(
 
             if (!response.IsSuccessStatusCode)
             {
-                throw new SeriesVoicePreviewUnavailableException();
+                throw new SeriesVoicePreviewUnavailableException(
+                    ClassifyFailure(response.StatusCode));
             }
 
             var mediaType = response.Content.Headers.ContentType?.MediaType;
             if (!string.Equals(mediaType, "audio/wav", StringComparison.OrdinalIgnoreCase)
                 && !string.Equals(mediaType, "audio/x-wav", StringComparison.OrdinalIgnoreCase))
             {
-                throw new SeriesVoicePreviewUnavailableException();
+                throw ContractViolation();
             }
 
             var contentLength = response.Content.Headers.ContentLength;
             if (contentLength is <= 0 || contentLength > options.Value.MaximumResponseBytes)
             {
-                throw new SeriesVoicePreviewUnavailableException();
+                throw ContractViolation();
             }
 
             var revision = ReadSingleHeader(response, RevisionHeader);
+            var providerVersion = ReadSingleHeader(response, ProviderVersionHeader);
             var returnedVoice = ReadSingleHeader(response, VoiceHeader);
             if (!string.Equals(revision, options.Value.ModelRevision, StringComparison.Ordinal)
+                || !string.Equals(
+                    providerVersion,
+                    BlueMagpieOptions.PinnedProviderVersion,
+                    StringComparison.Ordinal)
                 || !string.Equals(returnedVoice, voice, StringComparison.Ordinal))
             {
-                throw new SeriesVoicePreviewUnavailableException();
+                throw ContractViolation();
             }
 
             await using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
@@ -65,10 +73,15 @@ public sealed class BlueMagpieTtsClient(
                 cancellationToken);
             if (!IsPcmWave(content))
             {
-                throw new SeriesVoicePreviewUnavailableException();
+                throw ContractViolation();
             }
 
-            return new BlueMagpieSynthesisResult(content, "audio/wav", revision, returnedVoice);
+            return new BlueMagpieSynthesisResult(
+                content,
+                "audio/wav",
+                revision,
+                providerVersion,
+                returnedVoice);
         }
         catch (SeriesVoicePreviewUnavailableException)
         {
@@ -118,7 +131,7 @@ public sealed class BlueMagpieTtsClient(
 
                 if (output.Length + read > maximumBytes)
                 {
-                    throw new SeriesVoicePreviewUnavailableException();
+                    throw ContractViolation();
                 }
 
                 output.Write(buffer, 0, read);
@@ -188,6 +201,14 @@ public sealed class BlueMagpieTtsClient(
 
         return offset == content.Length && hasFormat && hasAudio;
     }
+
+    private static SeriesVoicePreviewFailureKind ClassifyFailure(HttpStatusCode statusCode) =>
+        (int)statusCode is 408 or 425 or 429 or 500 or 502 or 503 or 504
+            ? SeriesVoicePreviewFailureKind.Unavailable
+            : SeriesVoicePreviewFailureKind.ContractViolation;
+
+    private static SeriesVoicePreviewUnavailableException ContractViolation() =>
+        new(SeriesVoicePreviewFailureKind.ContractViolation);
 
     private sealed record BlueMagpieSpeechRequest(string Text, string Voice);
 }

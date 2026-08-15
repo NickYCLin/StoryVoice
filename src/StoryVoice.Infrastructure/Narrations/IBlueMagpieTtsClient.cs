@@ -4,6 +4,7 @@ public sealed record BlueMagpieSynthesisResult(
     byte[] Content,
     string ContentType,
     string ModelRevision,
+    string ProviderVersion,
     string Voice);
 
 public interface IBlueMagpieTtsClient

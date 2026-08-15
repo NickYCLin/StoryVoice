@@ -120,8 +120,8 @@ public sealed class CharacterProfileApiTests(ApiFactory factory) : IClassFixture
             new
             {
                 name = $"角色庫測試系列-{Guid.NewGuid():N}",
-                narratorProvider = "edge",
-                narratorVoice = "zh-TW-YunJheNeural",
+                narratorProvider = "3wa-voxcpm2",
+                narratorVoice = "custom",
                 narratorRate = "-5%",
                 narratorPitch = "+0Hz",
                 narratorVolume = "+0%",
@@ -192,8 +192,8 @@ public sealed class CharacterProfileApiTests(ApiFactory factory) : IClassFixture
             new
             {
                 name = $"刪除保護測試系列-{Guid.NewGuid():N}",
-                narratorProvider = "edge",
-                narratorVoice = "zh-TW-YunJheNeural",
+                narratorProvider = "3wa-voxcpm2",
+                narratorVoice = "custom",
                 narratorRate = "-5%",
                 narratorPitch = "+0Hz",
                 narratorVolume = "+0%",

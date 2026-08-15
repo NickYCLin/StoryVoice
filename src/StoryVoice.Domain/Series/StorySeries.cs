@@ -299,6 +299,70 @@ public sealed class StorySeries
         Touch(now);
     }
 
+    public void SetNarratorVoice(
+        string narratorProvider,
+        string narratorVoice,
+        string narratorRate,
+        string narratorPitch,
+        string narratorVolume)
+    {
+        EnsureMutationAggregateComplete();
+        var normalizedProvider = SeriesValueValidator.NormalizePrintable(
+            narratorProvider,
+            SeriesFieldLimits.Provider,
+            nameof(narratorProvider));
+        var normalizedVoice = SeriesValueValidator.NormalizePrintable(
+            narratorVoice,
+            SeriesFieldLimits.Voice,
+            nameof(narratorVoice));
+        var normalizedRate = SeriesValueValidator.NormalizePrintable(
+            narratorRate,
+            SeriesFieldLimits.SynthesisParameter,
+            nameof(narratorRate));
+        var normalizedPitch = SeriesValueValidator.NormalizePrintable(
+            narratorPitch,
+            SeriesFieldLimits.SynthesisParameter,
+            nameof(narratorPitch));
+        var normalizedVolume = SeriesValueValidator.NormalizePrintable(
+            narratorVolume,
+            SeriesFieldLimits.SynthesisParameter,
+            nameof(narratorVolume));
+        if (string.Equals(NarratorProvider, normalizedProvider, StringComparison.Ordinal)
+            && string.Equals(NarratorVoice, normalizedVoice, StringComparison.Ordinal)
+            && string.Equals(NarratorRate, normalizedRate, StringComparison.Ordinal)
+            && string.Equals(NarratorPitch, normalizedPitch, StringComparison.Ordinal)
+            && string.Equals(NarratorVolume, normalizedVolume, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        NarratorProvider = normalizedProvider;
+        NarratorVoice = normalizedVoice;
+        NarratorRate = normalizedRate;
+        NarratorPitch = normalizedPitch;
+        NarratorVolume = normalizedVolume;
+        Touch();
+    }
+
+    public void SetCharacterVoice(
+        Guid characterId,
+        string voiceProvider,
+        string voice,
+        string rate,
+        string pitch,
+        string volume)
+    {
+        EnsureMutationAggregateComplete();
+        EnsureId(characterId, nameof(characterId));
+        var character = _characters.SingleOrDefault(candidate => candidate.Id == characterId)
+            ?? throw new InvalidOperationException("角色不屬於這個系列。");
+        var now = DateTimeOffset.UtcNow;
+        if (character.SetVoice(voiceProvider, voice, rate, pitch, volume, now))
+        {
+            Touch(now);
+        }
+    }
+
     /// <summary>
     /// Names the character whose narration voice is the story's first-person "我" — lets speaker
     /// attribution resolve self-referential reporting clauses ("我說：") to a real cast member

@@ -36,6 +36,7 @@ public sealed class BlueMagpieVoicePreviewTests
         Assert.Equal(BlueMagpieOptions.FemaleVoice, body.RootElement.GetProperty("voice").GetString());
         Assert.Equal("audio/wav", result.ContentType);
         Assert.Equal(BlueMagpieOptions.PinnedModelRevision, result.ModelRevision);
+        Assert.Equal(BlueMagpieOptions.PinnedProviderVersion, result.ProviderVersion);
         Assert.Equal(BlueMagpieOptions.FemaleVoice, result.Voice);
         Assert.Equal(CreateWavBytes(), result.Content);
     }
@@ -66,6 +67,7 @@ public sealed class BlueMagpieVoicePreviewTests
         Assert.DoesNotContain(privateBody, exception.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("不得記錄的文字", exception.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("test-internal-token", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(SeriesVoicePreviewFailureKind.ContractViolation, exception.FailureKind);
     }
 
     [Fact]
@@ -78,11 +80,12 @@ public sealed class BlueMagpieVoicePreviewTests
             BaseAddress = new Uri("http://bluemagpie-gateway:8081/"),
         };
 
-        await Assert.ThrowsAsync<SeriesVoicePreviewUnavailableException>(() =>
+        var nonWaveException = await Assert.ThrowsAsync<SeriesVoicePreviewUnavailableException>(() =>
             CreateClient(nonWaveHttpClient).SynthesizeAsync(
                 "固定試音",
                 BlueMagpieOptions.FemaleVoice,
                 CancellationToken.None));
+        Assert.Equal(SeriesVoicePreviewFailureKind.ContractViolation, nonWaveException.FailureKind);
 
         var oversizedHandler = new RecordingHandler(() => CreateSuccessfulResponse(new byte[65]));
         using var oversizedHttpClient = new HttpClient(oversizedHandler)
@@ -90,11 +93,12 @@ public sealed class BlueMagpieVoicePreviewTests
             BaseAddress = new Uri("http://bluemagpie-gateway:8081/"),
         };
 
-        await Assert.ThrowsAsync<SeriesVoicePreviewUnavailableException>(() =>
+        var oversizedException = await Assert.ThrowsAsync<SeriesVoicePreviewUnavailableException>(() =>
             CreateClient(oversizedHttpClient, maximumResponseBytes: 64).SynthesizeAsync(
                 "固定試音",
                 BlueMagpieOptions.FemaleVoice,
                 CancellationToken.None));
+        Assert.Equal(SeriesVoicePreviewFailureKind.ContractViolation, oversizedException.FailureKind);
     }
 
     [Fact]
@@ -113,11 +117,70 @@ public sealed class BlueMagpieVoicePreviewTests
             BaseAddress = new Uri("http://bluemagpie-gateway:8081/"),
         };
 
-        await Assert.ThrowsAsync<SeriesVoicePreviewUnavailableException>(() =>
+        var exception = await Assert.ThrowsAsync<SeriesVoicePreviewUnavailableException>(() =>
             CreateClient(httpClient).SynthesizeAsync(
                 "固定試音",
                 BlueMagpieOptions.FemaleVoice,
                 CancellationToken.None));
+        Assert.Equal(SeriesVoicePreviewFailureKind.ContractViolation, exception.FailureKind);
+    }
+
+    [Fact]
+    public async Task Client_requires_the_exact_BM1_provider_contract_header()
+    {
+        var handler = new RecordingHandler(() =>
+        {
+            var response = CreateSuccessfulResponse();
+            response.Headers.Remove("X-BlueMagpie-Provider-Version");
+            response.Headers.Add("X-BlueMagpie-Provider-Version", BlueMagpieOptions.PinnedModelRevision);
+            return response;
+        });
+        using var httpClient = new HttpClient(handler)
+        {
+            BaseAddress = new Uri("http://bluemagpie-gateway:8081/"),
+        };
+
+        var exception = await Assert.ThrowsAsync<SeriesVoicePreviewUnavailableException>(() =>
+            CreateClient(httpClient).SynthesizeAsync(
+                "固定試音",
+                BlueMagpieOptions.FemaleVoice,
+                TestContext.Current.CancellationToken));
+
+        Assert.Equal(SeriesVoicePreviewFailureKind.ContractViolation, exception.FailureKind);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.BadRequest, SeriesVoicePreviewFailureKind.ContractViolation)]
+    [InlineData(HttpStatusCode.Unauthorized, SeriesVoicePreviewFailureKind.ContractViolation)]
+    [InlineData(HttpStatusCode.NotFound, SeriesVoicePreviewFailureKind.ContractViolation)]
+    [InlineData(HttpStatusCode.Conflict, SeriesVoicePreviewFailureKind.ContractViolation)]
+    [InlineData(HttpStatusCode.RequestTimeout, SeriesVoicePreviewFailureKind.Unavailable)]
+    [InlineData(HttpStatusCode.TooManyRequests, SeriesVoicePreviewFailureKind.Unavailable)]
+    [InlineData(HttpStatusCode.InternalServerError, SeriesVoicePreviewFailureKind.Unavailable)]
+    [InlineData(HttpStatusCode.ServiceUnavailable, SeriesVoicePreviewFailureKind.Unavailable)]
+    public async Task Client_classifies_HTTP_failures_without_exposing_gateway_details(
+        HttpStatusCode statusCode,
+        SeriesVoicePreviewFailureKind expectedKind)
+    {
+        var handler = new RecordingHandler(() => new HttpResponseMessage(statusCode)
+        {
+            Content = new StringContent("private gateway diagnostics"),
+        });
+        using var httpClient = new HttpClient(handler)
+        {
+            BaseAddress = new Uri("http://bluemagpie-gateway:8081/"),
+        };
+
+        var exception = await Assert.ThrowsAsync<SeriesVoicePreviewUnavailableException>(() =>
+            CreateClient(httpClient).SynthesizeAsync(
+                "不得記錄的小說內容",
+                BlueMagpieOptions.FemaleVoice,
+                TestContext.Current.CancellationToken));
+
+        Assert.Equal(expectedKind, exception.FailureKind);
+        Assert.Equal("本機台灣華語試音暫時無法使用，請稍後再試。", exception.Message);
+        Assert.DoesNotContain("private gateway diagnostics", exception.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("不得記錄的小說內容", exception.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -233,6 +296,7 @@ public sealed class BlueMagpieVoicePreviewTests
         };
         response.Content.Headers.ContentType = new MediaTypeHeaderValue("audio/wav");
         response.Headers.Add("X-BlueMagpie-Model-Revision", BlueMagpieOptions.PinnedModelRevision);
+        response.Headers.Add("X-BlueMagpie-Provider-Version", BlueMagpieOptions.PinnedProviderVersion);
         response.Headers.Add("X-BlueMagpie-Voice", BlueMagpieOptions.FemaleVoice);
         return response;
     }
@@ -301,6 +365,7 @@ public sealed class BlueMagpieVoicePreviewTests
                 CreateWavBytes(),
                 "audio/wav",
                 BlueMagpieOptions.PinnedModelRevision,
+                BlueMagpieOptions.PinnedProviderVersion,
                 voice));
         }
     }
@@ -324,6 +389,7 @@ public sealed class BlueMagpieVoicePreviewTests
                 CreateWavBytes(),
                 "audio/wav",
                 BlueMagpieOptions.PinnedModelRevision,
+                BlueMagpieOptions.PinnedProviderVersion,
                 voice);
         }
     }
@@ -347,6 +413,7 @@ public sealed class BlueMagpieVoicePreviewTests
                 CreateWavBytes(),
                 "audio/wav",
                 BlueMagpieOptions.PinnedModelRevision,
+                BlueMagpieOptions.PinnedProviderVersion,
                 voice));
         }
     }

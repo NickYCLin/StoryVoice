@@ -50,5 +50,10 @@ public interface ISeriesService
         ConfigureSeriesNarrativeVoiceRequest request,
         CancellationToken cancellationToken);
 
+    Task<StorySeriesDetailsResponse?> ConfigureVoicesAsync(
+        Guid seriesId,
+        ConfigureSeriesVoicesRequest request,
+        CancellationToken cancellationToken);
+
     IReadOnlyList<SeriesVoiceOptionResponse> ListVoiceOptions();
 }

@@ -12,6 +12,11 @@ public static class CharacterVoiceProviders
 
     public const string VoAi = "voai";
 
+    /// <summary>The privately self-hosted OpenFormosa BlueMagpie BM1 provider. Its model weights
+    /// are intentionally treated as private-use-only until their upstream <c>other</c> license is
+    /// clarified; this identifier must not be interpreted as permission to redistribute them.</summary>
+    public const string BlueMagpie = "bluemagpie";
+
     /// <summary>The provider whose <see cref="StoryVoice.Domain.Narrations.CharacterVoiceProfile"/>-backed
     /// synthesis can also fall back to plain Edge voices turn-by-turn — see
     /// <c>ThreeWaVoxCpm2NarrationProvider</c> in the Worker project.</summary>

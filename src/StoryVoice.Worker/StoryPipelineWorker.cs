@@ -273,7 +273,7 @@ public sealed class StoryPipelineWorker(
                         characterProfileIdsByCharacterId);
                     await multiVoiceDispatcher.SynthesizeAsync(
                         castRevision.NarratorProvider,
-                        new MultiVoiceNarrationRequest(turns),
+                        CreateMultiVoiceNarrationRequest(castRevision, turns),
                         temporaryPath,
                         reportProgress,
                         providerCancellation.Token);
@@ -435,8 +435,12 @@ public sealed class StoryPipelineWorker(
                     && revision.SeriesId == seriesId
                     && revision.Id == castRevisionId,
                 cancellationToken);
-        return castRevision
-            ?? throw new InvalidOperationException(MultiCharacterTurnBuilder.IntegrityMismatchReasonCode);
+        if (castRevision is null || !castRevision.VerifyFingerprint())
+        {
+            throw new InvalidOperationException(MultiCharacterTurnBuilder.IntegrityMismatchReasonCode);
+        }
+
+        return castRevision;
     }
 
     private static async Task<(IReadOnlyList<CharacterVoiceProfile> Profiles, IReadOnlyDictionary<Guid, Guid> CharacterProfileIdsByCharacterId)>
@@ -524,6 +528,24 @@ public sealed class StoryPipelineWorker(
 
         var mapped = 10 + (int)((long)completedChunks * 85 / totalChunks);
         return Math.Clamp(mapped, 11, 95);
+    }
+
+    internal static MultiVoiceNarrationRequest CreateMultiVoiceNarrationRequest(
+        NarrationCastRevision castRevision,
+        IReadOnlyList<NarrationTurn> turns)
+    {
+        ArgumentNullException.ThrowIfNull(castRevision);
+        ArgumentNullException.ThrowIfNull(turns);
+        return new MultiVoiceNarrationRequest(
+            turns,
+            new NarrationProviderContract(
+                castRevision.NarratorProvider,
+                castRevision.NarratorProviderVersion),
+            castRevision.Assignments
+                .Select(assignment => new NarrationProviderContract(
+                    assignment.VoiceProvider,
+                    assignment.ProviderVersion))
+                .ToArray());
     }
 
     internal static IQueryable<NarrationJob> SupportedJobs(IQueryable<NarrationJob> jobs) =>

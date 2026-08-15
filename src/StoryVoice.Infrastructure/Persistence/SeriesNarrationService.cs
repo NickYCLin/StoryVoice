@@ -27,6 +27,7 @@ internal sealed class SeriesNarrationService(
     ChineseSpeechSegmenter segmenter,
     IOptions<NarrationAdmissionOptions> admissionOptions,
     IOptions<MultiCharacterNarrationOptions> compositionOptions,
+    IOptions<BlueMagpieOptions> blueMagpieOptions,
     PostgreSqlCastEpochActivationPublisher activationPublisher) : ISeriesNarrationService
 {
     public async Task<SeriesNarrationRebuildResponse?> CreateRebuildAsync(
@@ -60,6 +61,16 @@ internal sealed class SeriesNarrationService(
             if (series is null)
             {
                 return null;
+            }
+
+            if (string.Equals(
+                    series.NarratorProvider,
+                    CharacterVoiceProviders.BlueMagpie,
+                    StringComparison.OrdinalIgnoreCase)
+                && !blueMagpieOptions.Value.FormalNarrationEnabled)
+            {
+                throw new InvalidOperationException(
+                    "BlueMagpie 目前只開放固定句試音；正式小說配音尚未由管理員啟用。");
             }
 
             var memberships = series.Books

@@ -52,19 +52,32 @@ Open:
 - Liveness: <http://localhost:8080/health/live>
 - Readiness: <http://localhost:8080/health/ready>
 
-### Private BlueMagpie Taiwan-Mandarin preview (ARM64 + NVIDIA GPU)
+### Private BlueMagpie Taiwan-Mandarin preview and short canary (ARM64 + NVIDIA GPU)
 
-The `bluemagpie` Compose profile adds a self-hosted, fixed-sentence preview only.
-It does not add BlueMagpie to the production series voice catalog, send book text,
-or call VoAI. The gateway has no host port and runs on an internal Docker network.
+The `bluemagpie` Compose profile adds a self-hosted gateway with no host port on an
+internal Docker network. `BLUEMAGPIE_ENABLED=true` enables the fixed-sentence
+preview. Formal series narration is a separate opt-in:
+`BLUEMAGPIE_FORMAL_NARRATION_ENABLED=true` exposes exactly two built-in voices
+(`female_voice` and `hung_yi_lee`) in the series voice catalog and admits staged
+multi-character jobs through the local Worker.
+
+The formal path is currently limited to short, private **staged canaries**. Keep it
+disabled for complete books and do not activate canary audio. Before full-book use,
+BlueMagpie still needs a durable deterministic chunk cache/resume mechanism and a
+long-form benchmark with restart/retry coverage. Its model weights are marked with
+license `other`, so this path is private/internal only; do not assume redistribution
+or commercial-use rights.
 
 Preload the pinned model cache, create a random secret of at least 32 characters,
 then set these values outside Git:
 
 ```bash
 BLUEMAGPIE_ENABLED=true
+BLUEMAGPIE_FORMAL_NARRATION_ENABLED=false
 BLUEMAGPIE_INTERNAL_TOKEN=<random-internal-secret>
 BLUEMAGPIE_CACHE_PATH=/absolute/path/to/the/preloaded/cache
+VOAI_API_KEY=
+VOAI_PAID_API_KEY=
 ```
 
 Start the private preview with:
@@ -73,9 +86,11 @@ Start the private preview with:
 docker compose --profile bluemagpie up -d --build bluemagpie-gateway api worker web
 ```
 
-Paid VoAI synthesis is deliberately separate: the Worker ignores the legacy
-`VOAI_API_KEY` variable. It can only be enabled by explicitly configuring
-`VOAI_PAID_API_KEY`; leave it empty for a no-paid-API deployment.
+For a short BlueMagpie canary, temporarily set the formal flag to `true`, build only
+private staged audio, then return it to `false`. Paid VoAI synthesis is deliberately
+separate: the Worker ignores the legacy `VOAI_API_KEY` variable and can only enable
+paid calls from `VOAI_PAID_API_KEY`. Both keys must remain empty for a no-paid-API
+deployment and for the BlueMagpie canary described here.
 
 Compose 只把 Web 與 API 綁在 `127.0.0.1`；對外服務應由同機 reverse proxy 提供 TLS。
 
@@ -255,12 +270,12 @@ tests/
 - StoryVoice **does not provide DRM circumvention**.
 - 博客來 Companion 不接收帳密／Cookie，也不下載或解密博客來電子書內文。
 - Process only content you own or have the right to transform.
-- 建立神經語音時，合法正文會送往設定的外部 Microsoft Edge 語音服務；StoryVoice 不會把博客來官方 TTS 標記當成已生成音訊。
+- 建立系列配音時，合法正文會交給該系列目前設定的語音服務；服務可能是私人本機自架或外部供應商。StoryVoice 不會把博客來官方 TTS 標記當成已生成音訊。
 - API keys belong in environment variables or a secret manager, never Git.
 - 使用 VoAI 雲端 API 時，待合成文字會透過網路傳送至 VoAI；啟用前請確認內容授權、隱私需求與供應商條款。
 - 對外提供 VoAI 產物時，應依適用法規與平台規範揭露該語音由 AI 生成或合成。
 - VoAI 免費試用音訊含背景音樂或浮水印，只供串接測試、不可作為商用成品；商用前須購買適用方案並確認聲線授權。
-- BlueMagpie 程式碼與模型權重不是同一授權；模型權重目前標示為 `other`。本專案的 BlueMagpie 路徑僅供私人內網試音，公開或商業使用前須先取得明確授權。
+- BlueMagpie 程式碼與模型權重不是同一授權；模型權重目前標示為 `other`。本專案的 BlueMagpie 路徑僅供私人內網固定句試音或短篇 staged canary，公開、重新散布或商業使用前須先取得明確授權。
 - Uploaded books, generated audio, analysis results and runtime volumes are ignored by Git.
 - Generated audio is not automatically licensed for redistribution.
 

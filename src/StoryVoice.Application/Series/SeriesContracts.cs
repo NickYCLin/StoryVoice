@@ -61,11 +61,28 @@ public sealed record ConfigureSeriesNarrativeVoiceRequest(
     NarrativeVoiceMode Mode,
     Guid? PointOfViewCharacterId);
 
+/// <summary>
+/// Atomically replaces the narrator and every existing character's synthesis voice. Requiring a
+/// complete cast prevents a provider switch from leaving a half-migrated series that cannot be
+/// staged by a single multi-voice provider.
+/// </summary>
+public sealed record ConfigureSeriesVoicesRequest(
+    string NarratorProvider,
+    string NarratorVoice,
+    IReadOnlyList<ConfigureSeriesCharacterVoiceRequest> Characters);
+
+public sealed record ConfigureSeriesCharacterVoiceRequest(
+    Guid CharacterId,
+    string VoiceProvider,
+    string Voice);
+
 public sealed record SeriesVoiceOptionResponse(
     string Provider,
     string Voice,
     string DisplayName,
-    string Locale);
+    string Locale,
+    bool FormalNarrationAvailable,
+    string UsageScope);
 
 public sealed record StorySeriesSummaryResponse(
     Guid Id,

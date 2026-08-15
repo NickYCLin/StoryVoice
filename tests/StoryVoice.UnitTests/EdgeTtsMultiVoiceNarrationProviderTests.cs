@@ -70,6 +70,23 @@ public sealed class NarrationProviderRegistryTests
 
         Assert.Throws<InvalidOperationException>(() => registry.Resolve("  "));
     }
+
+    [Fact]
+    public void ResolveExact_requires_an_ordinal_name_and_version_for_a_versioned_provider()
+    {
+        var provider = new FakeVersionedMultiVoiceProvider("bluemagpie", "bm1-contract");
+        var registry = new NarrationProviderRegistry([provider]);
+
+        Assert.Same(provider, registry.ResolveExact("bluemagpie", "bm1-contract"));
+        Assert.Equal(
+            "provider_version_mismatch",
+            Assert.Throws<PermanentNarrationProviderException>(
+                () => registry.ResolveExact("BLUEMAGPIE", "bm1-contract")).ErrorCode);
+        Assert.Equal(
+            "provider_version_mismatch",
+            Assert.Throws<PermanentNarrationProviderException>(
+                () => registry.ResolveExact("bluemagpie", "other")).ErrorCode);
+    }
 }
 
 public sealed class NarrationProviderDispatcherTests
@@ -104,4 +121,19 @@ internal sealed class FakeMultiVoiceProvider(string providerName) : IMultiVoiceN
         LastOutputPath = outputPath;
         return Task.CompletedTask;
     }
+}
+
+internal sealed class FakeVersionedMultiVoiceProvider(
+    string providerName,
+    string providerVersion) : IVersionedMultiVoiceNarrationProvider
+{
+    public string ProviderName { get; } = providerName;
+    public string ProviderVersion { get; } = providerVersion;
+
+    public Task SynthesizeAsync(
+        MultiVoiceNarrationRequest request,
+        string outputPath,
+        Func<NarrationSynthesisProgress, CancellationToken, Task>? progressCallback,
+        CancellationToken cancellationToken) =>
+        Task.CompletedTask;
 }

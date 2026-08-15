@@ -180,12 +180,14 @@ public sealed class StorySeriesTests
         var character = series.AddCharacter(
             "Alice", SeriesCharacterRole.Main, "edge", "voice-a", "+0%", "+0Hz", "+0%", null);
         series.AddAlias(character, "  The   Captain  ");
+        var seriesStamp = series.ConcurrencyStamp;
         var identityKeySnapshot = series.IdentityKeys
             .Select(key => (key.Id, key.Value, key.NormalizedValue, key.Kind))
             .ToArray();
 
         Assert.Throws<InvalidOperationException>(() => series.AddAlias(character, "the captain"));
 
+        Assert.Equal(seriesStamp, series.ConcurrencyStamp);
         Assert.Equal(identityKeySnapshot, series.IdentityKeys
             .Select(key => (key.Id, key.Value, key.NormalizedValue, key.Kind))
             .ToArray());

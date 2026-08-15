@@ -14,8 +14,10 @@ test('new narration routes eligible authorized text through the multi-character 
   assert.ok(!panel.includes('function createNarration'))
 })
 
-test('narration discloses external neural provider and distinguishes official TTS metadata', () => {
-  assert.ok(panel.includes('Microsoft Edge 神經語音服務'))
+test('narration discloses the configured local or external provider and distinguishes official TTS metadata', () => {
+  assert.ok(panel.includes('該系列目前設定的語音服務'))
+  assert.ok(panel.includes('私人本機自架或外部供應商'))
+  assert.ok(!panel.includes('文字會送往 Microsoft Edge'))
   assert.ok(panel.includes('博客來官方閱讀器的 TTS 標記是不同能力'))
   assert.ok(panel.includes('博客來官方 TTS 標記不等於 StoryVoice 音訊'))
   assert.ok(panel.includes('音訊完成後保存於你的私人 StoryVoice 帳號'))

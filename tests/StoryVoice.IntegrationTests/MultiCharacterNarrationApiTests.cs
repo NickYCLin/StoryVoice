@@ -3,13 +3,16 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using StoryVoice.Application.Books;
 using StoryVoice.Application.Narrations;
 using StoryVoice.Application.Narrations.SpeechPlanning;
 using StoryVoice.Application.Series;
 using StoryVoice.Domain.Narrations;
+using StoryVoice.Infrastructure.Narrations;
 using StoryVoice.Infrastructure.Persistence;
 
 namespace StoryVoice.IntegrationTests;
@@ -110,6 +113,170 @@ public sealed class MultiCharacterNarrationApiTests(ApiFactory factory) : IClass
     }
 
     [Fact]
+    public async Task Atomic_voice_switch_invalidates_pending_batch_and_cancels_job_without_staling_speech_plan()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var owner = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        var book = await ImportTextAsync(owner, "voice switch keeps confirmed plan", cancellationToken);
+        var series = await CreateSeriesAsync(owner, cancellationToken);
+        await AddBookAsync(owner, series.Id, book.Id, cancellationToken);
+        await AddCharacterAsync(owner, series.Id, cancellationToken);
+        await ConfirmOnlyChapterPlanAsync(owner, series.Id, book, cancellationToken);
+
+        using var stageResponse = await owner.PostWithCsrfAsync(
+            $"/api/series/{series.Id}/narration-rebuilds",
+            new { rightsAttested = true },
+            cancellationToken);
+        var staged = await stageResponse.Content.ReadFromJsonAsync<SeriesNarrationRebuildResponse>(
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.Created, stageResponse.StatusCode);
+        Assert.NotNull(staged);
+        var stagedMember = Assert.Single(staged.Members);
+        Assert.NotNull(stagedMember.StagedNarrationJobId);
+
+        using var detailsResponse = await owner.GetAsync($"/api/series/{series.Id}", cancellationToken);
+        var details = await detailsResponse.Content.ReadFromJsonAsync<StorySeriesDetailsResponse>(
+            cancellationToken);
+        var character = Assert.Single(Assert.IsType<StorySeriesDetailsResponse>(details).Characters);
+
+        int confirmedPlanCount;
+        await using (var beforeScope = factory.Services.CreateAsyncScope())
+        {
+            var beforeDb = beforeScope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+            confirmedPlanCount = await beforeDb.ConfirmedSpeechPlanRevisions
+                .CountAsync(revision => revision.SeriesId == series.Id, cancellationToken);
+            Assert.True(confirmedPlanCount > 0);
+        }
+
+        using var switchResponse = await owner.PutWithCsrfAsync(
+            $"/api/series/{series.Id}/voices",
+            new
+            {
+                narratorProvider = "edge",
+                narratorVoice = "zh-TW-HsiaoChenNeural",
+                characters = new[]
+                {
+                    new
+                    {
+                        characterId = character.Id,
+                        voiceProvider = "edge",
+                        voice = "zh-TW-HsiaoYuNeural"
+                    }
+                }
+            },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, switchResponse.StatusCode);
+
+        await using var verifyScope = factory.Services.CreateAsyncScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+        var invalidatedBatch = await verifyDb.SeriesCastRebuildBatches
+            .SingleAsync(batch => batch.Id == staged.Id, cancellationToken);
+        var cancelledJob = await verifyDb.NarrationJobs
+            .SingleAsync(job => job.Id == stagedMember.StagedNarrationJobId, cancellationToken);
+        var speechDraft = await verifyDb.ChapterSpeechPlanDrafts
+            .SingleAsync(draft => draft.SeriesId == series.Id, cancellationToken);
+
+        Assert.Equal(SeriesCastRebuildBatchStatus.Failed, invalidatedBatch.Status);
+        Assert.Equal(NarrationJobStatus.Cancelled, cancelledJob.Status);
+        Assert.True(cancelledJob.CancellationRequested);
+        Assert.NotEqual(ChapterSpeechPlanDraftStatus.Stale, speechDraft.Status);
+        Assert.Equal(
+            confirmedPlanCount,
+            await verifyDb.ConfirmedSpeechPlanRevisions.CountAsync(
+                revision => revision.SeriesId == series.Id,
+                cancellationToken));
+        Assert.Null((await verifyDb.StorySeries.SingleAsync(
+            candidate => candidate.Id == series.Id,
+            cancellationToken)).ActiveCastRevisionId);
+    }
+
+    [Fact]
+    public async Task Adding_a_new_book_invalidates_pending_batch_but_rejected_duplicate_does_not()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var owner = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        var setup = await CreateBuildingBatchAsync(owner, "book membership invalidation", cancellationToken);
+
+        using var duplicateResponse = await owner.PostWithCsrfAsync(
+            $"/api/series/{setup.Series.Id}/books",
+            new { bookId = setup.Book.Id, volumeLabel = "重複冊次", sortOrder = 2 },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, duplicateResponse.StatusCode);
+        await AssertBatchAndJobStateAsync(
+            setup.Batch,
+            SeriesCastRebuildBatchStatus.Building,
+            NarrationJobStatus.Queued,
+            cancellationRequested: false,
+            cancellationToken);
+
+        var secondBook = await ImportTextAsync(owner, "new series membership", cancellationToken);
+        using var addResponse = await owner.PostWithCsrfAsync(
+            $"/api/series/{setup.Series.Id}/books",
+            new { bookId = secondBook.Id, volumeLabel = "第二冊", sortOrder = 2 },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, addResponse.StatusCode);
+        await AssertBatchAndJobStateAsync(
+            setup.Batch,
+            SeriesCastRebuildBatchStatus.Failed,
+            NarrationJobStatus.Cancelled,
+            cancellationRequested: true,
+            cancellationToken);
+    }
+
+    [Fact]
+    public async Task Adding_an_alias_invalidates_pending_batch_but_rejected_duplicate_does_not()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var owner = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        var setup = await CreateBuildingBatchAsync(owner, "alias invalidation", cancellationToken);
+
+        using var firstAliasResponse = await owner.PostWithCsrfAsync(
+            $"/api/series/{setup.Series.Id}/characters/{setup.Character.Id}/aliases",
+            new { alias = "隊長" },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, firstAliasResponse.StatusCode);
+        await AssertBatchAndJobStateAsync(
+            setup.Batch,
+            SeriesCastRebuildBatchStatus.Failed,
+            NarrationJobStatus.Cancelled,
+            cancellationRequested: true,
+            cancellationToken);
+
+        using var retryResponse = await owner.PostWithCsrfAsync(
+            $"/api/series/{setup.Series.Id}/narration-rebuilds",
+            new { rightsAttested = true },
+            cancellationToken);
+        var retryBatch = await retryResponse.Content.ReadFromJsonAsync<SeriesNarrationRebuildResponse>(
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.Created, retryResponse.StatusCode);
+        Assert.NotNull(retryBatch);
+
+        using var duplicateAliasResponse = await owner.PostWithCsrfAsync(
+            $"/api/series/{setup.Series.Id}/characters/{setup.Character.Id}/aliases",
+            new { alias = " 隊長 " },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, duplicateAliasResponse.StatusCode);
+        await AssertBatchAndJobStateAsync(
+            retryBatch,
+            SeriesCastRebuildBatchStatus.Building,
+            NarrationJobStatus.Queued,
+            cancellationRequested: false,
+            cancellationToken);
+
+        using var newAliasResponse = await owner.PostWithCsrfAsync(
+            $"/api/series/{setup.Series.Id}/characters/{setup.Character.Id}/aliases",
+            new { alias = "學長" },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, newAliasResponse.StatusCode);
+        await AssertBatchAndJobStateAsync(
+            retryBatch,
+            SeriesCastRebuildBatchStatus.Failed,
+            NarrationJobStatus.Cancelled,
+            cancellationRequested: true,
+            cancellationToken);
+    }
+
+    [Fact]
     public async Task A_3wa_series_can_stage_a_rebuild_mixing_an_edge_character_with_the_narrator()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -161,6 +328,67 @@ public sealed class MultiCharacterNarrationApiTests(ApiFactory factory) : IClass
         Assert.True(
             stageResponse.StatusCode == HttpStatusCode.Created,
             $"Unexpected response: {responseBody}");
+    }
+
+    [Fact]
+    public async Task Rebuild_admission_rechecks_formal_bluemagpie_flag_for_an_existing_cast()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var enabledFactory = factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("BlueMagpie:Enabled", "true");
+            builder.UseSetting("BlueMagpie:FormalNarrationEnabled", "true");
+            builder.UseSetting("BlueMagpie:InternalToken", new string('t', 32));
+        });
+        using var owner = await enabledFactory.CreateAuthenticatedClientAsync(cancellationToken);
+        var book = await ImportTextAsync(owner, "formal admission must be rechecked", cancellationToken);
+
+        using var createResponse = await owner.PostWithCsrfAsync(
+            "/api/series",
+            new
+            {
+                name = $"BlueMagpie admission {Guid.NewGuid():N}",
+                narratorProvider = "bluemagpie",
+                narratorVoice = "female_voice",
+                narratorRate = "+0%",
+                narratorPitch = "+0Hz",
+                narratorVolume = "+0%",
+                defaultSpeakerPauseMs = 180
+            },
+            cancellationToken);
+        var series = await createResponse.Content.ReadFromJsonAsync<StorySeriesDetailsResponse>(
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
+        Assert.NotNull(series);
+        await AddBookAsync(owner, series.Id, book.Id, cancellationToken);
+
+        using var addCharacterResponse = await owner.PostWithCsrfAsync(
+            $"/api/series/{series.Id}/characters",
+            new
+            {
+                canonicalName = "測試角色",
+                role = "Main",
+                voiceProvider = "bluemagpie",
+                voice = "hung_yi_lee",
+                rate = "+0%",
+                pitch = "+0Hz",
+                volume = "+0%",
+                notes = (string?)null
+            },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, addCharacterResponse.StatusCode);
+        await ConfirmOnlyChapterPlanAsync(owner, series.Id, book, cancellationToken);
+
+        enabledFactory.Services.GetRequiredService<IOptions<BlueMagpieOptions>>()
+            .Value.FormalNarrationEnabled = false;
+        using var stageResponse = await owner.PostWithCsrfAsync(
+            $"/api/series/{series.Id}/narration-rebuilds",
+            new { rightsAttested = true },
+            cancellationToken);
+        var responseBody = await stageResponse.Content.ReadAsStringAsync(cancellationToken);
+
+        Assert.Equal(HttpStatusCode.BadRequest, stageResponse.StatusCode);
+        Assert.Contains("正式小說配音尚未由管理員啟用", responseBody, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -345,6 +573,53 @@ public sealed class MultiCharacterNarrationApiTests(ApiFactory factory) : IClass
             .Where(revision => revision.SeriesId == series.Id)
             .CountAsync(cancellationToken);
         Assert.Equal(1, revisionCount);
+    }
+
+    private static async Task<(
+        StorySeriesDetailsResponse Series,
+        BookDetailsResponse Book,
+        StorySeriesCharacterResponse Character,
+        SeriesNarrationRebuildResponse Batch)> CreateBuildingBatchAsync(
+        HttpClient owner,
+        string text,
+        CancellationToken cancellationToken)
+    {
+        var book = await ImportTextAsync(owner, text, cancellationToken);
+        var series = await CreateSeriesAsync(owner, cancellationToken);
+        await AddBookAsync(owner, series.Id, book.Id, cancellationToken);
+        await AddCharacterAsync(owner, series.Id, cancellationToken);
+        await ConfirmOnlyChapterPlanAsync(owner, series.Id, book, cancellationToken);
+        using var detailsResponse = await owner.GetAsync($"/api/series/{series.Id}", cancellationToken);
+        var details = await detailsResponse.Content.ReadFromJsonAsync<StorySeriesDetailsResponse>(
+            cancellationToken);
+        var character = Assert.Single(Assert.IsType<StorySeriesDetailsResponse>(details).Characters);
+        using var stageResponse = await owner.PostWithCsrfAsync(
+            $"/api/series/{series.Id}/narration-rebuilds",
+            new { rightsAttested = true },
+            cancellationToken);
+        var batch = await stageResponse.Content.ReadFromJsonAsync<SeriesNarrationRebuildResponse>(
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.Created, stageResponse.StatusCode);
+        return (series, book, character, Assert.IsType<SeriesNarrationRebuildResponse>(batch));
+    }
+
+    private async Task AssertBatchAndJobStateAsync(
+        SeriesNarrationRebuildResponse batchSnapshot,
+        SeriesCastRebuildBatchStatus expectedBatchStatus,
+        NarrationJobStatus expectedJobStatus,
+        bool cancellationRequested,
+        CancellationToken cancellationToken)
+    {
+        var stagedJobId = Assert.IsType<Guid>(Assert.Single(batchSnapshot.Members).StagedNarrationJobId);
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+        var batch = await db.SeriesCastRebuildBatches
+            .SingleAsync(candidate => candidate.Id == batchSnapshot.Id, cancellationToken);
+        var job = await db.NarrationJobs
+            .SingleAsync(candidate => candidate.Id == stagedJobId, cancellationToken);
+        Assert.Equal(expectedBatchStatus, batch.Status);
+        Assert.Equal(expectedJobStatus, job.Status);
+        Assert.Equal(cancellationRequested, job.CancellationRequested);
     }
 
     private static async Task AssertSingleVoiceRetiredAsync(

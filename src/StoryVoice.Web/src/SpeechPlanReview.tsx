@@ -238,7 +238,7 @@ export function SpeechPlanReview({
       <div className="mt-6 border-t border-stone-200 pt-5">
         <label className="flex max-w-4xl items-start gap-3 text-sm leading-6 text-stone-600">
           <input checked={rightsAttested} className="mt-1 h-4 w-4 accent-amber-600" onChange={(event) => setRightsAttested(event.target.checked)} type="checkbox" />
-          <span>我確認這個系列所有正文都可合法交給 Edge 神經語音服務處理；這會建立整批私有 staged 音訊，直到所有冊次完成才可手動啟用。</span>
+          <span>我確認這個系列所有正文都可合法交給系列目前設定的語音服務處理；服務可能是私人本機自架或外部供應商。這會建立整批私有 staged 音訊，直到所有冊次完成才可手動啟用。</span>
         </label>
         <button
           className="secondary-button mt-3 disabled:cursor-not-allowed disabled:opacity-45"

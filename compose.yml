@@ -49,6 +49,7 @@ services:
       Narration__AdmissionEnabled: ${NARRATION_ADMISSION_ENABLED:-false}
       Auth__DataProtectionKeysPath: /var/lib/storyvoice/data-protection-keys
       BlueMagpie__Enabled: ${BLUEMAGPIE_ENABLED:-false}
+      BlueMagpie__FormalNarrationEnabled: ${BLUEMAGPIE_FORMAL_NARRATION_ENABLED:-false}
       BlueMagpie__BaseUrl: http://bluemagpie-gateway:8081/
       BlueMagpie__InternalToken: ${BLUEMAGPIE_INTERNAL_TOKEN:-}
       BlueMagpie__ModelRevision: 6f7cab914a1e27c56b504ec663c0144dc25cc0a3
@@ -92,6 +93,14 @@ services:
       VoAi__BaseUrl: ${VOAI_BASE_URL:-https://connect.voai.ai/}
       # Paid VoAI calls are opt-in. A legacy VOAI_API_KEY is intentionally ignored.
       VoAi__ApiKey: ${VOAI_PAID_API_KEY:-}
+      BlueMagpie__Enabled: ${BLUEMAGPIE_ENABLED:-false}
+      BlueMagpie__FormalNarrationEnabled: ${BLUEMAGPIE_FORMAL_NARRATION_ENABLED:-false}
+      BlueMagpie__BaseUrl: http://bluemagpie-gateway:8081/
+      BlueMagpie__InternalToken: ${BLUEMAGPIE_INTERNAL_TOKEN:-}
+      BlueMagpie__ModelRevision: 6f7cab914a1e27c56b504ec663c0144dc25cc0a3
+      BlueMagpie__QueueTimeoutSeconds: ${BLUEMAGPIE_QUEUE_TIMEOUT_SECONDS:-15}
+      BlueMagpie__SynthesisWatchdogSeconds: ${BLUEMAGPIE_SYNTHESIS_WATCHDOG_SECONDS:-120}
+      BlueMagpie__RequestTimeoutSeconds: ${BLUEMAGPIE_REQUEST_TIMEOUT_SECONDS:-180}
       Narration__AudioRootPath: /data/audio
       Narration__Voice: zh-TW-YunJheNeural
       Narration__Rate: -5%
@@ -107,6 +116,9 @@ services:
         condition: service_healthy
       api:
         condition: service_healthy
+    networks:
+      - default
+      - bluemagpie-internal
     restart: unless-stopped
 
   bluemagpie-gateway:

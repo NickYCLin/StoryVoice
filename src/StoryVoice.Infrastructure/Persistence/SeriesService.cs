@@ -8,6 +8,7 @@ using StoryVoice.Application.Series;
 using StoryVoice.Domain.Books;
 using StoryVoice.Domain.Narrations;
 using StoryVoice.Domain.Series;
+using StoryVoice.Infrastructure.Narrations;
 
 namespace StoryVoice.Infrastructure.Persistence;
 
@@ -15,11 +16,17 @@ internal sealed class SeriesService(
     StoryVoiceDbContext dbContext,
     ICurrentUser currentUser,
     IStorySeriesRepository repository,
-    IOptions<SeriesVoiceCatalogOptions> voiceCatalogOptions) : ISeriesService
+    IOptions<SeriesVoiceCatalogOptions> voiceCatalogOptions,
+    IOptions<BlueMagpieOptions> blueMagpieOptions) : ISeriesService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private const string NeutralRate = "+0%";
+    private const string NeutralPitch = "+0Hz";
+    private const string NeutralVolume = "+0%";
     private readonly IReadOnlyList<SeriesVoiceCatalogEntry> _voiceCatalog =
         voiceCatalogOptions.Value.Voices.ToArray();
+    private readonly bool _blueMagpieFormalNarrationEnabled =
+        blueMagpieOptions.Value.FormalNarrationEnabled;
 
     public async Task<IReadOnlyList<StorySeriesSummaryResponse>> ListAsync(
         CancellationToken cancellationToken)
@@ -68,6 +75,12 @@ internal sealed class SeriesService(
         ArgumentNullException.ThrowIfNull(request);
         var ownerId = EnsureCurrentOwnerId();
         var narratorVoice = ResolveVoice(request.NarratorProvider, request.NarratorVoice);
+        EnsureFormalNarrationAvailable(narratorVoice.Provider);
+        EnsureSupportedSynthesisParameters(
+            narratorVoice.Provider,
+            request.NarratorRate,
+            request.NarratorPitch,
+            request.NarratorVolume);
         var series = StorySeries.Create(
             ownerId,
             request.Name,
@@ -114,6 +127,7 @@ internal sealed class SeriesService(
         }
 
         series.AddBook(book, request.VolumeLabel, request.SortOrder);
+        await InvalidatePendingRebuildsAsync(series, cancellationToken);
         await SaveChangesAsync(cancellationToken);
         return await ToDetailsAsync(series, cancellationToken);
     }
@@ -126,6 +140,8 @@ internal sealed class SeriesService(
         EnsureId(seriesId, nameof(seriesId));
         ArgumentNullException.ThrowIfNull(request);
         var voice = ResolveVoice(request.VoiceProvider, request.Voice);
+        EnsureFormalNarrationAvailable(voice.Provider);
+        EnsureSupportedSynthesisParameters(voice.Provider, request.Rate, request.Pitch, request.Volume);
         var ownerId = EnsureCurrentOwnerId();
         await EnsureCharacterProfileOwnedAsync(ownerId, request.CharacterProfileId, cancellationToken);
         var series = await repository.GetForMutationAsync(seriesId, cancellationToken);
@@ -134,6 +150,7 @@ internal sealed class SeriesService(
             return null;
         }
 
+        EnsureSingleSynthesisProvider(series.NarratorProvider, [voice.Provider]);
         series.AddCharacter(
             request.CanonicalName,
             request.Role,
@@ -144,6 +161,7 @@ internal sealed class SeriesService(
             request.Volume,
             request.Notes,
             request.CharacterProfileId);
+        await InvalidatePendingRebuildsAsync(series, cancellationToken);
         await SaveChangesAsync(cancellationToken);
         return await ToDetailsAsync(series, cancellationToken);
     }
@@ -158,6 +176,8 @@ internal sealed class SeriesService(
         EnsureId(characterId, nameof(characterId));
         ArgumentNullException.ThrowIfNull(request);
         var voice = ResolveVoice(request.VoiceProvider, request.Voice);
+        EnsureFormalNarrationAvailable(voice.Provider);
+        EnsureSupportedSynthesisParameters(voice.Provider, request.Rate, request.Pitch, request.Volume);
         var ownerId = EnsureCurrentOwnerId();
         await EnsureCharacterProfileOwnedAsync(ownerId, request.CharacterProfileId, cancellationToken);
         var series = await repository.GetForMutationAsync(seriesId, cancellationToken);
@@ -166,6 +186,7 @@ internal sealed class SeriesService(
             return null;
         }
 
+        EnsureSingleSynthesisProvider(series.NarratorProvider, [voice.Provider]);
         series.UpdateCharacter(
             characterId,
             request.CanonicalName,
@@ -177,6 +198,7 @@ internal sealed class SeriesService(
             request.Volume,
             request.Notes,
             request.CharacterProfileId);
+        await InvalidatePendingRebuildsAsync(series, cancellationToken);
         await SaveChangesAsync(cancellationToken);
         return await ToDetailsAsync(series, cancellationToken);
     }
@@ -197,6 +219,7 @@ internal sealed class SeriesService(
         }
 
         series.AddAlias(characterId, request.Alias);
+        await InvalidatePendingRebuildsAsync(series, cancellationToken);
         await SaveChangesAsync(cancellationToken);
         return await ToDetailsAsync(series, cancellationToken);
     }
@@ -243,6 +266,121 @@ internal sealed class SeriesService(
         return await ToDetailsAsync(series, cancellationToken);
     }
 
+    public async Task<StorySeriesDetailsResponse?> ConfigureVoicesAsync(
+        Guid seriesId,
+        ConfigureSeriesVoicesRequest request,
+        CancellationToken cancellationToken)
+    {
+        EnsureId(seriesId, nameof(seriesId));
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.Characters is null)
+        {
+            throw new ArgumentException("角色聲線清單不可為空值。", nameof(request));
+        }
+
+        var series = await repository.GetForMutationAsync(seriesId, cancellationToken);
+        if (series is null)
+        {
+            return null;
+        }
+
+        if (request.Characters.Count != series.Characters.Count)
+        {
+            throw new ArgumentException("切換系列聲線時必須包含每一位現有角色。", nameof(request));
+        }
+
+        var narratorVoice = ResolveVoice(request.NarratorProvider, request.NarratorVoice);
+        EnsureFormalNarrationAvailable(narratorVoice.Provider);
+        var assignments = new Dictionary<Guid, SeriesVoiceCatalogEntry>();
+        foreach (var assignment in request.Characters)
+        {
+            ArgumentNullException.ThrowIfNull(assignment);
+            EnsureId(assignment.CharacterId, nameof(assignment.CharacterId));
+            if (!assignments.TryAdd(
+                    assignment.CharacterId,
+                    ResolveVoice(assignment.VoiceProvider, assignment.Voice)))
+            {
+                throw new ArgumentException("同一位角色不可重複指定聲線。", nameof(request));
+            }
+        }
+
+        if (series.Characters.Any(character => !assignments.ContainsKey(character.Id)))
+        {
+            throw new ArgumentException("角色聲線清單包含不屬於這個系列的角色。", nameof(request));
+        }
+
+        EnsureSingleSynthesisProvider(
+            narratorVoice.Provider,
+            assignments.Values.Select(voice => voice.Provider));
+        foreach (var provider in assignments.Values.Select(voice => voice.Provider).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            EnsureFormalNarrationAvailable(provider);
+        }
+
+        var narratorParameters = ResolveEffectiveSynthesisParameters(
+            narratorVoice.Provider,
+            series.NarratorRate,
+            series.NarratorPitch,
+            series.NarratorVolume);
+
+        var changed = !string.Equals(
+                series.NarratorProvider,
+                narratorVoice.Provider,
+                StringComparison.Ordinal)
+            || !string.Equals(series.NarratorVoice, narratorVoice.Voice, StringComparison.Ordinal)
+            || !string.Equals(series.NarratorRate, narratorParameters.Rate, StringComparison.Ordinal)
+            || !string.Equals(series.NarratorPitch, narratorParameters.Pitch, StringComparison.Ordinal)
+            || !string.Equals(series.NarratorVolume, narratorParameters.Volume, StringComparison.Ordinal)
+            || series.Characters.Any(character =>
+            {
+                var voice = assignments[character.Id];
+                var parameters = ResolveEffectiveSynthesisParameters(
+                    voice.Provider,
+                    character.Rate,
+                    character.Pitch,
+                    character.Volume);
+                return !string.Equals(character.VoiceProvider, voice.Provider, StringComparison.Ordinal)
+                    || !string.Equals(character.Voice, voice.Voice, StringComparison.Ordinal)
+                    || !string.Equals(character.Rate, parameters.Rate, StringComparison.Ordinal)
+                    || !string.Equals(character.Pitch, parameters.Pitch, StringComparison.Ordinal)
+                    || !string.Equals(character.Volume, parameters.Volume, StringComparison.Ordinal);
+            });
+        if (!changed)
+        {
+            return await ToDetailsAsync(series, cancellationToken);
+        }
+
+        // Every catalog entry and the complete provider set is validated before the first domain
+        // mutation. SaveChanges then persists the whole cast switch and pending-batch invalidation
+        // atomically; confirmed speech-plan/cast revisions and active audio pointers are untouched.
+        series.SetNarratorVoice(
+            narratorVoice.Provider,
+            narratorVoice.Voice,
+            narratorParameters.Rate,
+            narratorParameters.Pitch,
+            narratorParameters.Volume);
+        foreach (var character in series.Characters)
+        {
+            var voice = assignments[character.Id];
+            var parameters = ResolveEffectiveSynthesisParameters(
+                voice.Provider,
+                character.Rate,
+                character.Pitch,
+                character.Volume);
+            series.SetCharacterVoice(
+                character.Id,
+                voice.Provider,
+                voice.Voice,
+                parameters.Rate,
+                parameters.Pitch,
+                parameters.Volume);
+        }
+
+        await InvalidatePendingRebuildsAsync(series, cancellationToken);
+        await SaveChangesAsync(cancellationToken);
+        return await ToDetailsAsync(series, cancellationToken);
+    }
+
     private async Task ConfigureNarrativeVoiceAsync(
         StorySeries series,
         NarrativeVoiceMode mode,
@@ -265,6 +403,14 @@ internal sealed class SeriesService(
             draft.MarkStale();
         }
 
+        await InvalidatePendingRebuildsAsync(series, cancellationToken);
+        await SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task InvalidatePendingRebuildsAsync(
+        StorySeries series,
+        CancellationToken cancellationToken)
+    {
         var batches = await dbContext.SeriesCastRebuildBatches
             .Where(batch => batch.OwnerId == series.OwnerId
                 && batch.SeriesId == series.Id
@@ -292,8 +438,6 @@ internal sealed class SeriesService(
                 batch.Invalidate(invalidatedAt);
             }
         }
-
-        await SaveChangesAsync(cancellationToken);
     }
 
     public async Task<StorySeriesDetailsResponse?> ApplyAnalyzedCharactersAsync(
@@ -369,6 +513,8 @@ internal sealed class SeriesService(
                 return null;
             }
 
+            var originalConcurrencyStamp = series.ConcurrencyStamp;
+
             if (series.Books.All(member => member.BookId != contentBookId))
             {
                 var nextSortOrder = series.Books.Count == 0
@@ -380,6 +526,13 @@ internal sealed class SeriesService(
             foreach (var selection in request.Characters)
             {
                 var voice = ResolveVoice(selection.VoiceProvider, selection.Voice);
+                EnsureFormalNarrationAvailable(voice.Provider);
+                EnsureSingleSynthesisProvider(series.NarratorProvider, [voice.Provider]);
+                EnsureSupportedSynthesisParameters(
+                    voice.Provider,
+                    selection.Rate,
+                    selection.Pitch,
+                    selection.Volume);
                 var canonicalKey = NormalizeIdentityKey(selection.CanonicalName);
                 var existingIdentity = series.IdentityKeys.SingleOrDefault(
                     key => string.Equals(key.NormalizedValue, canonicalKey, StringComparison.Ordinal));
@@ -420,6 +573,11 @@ internal sealed class SeriesService(
                 }
             }
 
+            if (series.ConcurrencyStamp != originalConcurrencyStamp)
+            {
+                await InvalidatePendingRebuildsAsync(series, cancellationToken);
+            }
+
             await SaveChangesAsync(cancellationToken);
             if (transaction is not null)
             {
@@ -441,13 +599,23 @@ internal sealed class SeriesService(
 
     public IReadOnlyList<SeriesVoiceOptionResponse> ListVoiceOptions() =>
         _voiceCatalog
+            .Where(voice => _blueMagpieFormalNarrationEnabled
+                || !string.Equals(
+                    voice.Provider,
+                    CharacterVoiceProviders.BlueMagpie,
+                    StringComparison.OrdinalIgnoreCase))
             .OrderBy(voice => voice.Locale, StringComparer.Ordinal)
             .ThenBy(voice => voice.DisplayName, StringComparer.Ordinal)
             .Select(voice => new SeriesVoiceOptionResponse(
                 voice.Provider,
                 voice.Voice,
                 voice.DisplayName,
-                voice.Locale))
+                voice.Locale,
+                !string.Equals(voice.Provider, CharacterVoiceProviders.BlueMagpie, StringComparison.OrdinalIgnoreCase)
+                    || _blueMagpieFormalNarrationEnabled,
+                string.Equals(voice.Provider, CharacterVoiceProviders.BlueMagpie, StringComparison.OrdinalIgnoreCase)
+                    ? "private-self-hosted"
+                    : "standard"))
             .ToArray();
 
     private SeriesVoiceCatalogEntry ResolveVoice(string provider, string voice)
@@ -458,6 +626,61 @@ internal sealed class SeriesService(
         return resolved
             ?? throw new ArgumentException("指定的語音不在伺服器允許清單內。", nameof(voice));
     }
+
+    private void EnsureFormalNarrationAvailable(string provider)
+    {
+        if (string.Equals(provider, CharacterVoiceProviders.BlueMagpie, StringComparison.OrdinalIgnoreCase)
+            && !_blueMagpieFormalNarrationEnabled)
+        {
+            throw new InvalidOperationException(
+                "BlueMagpie 目前只開放固定句試音；正式小說配音尚未由管理員啟用。");
+        }
+    }
+
+    private static void EnsureSingleSynthesisProvider(
+        string narratorProvider,
+        IEnumerable<string> characterProviders)
+    {
+        var allowsEdgeFallback = string.Equals(
+            narratorProvider,
+            CharacterVoiceProviders.ThreeWaVoxCpm2,
+            StringComparison.OrdinalIgnoreCase);
+        if (characterProviders.Any(provider =>
+                !string.Equals(provider, narratorProvider, StringComparison.OrdinalIgnoreCase)
+                && !(allowsEdgeFallback
+                    && string.Equals(provider, CharacterVoiceProviders.Edge, StringComparison.OrdinalIgnoreCase))))
+        {
+            throw new ArgumentException(
+                "系列旁白與角色必須使用相同的語音 provider（3wa 系列可使用 Edge fallback）。",
+                nameof(characterProviders));
+        }
+    }
+
+    private static void EnsureSupportedSynthesisParameters(
+        string provider,
+        string rate,
+        string pitch,
+        string volume)
+    {
+        if (string.Equals(provider, CharacterVoiceProviders.BlueMagpie, StringComparison.OrdinalIgnoreCase)
+            && (!string.Equals(rate?.Trim(), NeutralRate, StringComparison.Ordinal)
+                || !string.Equals(pitch?.Trim(), NeutralPitch, StringComparison.Ordinal)
+                || !string.Equals(volume?.Trim(), NeutralVolume, StringComparison.Ordinal)))
+        {
+            throw new ArgumentException(
+                "BlueMagpie BM1 目前只支援中性的 +0% 語速、+0Hz 音高與 +0% 音量。",
+                nameof(provider));
+        }
+    }
+
+    private static (string Rate, string Pitch, string Volume) ResolveEffectiveSynthesisParameters(
+        string provider,
+        string rate,
+        string pitch,
+        string volume) =>
+        string.Equals(provider, CharacterVoiceProviders.BlueMagpie, StringComparison.OrdinalIgnoreCase)
+            ? (NeutralRate, NeutralPitch, NeutralVolume)
+            : (rate, pitch, volume);
 
     private async Task SaveChangesAsync(CancellationToken cancellationToken)
     {

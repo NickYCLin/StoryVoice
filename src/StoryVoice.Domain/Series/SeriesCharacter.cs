@@ -203,6 +203,53 @@ public sealed class SeriesCharacter
         ConcurrencyStamp = Guid.NewGuid();
     }
 
+    internal bool SetVoice(
+        string voiceProvider,
+        string voice,
+        string rate,
+        string pitch,
+        string volume,
+        DateTimeOffset now)
+    {
+        var normalizedProvider = SeriesValueValidator.NormalizePrintable(
+            voiceProvider,
+            SeriesFieldLimits.Provider,
+            nameof(voiceProvider));
+        var normalizedVoice = SeriesValueValidator.NormalizePrintable(
+            voice,
+            SeriesFieldLimits.Voice,
+            nameof(voice));
+        var normalizedRate = SeriesValueValidator.NormalizePrintable(
+            rate,
+            SeriesFieldLimits.SynthesisParameter,
+            nameof(rate));
+        var normalizedPitch = SeriesValueValidator.NormalizePrintable(
+            pitch,
+            SeriesFieldLimits.SynthesisParameter,
+            nameof(pitch));
+        var normalizedVolume = SeriesValueValidator.NormalizePrintable(
+            volume,
+            SeriesFieldLimits.SynthesisParameter,
+            nameof(volume));
+        if (string.Equals(VoiceProvider, normalizedProvider, StringComparison.Ordinal)
+            && string.Equals(Voice, normalizedVoice, StringComparison.Ordinal)
+            && string.Equals(Rate, normalizedRate, StringComparison.Ordinal)
+            && string.Equals(Pitch, normalizedPitch, StringComparison.Ordinal)
+            && string.Equals(Volume, normalizedVolume, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        VoiceProvider = normalizedProvider;
+        Voice = normalizedVoice;
+        Rate = normalizedRate;
+        Pitch = normalizedPitch;
+        Volume = normalizedVolume;
+        UpdatedAt = now;
+        ConcurrencyStamp = Guid.NewGuid();
+        return true;
+    }
+
     private static void EnsureId(Guid value, string parameterName)
     {
         if (value == Guid.Empty)

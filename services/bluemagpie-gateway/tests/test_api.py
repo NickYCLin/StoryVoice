@@ -14,6 +14,8 @@ from bluemagpie_gateway.app import create_app
 from bluemagpie_gateway.constants import (
     GPU_LOCK_KEY,
     MODEL_REVISION,
+    PROVIDER_VERSION,
+    PROVIDER_VERSION_HEADER,
     REVISION_HEADER,
     TOKEN_HEADER,
     VOICE_HEADER,
@@ -113,6 +115,7 @@ def test_lifecycle_and_health_contract() -> None:
         assert ready.json() == {
             "status": "ready",
             "model_revision": MODEL_REVISION,
+            "provider_version": PROVIDER_VERSION,
         }
         assert fake.started == 1
 
@@ -139,6 +142,7 @@ def test_speech_returns_pinned_pcm_wave_contract() -> None:
     assert response.status_code == 200
     assert response.headers["content-type"] == "audio/wav"
     assert response.headers[REVISION_HEADER] == MODEL_REVISION
+    assert response.headers[PROVIDER_VERSION_HEADER] == PROVIDER_VERSION
     assert response.headers[VOICE_HEADER] == "female_voice"
     assert response.headers["cache-control"] == "no-store"
     assert int(response.headers["content-length"]) == len(response.content)

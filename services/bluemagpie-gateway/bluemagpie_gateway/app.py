@@ -22,6 +22,8 @@ from .constants import (
     MAX_TEXT_LENGTH,
     MAX_REQUEST_BODY_BYTES,
     MODEL_REVISION,
+    PROVIDER_VERSION,
+    PROVIDER_VERSION_HEADER,
     REVISION_HEADER,
     TOKEN_HEADER,
     VOICE_HEADER,
@@ -292,6 +294,7 @@ def create_app(
             content={
                 "status": "ready",
                 "model_revision": MODEL_REVISION,
+                "provider_version": PROVIDER_VERSION,
             }
         )
 
@@ -391,6 +394,7 @@ def create_app(
                 media_type="audio/wav",
                 headers={
                     REVISION_HEADER: MODEL_REVISION,
+                    PROVIDER_VERSION_HEADER: PROVIDER_VERSION,
                     VOICE_HEADER: payload.voice,
                     "Cache-Control": "no-store",
                     "X-Content-Type-Options": "nosniff",

@@ -47,6 +47,62 @@ public sealed class StoryPipelineWorkerModeTests
                 StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void Worker_copies_narrator_and_every_character_provider_contract_into_the_dispatch_request()
+    {
+        var ownerId = Guid.NewGuid();
+        var seriesId = Guid.NewGuid();
+        var revisionId = Guid.NewGuid();
+        var assignment = NarrationCastAssignment.Create(
+            Guid.NewGuid(),
+            ownerId,
+            seriesId,
+            revisionId,
+            Guid.NewGuid(),
+            "角色甲",
+            "bluemagpie",
+            BlueMagpieMultiVoiceNarrationProvider.PinnedProviderVersion,
+            "female_voice",
+            "+0%",
+            "+0Hz",
+            "+0%");
+        var revision = NarrationCastRevision.Create(
+            revisionId,
+            ownerId,
+            seriesId,
+            1,
+            "bluemagpie",
+            BlueMagpieMultiVoiceNarrationProvider.PinnedProviderVersion,
+            "hung_yi_lee",
+            "+0%",
+            "+0Hz",
+            "+0%",
+            200,
+            800,
+            "bluemagpie-pcm16-concat-v1",
+            "wav-48khz-mono-to-mp3-concat-v1",
+            DateTimeOffset.UtcNow,
+            [assignment]);
+        NarrationTurn[] turns =
+        [
+            new("你好", "female_voice", "+0%", "+0Hz", "+0%", 0),
+        ];
+
+        var request = StoryPipelineWorker.CreateMultiVoiceNarrationRequest(revision, turns);
+
+        Assert.Same(turns, request.Turns);
+        Assert.Equal(
+            new NarrationProviderContract(
+                "bluemagpie",
+                BlueMagpieMultiVoiceNarrationProvider.PinnedProviderVersion),
+            request.NarratorProvider);
+        Assert.Equal(
+            new NarrationProviderContract(
+                "bluemagpie",
+                BlueMagpieMultiVoiceNarrationProvider.PinnedProviderVersion),
+            Assert.Single(request.CharacterProviders!));
+    }
+
     private static NarrationJob CreateJob() =>
         NarrationJob.Create(
             Guid.NewGuid(),

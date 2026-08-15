@@ -83,6 +83,35 @@ public sealed class NarrationCastRevision
     public IReadOnlyList<NarrationCastAssignment> Assignments => _assignments.AsReadOnly();
     public bool CanBeUsedByRegularJob => Status == NarrationCastRevisionStatus.Active;
 
+    /// <summary>
+    /// Recomputes the immutable synthesis snapshot fingerprint from the values materialized from
+    /// persistence. Workers call this immediately before synthesis so corrupted or manually
+    /// altered cast rows cannot be rendered under the original fingerprint.
+    /// </summary>
+    public bool VerifyFingerprint()
+    {
+        var canonicalAssignments = _assignments
+            .OrderBy(
+                assignment => assignment.CharacterId.ToString("N", CultureInfo.InvariantCulture),
+                StringComparer.Ordinal)
+            .ToArray();
+        return string.Equals(
+            Fingerprint,
+            ComputeFingerprint(
+                NarratorProvider,
+                NarratorProviderVersion,
+                NarratorVoice,
+                NarratorRate,
+                NarratorPitch,
+                NarratorVolume,
+                DefaultSpeakerPauseMs,
+                ChapterPauseMs,
+                CompositionVersion,
+                FfmpegProfile,
+                canonicalAssignments),
+            StringComparison.Ordinal);
+    }
+
     public static NarrationCastRevision Create(
         Guid id,
         Guid ownerId,

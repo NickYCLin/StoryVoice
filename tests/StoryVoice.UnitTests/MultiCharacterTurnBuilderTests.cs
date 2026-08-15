@@ -69,6 +69,24 @@ public sealed class MultiCharacterTurnBuilderTests
     }
 
     [Fact]
+    public void BlueMagpie_dialogue_keeps_the_fixed_cast_delivery_without_emotion_deltas()
+    {
+        var castRevision = BuildCastRevision(
+            narratorVoice: "hung_yi_lee",
+            aliceVoice: "female_voice",
+            aliceProvider: CharacterVoiceProviders.BlueMagpie,
+            narratorProvider: CharacterVoiceProviders.BlueMagpie);
+        var chapter = BuildConfirmedChapter(0, "序章", "「你們搞什麼鬼！」艾莉絲怒道。", AliceId);
+
+        var turns = MultiCharacterTurnBuilder.BuildTurns(castRevision, [chapter]);
+
+        var dialogue = Assert.Single(turns, turn => turn.Voice == "female_voice");
+        Assert.Equal("+0%", dialogue.Rate);
+        Assert.Equal("+4Hz", dialogue.Pitch);
+        Assert.Equal("+2%", dialogue.Volume);
+    }
+
+    [Fact]
     public void Adjacent_same_voice_segments_within_a_chapter_merge_into_one_turn()
     {
         var castRevision = BuildCastRevision(narratorVoice: "narrator-voice", aliceVoice: "alice-voice");
@@ -352,7 +370,8 @@ public sealed class MultiCharacterTurnBuilderTests
         string aliceVoice,
         int defaultSpeakerPauseMs = 200,
         int chapterPauseMs = 800,
-        string aliceProvider = "edge")
+        string aliceProvider = "edge",
+        string narratorProvider = "edge")
     {
         var revisionId = Guid.NewGuid();
         var assignment = NarrationCastAssignment.Create(
@@ -373,7 +392,7 @@ public sealed class MultiCharacterTurnBuilderTests
             OwnerId,
             SeriesId,
             revisionNumber: 1,
-            narratorProvider: "edge",
+            narratorProvider: narratorProvider,
             narratorProviderVersion: "1",
             narratorVoice: narratorVoice,
             narratorRate: "-5%",

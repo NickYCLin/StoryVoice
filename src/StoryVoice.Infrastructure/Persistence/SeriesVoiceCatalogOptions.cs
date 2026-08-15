@@ -61,6 +61,20 @@ public sealed class SeriesVoiceCatalogOptions
         },
         new()
         {
+            Provider = CharacterVoiceProviders.BlueMagpie,
+            Voice = "female_voice",
+            DisplayName = "BlueMagpie 內建女聲（私人自架）",
+            Locale = "zh-TW"
+        },
+        new()
+        {
+            Provider = CharacterVoiceProviders.BlueMagpie,
+            Voice = "hung_yi_lee",
+            DisplayName = "BlueMagpie 內建男聲（私人自架）",
+            Locale = "zh-TW"
+        },
+        new()
+        {
             // VoAI's public VoiceAPI documentation uses this exact model, speaker, and style in
             // its synthesis examples. Keep all three pinned in the provider-scoped reference.
             Provider = CharacterVoiceProviders.VoAi,

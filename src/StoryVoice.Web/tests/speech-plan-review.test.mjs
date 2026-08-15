@@ -28,4 +28,7 @@ test('計畫未確認時禁止建立 staged 多角色工作，並顯示缺口數
   assert.match(review, /disabled=\{confirmedGapCount > 0/)
   assert.match(review, /\/narration-rebuilds/)
   assert.match(review, /rightsAttested/)
+  assert.match(review, /系列目前設定的語音服務/)
+  assert.match(review, /私人本機自架或外部供應商/)
+  assert.doesNotMatch(review, /交給 Edge 神經語音服務/)
 })
