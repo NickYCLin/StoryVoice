@@ -79,6 +79,32 @@ public sealed class OllamaSpeakerAttributionTests
     }
 
     [Fact]
+    public async Task Provider_unloads_and_fails_closed_when_gpu_lease_ownership_is_lost()
+    {
+        var characterId = Guid.NewGuid();
+        var content = JsonSerializer.Serialize(new
+        {
+            attributions = new[]
+            {
+                new { segmentIndex = 1, characterId = characterId.ToString(), confidence = 91 },
+            },
+        });
+        var gate = new RecordingGpuExecutionGate();
+        var handler = new CapturingHandler(
+            ChatResponse(content),
+            onUnloadResponse: () => gate.LastLease!.LoseOwnership());
+        using var client = new HttpClient(handler) { BaseAddress = new Uri("http://local-ollama/") };
+
+        await Assert.ThrowsAsync<LocalSpeakerAttributionUnavailableException>(() =>
+            CreateProvider(client, gate)
+                .AttributeAsync(Request(characterId), TestContext.Current.CancellationToken));
+
+        Assert.False(string.IsNullOrWhiteSpace(handler.UnloadRequestBody));
+        Assert.True(gate.LastLease?.OwnershipLost.IsCancellationRequested);
+        Assert.True(gate.LastLease?.Disposed);
+    }
+
+    [Fact]
     public async Task Hybrid_preserves_confirmed_rules_and_uses_model_for_unresolved_turns()
     {
         var ruleCharacter = Guid.NewGuid();
@@ -110,7 +136,9 @@ public sealed class OllamaSpeakerAttributionTests
         Assert.Equal(SpeakerAttributionDecisionSource.LocalModel, results.Single(result => result.SegmentIndex == 2).Source);
     }
 
-    private static OllamaSpeakerAttributionProvider CreateProvider(HttpClient client) => new(
+    private static OllamaSpeakerAttributionProvider CreateProvider(
+        HttpClient client,
+        ILocalGpuExecutionGate? gpuExecutionGate = null) => new(
         client,
         Options.Create(new LocalLlmCharacterAnalysisOptions
         {
@@ -120,7 +148,8 @@ public sealed class OllamaSpeakerAttributionTests
             TimeoutSeconds = 600,
             UnloadTimeoutSeconds = 3,
             MaximumResponseBytes = 16 * 1024,
-        }));
+        }),
+        gpuExecutionGate ?? new InProcessLocalGpuExecutionGate());
 
     private static SpeakerAttributionRequest Request(Guid characterId) => new(
         [new KnownCharacterIdentity(characterId, "阿明", ["小明"])],
@@ -138,7 +167,9 @@ public sealed class OllamaSpeakerAttributionTests
         message = new { content },
     });
 
-    private sealed class CapturingHandler(string chatResponse) : HttpMessageHandler
+    private sealed class CapturingHandler(
+        string chatResponse,
+        Action? onUnloadResponse = null) : HttpMessageHandler
     {
         public string ChatRequestBody { get; private set; } = string.Empty;
         public string UnloadRequestBody { get; private set; } = string.Empty;
@@ -157,6 +188,7 @@ public sealed class OllamaSpeakerAttributionTests
             }
 
             UnloadRequestBody = body;
+            onUnloadResponse?.Invoke();
             return Response("{\"done\":true}");
         }
 

@@ -1,12 +1,13 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.AspNetCore.Mvc.Testing;
 
 namespace StoryVoice.IntegrationTests;
 
 internal static class TestClientAuthentication
 {
-    public static HttpClient CreateCookieClient(this ApiFactory factory) =>
+    public static HttpClient CreateCookieClient(this WebApplicationFactory<Program> factory) =>
         factory.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions
         {
             AllowAutoRedirect = false,
@@ -14,7 +15,7 @@ internal static class TestClientAuthentication
         });
 
     public static async Task<HttpClient> CreateAuthenticatedClientAsync(
-        this ApiFactory factory,
+        this WebApplicationFactory<Program> factory,
         CancellationToken cancellationToken)
     {
         var client = factory.CreateCookieClient();
@@ -26,7 +27,7 @@ internal static class TestClientAuthentication
     }
 
     public static async Task<HttpClient> CreateCompanionClientAsync(
-        this ApiFactory factory,
+        this WebApplicationFactory<Program> factory,
         CancellationToken cancellationToken)
     {
         using var sessionClient = factory.CreateCookieClient();

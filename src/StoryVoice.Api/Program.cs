@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Serilog;
 using StackExchange.Redis;
@@ -18,6 +19,7 @@ using StoryVoice.Application.Bookshelves;
 using StoryVoice.Infrastructure;
 using StoryVoice.Infrastructure.Health;
 using StoryVoice.Infrastructure.Identity;
+using StoryVoice.Infrastructure.Insights;
 using StoryVoice.Infrastructure.Persistence;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -129,6 +131,8 @@ if (!builder.Environment.IsEnvironment("Testing"))
         ?? throw new InvalidOperationException("ConnectionStrings:Redis is required.");
     builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
         ConnectionMultiplexer.Connect(redisConnection));
+    builder.Services.RemoveAll<ILocalGpuExecutionGate>();
+    builder.Services.AddSingleton<ILocalGpuExecutionGate, RedisLocalGpuExecutionGate>();
     healthChecks.AddCheck<RedisHealthCheck>("redis", tags: ["ready"]);
 }
 

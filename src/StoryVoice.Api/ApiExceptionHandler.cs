@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using StoryVoice.Application.BookImports;
 using StoryVoice.Application.Insights;
 using StoryVoice.Application.Narrations;
+using StoryVoice.Application.Series;
 
 namespace StoryVoice.Api;
 
@@ -27,6 +28,7 @@ public sealed class ApiExceptionHandler(
             LocalLlmCharacterAnalysisInputTooLargeException => StatusCodes.Status413PayloadTooLarge,
             LocalLlmCharacterAnalysisSourceChangedException => StatusCodes.Status409Conflict,
             LocalLlmCharacterAnalysisUnavailableException => StatusCodes.Status503ServiceUnavailable,
+            SeriesVoicePreviewUnavailableException => StatusCodes.Status503ServiceUnavailable,
             AntiforgeryValidationException => StatusCodes.Status400BadRequest,
             ArgumentException or InvalidOperationException => StatusCodes.Status400BadRequest,
             _ => StatusCodes.Status500InternalServerError
@@ -84,6 +86,11 @@ public sealed class ApiExceptionHandler(
         else if (exception is NarrationRightsRequiredException)
         {
             problemDetails.Extensions["code"] = NarrationRightsRequiredException.StableCode;
+        }
+        else if (exception is SeriesVoicePreviewUnavailableException)
+        {
+            problemDetails.Title = "Local voice preview is temporarily unavailable";
+            problemDetails.Extensions["code"] = SeriesVoicePreviewUnavailableException.StableCode;
         }
 
         httpContext.Response.StatusCode = statusCode;

@@ -8,6 +8,9 @@ const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 const voiceProfilesPanel = readFileSync(new URL('../src/CharacterVoiceProfilesPanel.tsx', import.meta.url), 'utf8')
 const characterLibraryPage = readFileSync(new URL('../src/pages/CharacterLibraryPage.tsx', import.meta.url), 'utf8')
 const appLayout = readFileSync(new URL('../src/AppLayout.tsx', import.meta.url), 'utf8')
+const api = readFileSync(new URL('../src/api.ts', import.meta.url), 'utf8')
+const serverVoiceCatalog = readFileSync(new URL('../../StoryVoice.Infrastructure/Persistence/SeriesVoiceCatalogOptions.cs', import.meta.url), 'utf8')
+const apiSettings = readFileSync(new URL('../../StoryVoice.Api/appsettings.json', import.meta.url), 'utf8')
 
 test('系列配音控制台固定使用 owner-scoped series、角色與 alias API', () => {
   assert.match(panel, /\/api\/series\/voice-options/)
@@ -59,6 +62,25 @@ test('VoAI 系列禁止 3wa 角色庫並明示伺服器試音，建立系列仍�
   assert.match(panel, /voiceOptions\.map\(\(option\) => <option key=\{voiceKey\(option\)\} value=\{voiceKey\(option\)\}/)
   assert.match(panel, /narratorProvider: selectedVoice\.provider/)
   assert.match(panel, /narratorVoice: selectedVoice\.voice/)
+})
+
+test('BlueMagpie 只使用伺服器固定句試音，不會加入正式系列聲線或呼叫 VoAI', () => {
+  assert.match(panel, /const BLUE_MAGPIE_PROVIDER = 'bluemagpie'/)
+  assert.match(panel, /female_voice/)
+  assert.match(panel, /hung_yi_lee/)
+  assert.match(panel, /fetchBlob\('\/api\/series\/voice-preview'/)
+  assert.match(panel, /body: \{ provider: BLUE_MAGPIE_PROVIDER, voice: blueMagpieVoice \}/)
+  assert.match(panel, /不傳送小說正文、不呼叫 VoAI/)
+  assert.match(panel, /URL\.createObjectURL\(audio\)/)
+  assert.match(panel, /URL\.revokeObjectURL\(blueMagpiePreviewUrl\)/)
+  assert.match(panel, /blueMagpiePreviewRequest\.current\?\.abort\(\)/)
+  assert.match(panel, /signal: controller\.signal/)
+  assert.match(panel, /setBlueMagpiePreviewUrl\(null\)/)
+  assert.match(panel, /<audio autoPlay/)
+  assert.match(api, /export async function fetchBlob/)
+  assert.match(api, /return response\.blob\(\)/)
+  assert.doesNotMatch(serverVoiceCatalog, /bluemagpie/i)
+  assert.doesNotMatch(JSON.stringify(JSON.parse(apiSettings).SeriesVoiceCatalog), /bluemagpie/i)
 })
 
 test('staged rebuild 狀態以既有系列成員解析書名，不假設 rebuild API 回傳額外 bookTitle', () => {

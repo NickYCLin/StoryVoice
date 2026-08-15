@@ -1,5 +1,9 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using StoryVoice.Application.Books;
 using StoryVoice.Application.Series;
 
@@ -41,6 +45,72 @@ public sealed class SeriesApiTests(ApiFactory factory) : IClassFixture<ApiFactor
             && voice.Voice == "v1:Neo:佑希:預設"
             && voice.DisplayName == "VoAI 佑希（Neo／預設）"
             && voice.Locale == "zh-TW");
+        Assert.DoesNotContain(voices, voice =>
+            string.Equals(voice.Provider, "bluemagpie", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task Local_voice_preview_requires_authentication_and_csrf_and_fails_closed_when_disabled()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var request = new SeriesVoicePreviewRequest("bluemagpie", "female_voice");
+
+        using var anonymousClient = factory.CreateClient();
+        using var anonymousResponse = await anonymousClient.PostAsJsonAsync(
+            "/api/series/voice-preview",
+            request,
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymousResponse.StatusCode);
+
+        using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        using var missingCsrfResponse = await client.PostAsJsonAsync(
+            "/api/series/voice-preview",
+            request,
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, missingCsrfResponse.StatusCode);
+
+        using var disabledResponse = await client.PostWithCsrfAsync(
+            "/api/series/voice-preview",
+            request,
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, disabledResponse.StatusCode);
+        using var problem = JsonDocument.Parse(
+            await disabledResponse.Content.ReadAsStreamAsync(cancellationToken));
+        Assert.Equal(
+            SeriesVoicePreviewUnavailableException.StableCode,
+            problem.RootElement.GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task Enabled_local_voice_preview_returns_private_audio_and_pinned_identity_headers()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var enabledFactory = factory.WithWebHostBuilder(builder =>
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ISeriesVoicePreviewService>();
+                services.AddSingleton<ISeriesVoicePreviewService, FakeSeriesVoicePreviewService>();
+            }));
+        using var client = await enabledFactory.CreateAuthenticatedClientAsync(cancellationToken);
+
+        using var response = await client.PostWithCsrfAsync(
+            "/api/series/voice-preview",
+            new SeriesVoicePreviewRequest("bluemagpie", "female_voice"),
+            cancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("audio/wav", response.Content.Headers.ContentType?.MediaType);
+        Assert.Equal("no-store", response.Headers.CacheControl?.ToString());
+        Assert.Equal("nosniff", Assert.Single(response.Headers.GetValues("X-Content-Type-Options")));
+        Assert.Equal(
+            "6f7cab914a1e27c56b504ec663c0144dc25cc0a3",
+            Assert.Single(response.Headers.GetValues("X-BlueMagpie-Model-Revision")));
+        Assert.Equal(
+            "female_voice",
+            Assert.Single(response.Headers.GetValues("X-BlueMagpie-Voice")));
+        Assert.Equal(
+            FakeSeriesVoicePreviewService.Audio,
+            await response.Content.ReadAsByteArrayAsync(cancellationToken));
     }
 
     [Fact]
@@ -305,6 +375,20 @@ public sealed class SeriesApiTests(ApiFactory factory) : IClassFixture<ApiFactor
         narratorVolume = "+0%",
         defaultSpeakerPauseMs = 350
     };
+
+    private sealed class FakeSeriesVoicePreviewService : ISeriesVoicePreviewService
+    {
+        internal static readonly byte[] Audio = [82, 73, 70, 70, 87, 65, 86, 69];
+
+        public Task<SeriesVoicePreviewAudio> GenerateAsync(
+            SeriesVoicePreviewRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new SeriesVoicePreviewAudio(
+                Audio,
+                "audio/wav",
+                "6f7cab914a1e27c56b504ec663c0144dc25cc0a3",
+                request.Voice));
+    }
 
     private static async Task<StorySeriesDetailsResponse> CreateSeriesAsync(
         HttpClient client,

@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 
-import { fetchJson } from './api'
+import { fetchBlob, fetchJson } from './api'
 import { useAuthedOutletContext } from './authOutletContext'
 import { CharacterVoiceProfilesPanel } from './CharacterVoiceProfilesPanel'
 import { ConfirmDialog } from './components/ConfirmDialog'
@@ -11,6 +11,12 @@ import type { BookDetails, BookSummary } from './types'
 const CUSTOM_VOICE_PROVIDER = '3wa-voxcpm2'
 const EDGE_VOICE_PROVIDER = 'edge'
 const VOAI_VOICE_PROVIDER = 'voai'
+const BLUE_MAGPIE_PROVIDER = 'bluemagpie'
+const BLUE_MAGPIE_VOICES = [
+  { voice: 'female_voice', label: 'BlueMagpie 內建女聲' },
+  { voice: 'hung_yi_lee', label: 'BlueMagpie 內建男聲' },
+] as const
+type BlueMagpieVoice = typeof BLUE_MAGPIE_VOICES[number]['voice']
 
 type CharacterProfileSummary = {
   id: string
@@ -100,6 +106,10 @@ export function SeriesCastPanel() {
   const [details, setDetails] = useState<SeriesDetails | null>(null)
   const [state, setState] = useState<LoadState>('loading')
   const [message, setMessage] = useState('')
+  const [blueMagpieVoice, setBlueMagpieVoice] = useState<BlueMagpieVoice>(BLUE_MAGPIE_VOICES[0].voice)
+  const [blueMagpiePreviewUrl, setBlueMagpiePreviewUrl] = useState<string | null>(null)
+  const [blueMagpiePreviewState, setBlueMagpiePreviewState] = useState<'idle' | 'loading'>('idle')
+  const blueMagpiePreviewRequest = useRef<AbortController | null>(null)
 
   const [seriesName, setSeriesName] = useState('')
   const [narratorVoiceKey, setNarratorVoiceKey] = useState('')
@@ -170,6 +180,16 @@ export function SeriesCastPanel() {
   useEffect(() => {
     void loadDetails(selectedSeriesId)
   }, [loadDetails, selectedSeriesId])
+
+  useEffect(() => () => {
+    if (blueMagpiePreviewUrl) URL.revokeObjectURL(blueMagpiePreviewUrl)
+  }, [blueMagpiePreviewUrl])
+
+  useEffect(() => () => {
+    const pending = blueMagpiePreviewRequest.current
+    blueMagpiePreviewRequest.current = null
+    pending?.abort()
+  }, [])
 
   useEffect(() => {
     if (!details) {
@@ -264,6 +284,34 @@ export function SeriesCastPanel() {
     utterance.lang = exactVoice?.lang ?? 'zh-TW'
     window.speechSynthesis.speak(utterance)
     setMessage('正在播放固定示範句；瀏覽器找不到同名 voice 時會使用本機語音，最終以 Edge TTS 成品為準。')
+  }
+
+  async function previewBlueMagpieVoice() {
+    blueMagpiePreviewRequest.current?.abort()
+    const controller = new AbortController()
+    blueMagpiePreviewRequest.current = controller
+    setBlueMagpiePreviewUrl(null)
+    setBlueMagpiePreviewState('loading')
+    setMessage('正在由主機本機生成固定示範句；不會呼叫 VoAI 或傳送小說正文。')
+    try {
+      const audio = await fetchBlob('/api/series/voice-preview', {
+        method: 'POST',
+        csrfToken,
+        body: { provider: BLUE_MAGPIE_PROVIDER, voice: blueMagpieVoice },
+        signal: controller.signal,
+      })
+      if (controller.signal.aborted) return
+      setBlueMagpiePreviewUrl(URL.createObjectURL(audio))
+      setMessage('本機台灣華語試音已完成；這只是固定示範句，尚未啟用整本配音。')
+    } catch (error) {
+      if (controller.signal.aborted) return
+      setMessage(error instanceof Error ? error.message : '本機台灣華語試音失敗。')
+    } finally {
+      if (blueMagpiePreviewRequest.current === controller) {
+        blueMagpiePreviewRequest.current = null
+        setBlueMagpiePreviewState('idle')
+      }
+    }
   }
 
   async function createSeries(event: FormEvent<HTMLFormElement>) {
@@ -438,6 +486,34 @@ export function SeriesCastPanel() {
           <label className="text-xs text-stone-500">固定旁白聲線<select className="auth-input mt-2" onChange={(event) => setNarratorVoiceKey(event.target.value)} value={narratorVoiceKey}><option value="">選擇聲線</option>{voiceOptions.map((option) => <option key={voiceKey(option)} value={voiceKey(option)}>{option.displayName}（{option.locale}）</option>)}</select></label>
           <button className="secondary-button disabled:cursor-wait disabled:opacity-60" disabled={formState === 'loading' || !seriesName.trim() || !narratorVoiceKey} type="submit">建立系列</button>
         </form>
+      </section>
+
+      <section className="mt-6 rounded-3xl border border-sky-200 bg-sky-50 p-5 sm:p-7" aria-label="本機台灣華語試音">
+        <p className="text-xs font-semibold uppercase tracking-[.22em] text-sky-700">Self-hosted preview</p>
+        <h2 className="mt-2 font-serif text-2xl text-stone-900">本機台灣華語試音</h2>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-stone-600">僅生成伺服器內建的固定示範句，不傳送小說正文、不呼叫 VoAI，也不會建立正式配音工作。</p>
+        <div className="mt-4 flex flex-wrap items-end gap-3">
+          <label className="min-w-64 text-xs text-stone-500">
+            BlueMagpie 聲線
+            <select
+              className="auth-input mt-2"
+              onChange={(event) => {
+                blueMagpiePreviewRequest.current?.abort()
+                blueMagpiePreviewRequest.current = null
+                setBlueMagpiePreviewState('idle')
+                setBlueMagpiePreviewUrl(null)
+                setBlueMagpieVoice(event.target.value as BlueMagpieVoice)
+              }}
+              value={blueMagpieVoice}
+            >
+              {BLUE_MAGPIE_VOICES.map((option) => <option key={option.voice} value={option.voice}>{option.label}</option>)}
+            </select>
+          </label>
+          <button className="secondary-button disabled:cursor-wait disabled:opacity-60" disabled={blueMagpiePreviewState === 'loading'} onClick={() => void previewBlueMagpieVoice()} type="button">
+            {blueMagpiePreviewState === 'loading' ? '本機生成中…' : '生成固定試音'}
+          </button>
+        </div>
+        {blueMagpiePreviewUrl && <audio autoPlay className="mt-4 w-full max-w-xl" controls src={blueMagpiePreviewUrl}>你的瀏覽器無法播放這段試音。</audio>}
       </section>
 
       <section className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[18rem_minmax(0,1fr)]">

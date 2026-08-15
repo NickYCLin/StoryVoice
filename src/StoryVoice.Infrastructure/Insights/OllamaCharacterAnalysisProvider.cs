@@ -9,12 +9,13 @@ using StoryVoice.Application.Insights;
 namespace StoryVoice.Infrastructure.Insights;
 
 /// <summary>
-/// Sends bounded complete chapters to a host-local Ollama server. A process-wide gate prevents
-/// overlapping batches; every terminal path requires a confirmed unload before it returns.
+/// Sends bounded complete chapters to a host-local Ollama server. A shared Redis lease prevents
+/// overlapping GPU work across processes; every terminal path requires a confirmed unload.
 /// </summary>
 public sealed class OllamaCharacterAnalysisProvider(
     HttpClient httpClient,
-    IOptions<LocalLlmCharacterAnalysisOptions> options) : ILocalLlmCharacterAnalysisProvider
+    IOptions<LocalLlmCharacterAnalysisOptions> options,
+    ILocalGpuExecutionGate gpuExecutionGate) : ILocalLlmCharacterAnalysisProvider
 {
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
     private static readonly JsonDocumentOptions StrictJsonOptions = new()
@@ -63,16 +64,22 @@ public sealed class OllamaCharacterAnalysisProvider(
         LocalLlmCharacterAnalysisRequest request,
         CancellationToken cancellationToken)
     {
-        await LocalOllamaExecutionGate.Gate.WaitAsync(cancellationToken);
+        await using var lease = await gpuExecutionGate.AcquireAsync(cancellationToken);
+        using var executionCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken,
+            lease.OwnershipLost);
+        var executorStopped = false;
         try
         {
             var results = new List<LocalLlmChapterCharacterAnalysis>(request.Chapters.Count);
             foreach (var chapter in request.Chapters)
             {
-                var candidates = await AnalyzeChapterCoreAsync(chapter, cancellationToken);
+                lease.OwnershipLost.ThrowIfCancellationRequested();
+                var candidates = await AnalyzeChapterCoreAsync(chapter, executionCancellation.Token);
                 results.Add(new LocalLlmChapterCharacterAnalysis(chapter.ChapterNumber, candidates));
             }
 
+            lease.OwnershipLost.ThrowIfCancellationRequested();
             return results;
         }
         finally
@@ -80,10 +87,18 @@ public sealed class OllamaCharacterAnalysisProvider(
             try
             {
                 await UnloadAsync();
+                executorStopped = true;
+                if (lease.OwnershipLost.IsCancellationRequested)
+                {
+                    throw new LocalLlmCharacterAnalysisUnavailableException();
+                }
             }
             finally
             {
-                LocalOllamaExecutionGate.Gate.Release();
+                if (!executorStopped)
+                {
+                    lease.Abandon();
+                }
             }
         }
     }

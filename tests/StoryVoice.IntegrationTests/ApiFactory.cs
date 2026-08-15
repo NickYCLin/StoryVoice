@@ -44,6 +44,9 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
         builder.UseEnvironment("Testing");
         builder.UseSetting("BookStorage:RootPath", _storageRoot);
         builder.UseSetting("Narration:AudioRootPath", Path.Combine(_storageRoot, "audio"));
+        builder.UseSetting(
+            "Auth:DataProtectionKeysPath",
+            Path.Combine(_storageRoot, "data-protection"));
         builder.UseSetting("Narration:AdmissionEnabled", _narrationAdmissionEnabled ? "true" : "false");
         builder.ConfigureServices(services =>
         {

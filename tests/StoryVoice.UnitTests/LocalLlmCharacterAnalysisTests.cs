@@ -145,13 +145,54 @@ public sealed class LocalLlmCharacterAnalysisTests
     [Fact]
     public async Task Ollama_provider_fails_closed_when_unload_is_not_confirmed()
     {
+        var gate = new RecordingGpuExecutionGate();
         using var client = new HttpClient(new CapturingHandler(ValidAnalysis, unloadStatus: HttpStatusCode.InternalServerError))
         {
             BaseAddress = new Uri("http://local-ollama/"),
         };
 
         await Assert.ThrowsAsync<LocalLlmCharacterAnalysisUnavailableException>(() =>
-            CreateProvider(client).AnalyzeAsync(Request(), TestContext.Current.CancellationToken));
+            CreateProvider(client, gpuExecutionGate: gate).AnalyzeAsync(Request(), TestContext.Current.CancellationToken));
+
+        Assert.True(gate.LastLease?.Abandoned);
+        Assert.True(gate.LastLease?.Disposed);
+    }
+
+    [Fact]
+    public async Task Ollama_provider_cancels_inference_and_unloads_when_redis_ownership_is_lost()
+    {
+        var gate = new RecordingGpuExecutionGate();
+        using var client = new HttpClient(new CapturingHandler(
+            ValidAnalysis,
+            onChatResponse: () => gate.LastLease!.LoseOwnership()))
+        {
+            BaseAddress = new Uri("http://local-ollama/"),
+        };
+
+        await Assert.ThrowsAsync<LocalLlmCharacterAnalysisUnavailableException>(() =>
+            CreateProvider(client, gpuExecutionGate: gate)
+                .AnalyzeAsync(Request(), TestContext.Current.CancellationToken));
+
+        Assert.True(gate.LastLease?.OwnershipLost.IsCancellationRequested);
+        Assert.True(gate.LastLease?.Disposed);
+    }
+
+    [Fact]
+    public async Task Ollama_provider_fails_closed_if_ownership_is_lost_after_chat_completion()
+    {
+        var gate = new RecordingGpuExecutionGate();
+        var handler = new CapturingHandler(
+            ValidAnalysis,
+            onUnloadResponse: () => gate.LastLease!.LoseOwnership());
+        using var client = new HttpClient(handler) { BaseAddress = new Uri("http://local-ollama/") };
+
+        await Assert.ThrowsAsync<LocalLlmCharacterAnalysisUnavailableException>(() =>
+            CreateProvider(client, gpuExecutionGate: gate)
+                .AnalyzeAsync(Request(), TestContext.Current.CancellationToken));
+
+        Assert.False(string.IsNullOrWhiteSpace(handler.UnloadRequestBody));
+        Assert.True(gate.LastLease?.OwnershipLost.IsCancellationRequested);
+        Assert.True(gate.LastLease?.Disposed);
     }
 
     [Fact]
@@ -213,7 +254,10 @@ public sealed class LocalLlmCharacterAnalysisTests
         Assert.Contains("gpt-oss:20b", exception.Message, StringComparison.Ordinal);
     }
 
-    private static OllamaCharacterAnalysisProvider CreateProvider(HttpClient client, int maximumResponseBytes = 16 * 1024) =>
+    private static OllamaCharacterAnalysisProvider CreateProvider(
+        HttpClient client,
+        int maximumResponseBytes = 16 * 1024,
+        ILocalGpuExecutionGate? gpuExecutionGate = null) =>
         new(
             client,
             Options.Create(new LocalLlmCharacterAnalysisOptions
@@ -224,7 +268,8 @@ public sealed class LocalLlmCharacterAnalysisTests
                 TimeoutSeconds = 600,
                 UnloadTimeoutSeconds = 3,
                 MaximumResponseBytes = maximumResponseBytes,
-            }));
+            }),
+            gpuExecutionGate ?? new InProcessLocalGpuExecutionGate());
 
     private static LocalLlmCharacterAnalysisRequest Request() => new(
         "test-source-hash",
@@ -233,7 +278,9 @@ public sealed class LocalLlmCharacterAnalysisTests
     private sealed class CapturingHandler(
         string chatResponse,
         HttpStatusCode chatStatus = HttpStatusCode.OK,
-        HttpStatusCode unloadStatus = HttpStatusCode.OK) : HttpMessageHandler
+        HttpStatusCode unloadStatus = HttpStatusCode.OK,
+        Action? onChatResponse = null,
+        Action? onUnloadResponse = null) : HttpMessageHandler
     {
         public string ChatRequestBody { get; private set; } = string.Empty;
         public string UnloadRequestBody { get; private set; } = string.Empty;
@@ -248,11 +295,13 @@ public sealed class LocalLlmCharacterAnalysisTests
             if (request.RequestUri?.AbsolutePath == "/api/chat")
             {
                 ChatRequestBody = requestBody;
+                onChatResponse?.Invoke();
                 return Response(chatStatus, chatResponse);
             }
 
             Assert.Equal("/api/generate", request.RequestUri?.AbsolutePath);
             UnloadRequestBody = requestBody;
+            onUnloadResponse?.Invoke();
             return Response(unloadStatus, "{\"done\":true}");
         }
 

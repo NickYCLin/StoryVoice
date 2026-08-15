@@ -52,6 +52,31 @@ Open:
 - Liveness: <http://localhost:8080/health/live>
 - Readiness: <http://localhost:8080/health/ready>
 
+### Private BlueMagpie Taiwan-Mandarin preview (ARM64 + NVIDIA GPU)
+
+The `bluemagpie` Compose profile adds a self-hosted, fixed-sentence preview only.
+It does not add BlueMagpie to the production series voice catalog, send book text,
+or call VoAI. The gateway has no host port and runs on an internal Docker network.
+
+Preload the pinned model cache, create a random secret of at least 32 characters,
+then set these values outside Git:
+
+```bash
+BLUEMAGPIE_ENABLED=true
+BLUEMAGPIE_INTERNAL_TOKEN=<random-internal-secret>
+BLUEMAGPIE_CACHE_PATH=/absolute/path/to/the/preloaded/cache
+```
+
+Start the private preview with:
+
+```bash
+docker compose --profile bluemagpie up -d --build bluemagpie-gateway api worker web
+```
+
+Paid VoAI synthesis is deliberately separate: the Worker ignores the legacy
+`VOAI_API_KEY` variable. It can only be enabled by explicitly configuring
+`VOAI_PAID_API_KEY`; leave it empty for a no-paid-API deployment.
+
 Compose 只把 Web 與 API 綁在 `127.0.0.1`；對外服務應由同機 reverse proxy 提供 TLS。
 
 要先在本機驗證預定的正式子路徑：
@@ -235,6 +260,7 @@ tests/
 - 使用 VoAI 雲端 API 時，待合成文字會透過網路傳送至 VoAI；啟用前請確認內容授權、隱私需求與供應商條款。
 - 對外提供 VoAI 產物時，應依適用法規與平台規範揭露該語音由 AI 生成或合成。
 - VoAI 免費試用音訊含背景音樂或浮水印，只供串接測試、不可作為商用成品；商用前須購買適用方案並確認聲線授權。
+- BlueMagpie 程式碼與模型權重不是同一授權；模型權重目前標示為 `other`。本專案的 BlueMagpie 路徑僅供私人內網試音，公開或商業使用前須先取得明確授權。
 - Uploaded books, generated audio, analysis results and runtime volumes are ignored by Git.
 - Generated audio is not automatically licensed for redistribution.
 

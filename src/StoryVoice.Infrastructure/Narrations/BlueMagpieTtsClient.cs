@@ -1,0 +1,193 @@
+using System.Buffers;
+using System.Buffers.Binary;
+using System.Net.Http.Json;
+using Microsoft.Extensions.Options;
+using StoryVoice.Application.Series;
+
+namespace StoryVoice.Infrastructure.Narrations;
+
+public sealed class BlueMagpieTtsClient(
+    HttpClient httpClient,
+    IOptions<BlueMagpieOptions> options) : IBlueMagpieTtsClient
+{
+    private const string TokenHeader = "X-StoryVoice-Internal-Token";
+    private const string RevisionHeader = "X-BlueMagpie-Model-Revision";
+    private const string VoiceHeader = "X-BlueMagpie-Voice";
+
+    public async Task<BlueMagpieSynthesisResult> SynthesizeAsync(
+        string text,
+        string voice,
+        CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, "v1/audio/speech")
+        {
+            Content = JsonContent.Create(new BlueMagpieSpeechRequest(text, voice)),
+        };
+        request.Headers.TryAddWithoutValidation(TokenHeader, options.Value.InternalToken);
+
+        try
+        {
+            using var response = await httpClient.SendAsync(
+                request,
+                HttpCompletionOption.ResponseHeadersRead,
+                cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new SeriesVoicePreviewUnavailableException();
+            }
+
+            var mediaType = response.Content.Headers.ContentType?.MediaType;
+            if (!string.Equals(mediaType, "audio/wav", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(mediaType, "audio/x-wav", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new SeriesVoicePreviewUnavailableException();
+            }
+
+            var contentLength = response.Content.Headers.ContentLength;
+            if (contentLength is <= 0 || contentLength > options.Value.MaximumResponseBytes)
+            {
+                throw new SeriesVoicePreviewUnavailableException();
+            }
+
+            var revision = ReadSingleHeader(response, RevisionHeader);
+            var returnedVoice = ReadSingleHeader(response, VoiceHeader);
+            if (!string.Equals(revision, options.Value.ModelRevision, StringComparison.Ordinal)
+                || !string.Equals(returnedVoice, voice, StringComparison.Ordinal))
+            {
+                throw new SeriesVoicePreviewUnavailableException();
+            }
+
+            await using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            var content = await ReadBoundedAsync(
+                responseStream,
+                options.Value.MaximumResponseBytes,
+                cancellationToken);
+            if (!IsPcmWave(content))
+            {
+                throw new SeriesVoicePreviewUnavailableException();
+            }
+
+            return new BlueMagpieSynthesisResult(content, "audio/wav", revision, returnedVoice);
+        }
+        catch (SeriesVoicePreviewUnavailableException)
+        {
+            throw;
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new SeriesVoicePreviewUnavailableException();
+        }
+        catch (HttpRequestException exception)
+        {
+            throw new SeriesVoicePreviewUnavailableException(exception);
+        }
+        catch (IOException exception)
+        {
+            throw new SeriesVoicePreviewUnavailableException(exception);
+        }
+    }
+
+    private static string ReadSingleHeader(HttpResponseMessage response, string headerName)
+    {
+        if (!response.Headers.TryGetValues(headerName, out var values))
+        {
+            return string.Empty;
+        }
+
+        var candidates = values.Take(2).ToArray();
+        return candidates.Length == 1 ? candidates[0] : string.Empty;
+    }
+
+    private static async Task<byte[]> ReadBoundedAsync(
+        Stream stream,
+        int maximumBytes,
+        CancellationToken cancellationToken)
+    {
+        var buffer = ArrayPool<byte>.Shared.Rent(64 * 1024);
+        try
+        {
+            using var output = new MemoryStream();
+            while (true)
+            {
+                var read = await stream.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken);
+                if (read == 0)
+                {
+                    break;
+                }
+
+                if (output.Length + read > maximumBytes)
+                {
+                    throw new SeriesVoicePreviewUnavailableException();
+                }
+
+                output.Write(buffer, 0, read);
+            }
+
+            return output.ToArray();
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
+    private static bool IsPcmWave(ReadOnlySpan<byte> content)
+    {
+        if (content.Length < 46
+            || !content[..4].SequenceEqual("RIFF"u8)
+            || !content.Slice(8, 4).SequenceEqual("WAVE"u8)
+            || BinaryPrimitives.ReadUInt32LittleEndian(content.Slice(4, 4)) != content.Length - 8)
+        {
+            return false;
+        }
+
+        var hasFormat = false;
+        var hasAudio = false;
+        var offset = 12;
+        while (offset <= content.Length - 8)
+        {
+            var chunkId = content.Slice(offset, 4);
+            var chunkSize = BinaryPrimitives.ReadUInt32LittleEndian(content.Slice(offset + 4, 4));
+            var dataOffset = offset + 8;
+            if (chunkSize > int.MaxValue
+                || dataOffset > content.Length - (int)chunkSize)
+            {
+                return false;
+            }
+
+            var chunk = content.Slice(dataOffset, (int)chunkSize);
+            if (chunkId.SequenceEqual("fmt "u8))
+            {
+                hasFormat = chunk.Length >= 16
+                    && BinaryPrimitives.ReadUInt16LittleEndian(chunk[..2]) == 1
+                    && BinaryPrimitives.ReadUInt16LittleEndian(chunk.Slice(2, 2)) == 1
+                    && BinaryPrimitives.ReadUInt32LittleEndian(chunk.Slice(4, 4)) == 48_000
+                    && BinaryPrimitives.ReadUInt32LittleEndian(chunk.Slice(8, 4)) == 96_000
+                    && BinaryPrimitives.ReadUInt16LittleEndian(chunk.Slice(12, 2)) == 2
+                    && BinaryPrimitives.ReadUInt16LittleEndian(chunk.Slice(14, 2)) == 16;
+                if (!hasFormat)
+                {
+                    return false;
+                }
+            }
+            else if (chunkId.SequenceEqual("data"u8))
+            {
+                hasAudio = chunk.Length >= 2 && chunk.Length % 2 == 0;
+            }
+
+            var paddedSize = (long)chunkSize + (chunkSize & 1U);
+            var nextOffset = dataOffset + paddedSize;
+            if (nextOffset > content.Length)
+            {
+                return false;
+            }
+
+            offset = (int)nextOffset;
+        }
+
+        return offset == content.Length && hasFormat && hasAudio;
+    }
+
+    private sealed record BlueMagpieSpeechRequest(string Text, string Voice);
+}

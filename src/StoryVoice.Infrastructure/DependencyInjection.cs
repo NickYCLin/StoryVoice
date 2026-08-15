@@ -69,6 +69,41 @@ public static class DependencyInjection
             .Validate(options => options.UnloadTimeoutSeconds is >= 3 and <= 60, "本機 LLM unload timeout 必須介於 3 至 60 秒。")
             .Validate(options => options.MaximumResponseBytes is >= 1_024 and <= 65_536, "本機 LLM response 上限必須介於 1 KiB 至 64 KiB。")
             .ValidateOnStart();
+        services.AddOptions<LocalGpuExecutionGateOptions>()
+            .Bind(configuration.GetSection(LocalGpuExecutionGateOptions.SectionName))
+            .Validate(options => options.LeaseSeconds is >= LocalGpuExecutionGateOptions.MinimumLeaseSeconds and <= 7_200,
+                "本機 GPU Redis lease 必須介於 1900 至 7200 秒，以安全涵蓋最長 Ollama 執行與卸載。")
+            .Validate(options => options.PollIntervalMilliseconds is >= 25 and <= 2_000,
+                "本機 GPU Redis lock poll interval 必須介於 25 至 2000 毫秒。")
+            .Validate(options => options.RenewIntervalSeconds is >= 5 and <= 60,
+                "本機 GPU Redis lease 必須每 5 至 60 秒續租一次。")
+            .ValidateOnStart();
+        services.AddOptions<BlueMagpieOptions>()
+            .Bind(configuration.GetSection(BlueMagpieOptions.SectionName))
+            .Validate(options => !options.Enabled || IsValidBlueMagpieBaseUrl(options.BaseUrl),
+                "BlueMagpie base URL 無效。")
+            .Validate(options => !options.Enabled
+                || (!string.IsNullOrWhiteSpace(options.InternalToken)
+                    && options.InternalToken.Trim().Length >= 32),
+                "啟用 BlueMagpie 時必須設定至少 32 字元的 internal token。")
+            .Validate(options => string.Equals(
+                    options.ModelRevision,
+                    BlueMagpieOptions.PinnedModelRevision,
+                    StringComparison.Ordinal),
+                "BlueMagpie 只允許已驗證的固定模型版本。")
+            .Validate(options => options.ConnectTimeoutSeconds is >= 1 and <= 30,
+                "BlueMagpie connect timeout 必須介於 1 至 30 秒。")
+            .Validate(options => options.QueueTimeoutSeconds is >= 1 and <= 60,
+                "BlueMagpie queue timeout 必須介於 1 至 60 秒。")
+            .Validate(options => options.SynthesisWatchdogSeconds is >= 30 and <= 3_600,
+                "BlueMagpie synthesis watchdog 必須介於 30 至 3600 秒。")
+            .Validate(options => options.RequestTimeoutSeconds
+                    >= options.QueueTimeoutSeconds + options.SynthesisWatchdogSeconds + 15
+                    && options.RequestTimeoutSeconds <= 3_900,
+                "BlueMagpie API request timeout 必須涵蓋 queue、synthesis watchdog 與安全餘裕。")
+            .Validate(options => options.MaximumResponseBytes is >= 64 * 1024 and <= 16 * 1024 * 1024,
+                "BlueMagpie response 上限必須介於 64 KiB 至 16 MiB。")
+            .ValidateOnStart();
         services.AddOptions<MultiCharacterNarrationOptions>()
             .Bind(configuration.GetSection(MultiCharacterNarrationOptions.SectionName))
             .Validate(options => !string.IsNullOrWhiteSpace(options.ProviderVersion)
@@ -101,6 +136,9 @@ public static class DependencyInjection
             .ValidateOnStart();
         services.AddScoped<IBookRepository, BookRepository>();
         services.AddScoped<IBookMetadataCorrectionService, BookMetadataCorrectionService>();
+        // API production replaces this test-safe default with RedisLocalGpuExecutionGate after
+        // registering its shared connection multiplexer.
+        services.AddSingleton<ILocalGpuExecutionGate, InProcessLocalGpuExecutionGate>();
         services.AddHttpClient<ILocalLlmCharacterAnalysisProvider, OllamaCharacterAnalysisProvider>((provider, client) =>
         {
             var localLlmOptions = provider.GetRequiredService<IOptions<LocalLlmCharacterAnalysisOptions>>().Value;
@@ -115,6 +153,23 @@ public static class DependencyInjection
             client.Timeout = TimeSpan.FromSeconds(localLlmOptions.TimeoutSeconds);
         })
         .ConfigurePrimaryHttpMessageHandler(static () => new SocketsHttpHandler { UseProxy = false });
+        services.AddHttpClient<IBlueMagpieTtsClient, BlueMagpieTtsClient>((provider, client) =>
+        {
+            var blueMagpieOptions = provider.GetRequiredService<IOptions<BlueMagpieOptions>>().Value;
+            client.BaseAddress = new Uri(blueMagpieOptions.BaseUrl, UriKind.Absolute);
+            // The gateway owns the Redis GPU lease independently, so an API timeout cannot
+            // release CUDA early. A finite bound keeps a half-open internal connection from
+            // poisoning the singleton preview cache until the API process restarts.
+            client.Timeout = TimeSpan.FromSeconds(blueMagpieOptions.RequestTimeoutSeconds);
+        })
+        .ConfigurePrimaryHttpMessageHandler(provider => new SocketsHttpHandler
+        {
+            UseProxy = false,
+            AllowAutoRedirect = false,
+            AutomaticDecompression = System.Net.DecompressionMethods.None,
+            ConnectTimeout = TimeSpan.FromSeconds(
+                provider.GetRequiredService<IOptions<BlueMagpieOptions>>().Value.ConnectTimeoutSeconds),
+        });
         services.AddScoped<IBookInsightsService, BookInsightsService>();
         services.AddScoped<ILibraryStatusService, LibraryStatusService>();
         services.AddScoped<INarrationService, NarrationService>();
@@ -122,6 +177,8 @@ public static class DependencyInjection
         services.AddScoped<IStagedNarrationBatchProgressService, StagedNarrationBatchProgressService>();
         services.AddScoped<IStorySeriesRepository, StorySeriesRepository>();
         services.AddScoped<ISeriesService, SeriesService>();
+        // A singleton owns the successful two-voice preview cache for the lifetime of the API process.
+        services.AddSingleton<ISeriesVoicePreviewService, SeriesVoicePreviewService>();
         services.AddScoped<IBookCollectionRepository, BookCollectionRepository>();
         services.AddScoped<ICollectionService, CollectionService>();
         services.AddScoped<ISharedCollectionService, SharedCollectionService>();
@@ -160,5 +217,17 @@ public static class DependencyInjection
             client.BaseAddress = new Uri(hubOptions.BaseUrl);
         });
         return services;
+    }
+
+    private static bool IsValidBlueMagpieBaseUrl(string value)
+    {
+        return Uri.TryCreate(value, UriKind.Absolute, out var uri)
+            && uri.Scheme == Uri.UriSchemeHttp
+            && string.Equals(uri.Host, "bluemagpie-gateway", StringComparison.OrdinalIgnoreCase)
+            && uri.Port == 8081
+            && uri.AbsolutePath == "/"
+            && string.IsNullOrEmpty(uri.UserInfo)
+            && string.IsNullOrEmpty(uri.Query)
+            && string.IsNullOrEmpty(uri.Fragment);
     }
 }

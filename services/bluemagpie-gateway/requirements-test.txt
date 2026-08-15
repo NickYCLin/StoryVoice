@@ -1,0 +1,5 @@
+# Pure contract/HTTP tests. Deliberately no torch, CUDA, BlueMagpie, or Barbet.
+fastapi==0.116.1
+httpx==0.28.1
+pydantic==2.11.7
+pytest==8.4.1

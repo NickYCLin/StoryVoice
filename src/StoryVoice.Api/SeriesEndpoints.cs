@@ -20,6 +20,22 @@ public static class SeriesEndpoints
             Results.Ok(service.ListVoiceOptions()))
             .WithName("ListSeriesVoiceOptions");
 
+        group.MapPost("/voice-preview", async (
+            SeriesVoicePreviewRequest request,
+            HttpContext httpContext,
+            ISeriesVoicePreviewService service,
+            CancellationToken cancellationToken) =>
+        {
+            var preview = await service.GenerateAsync(request, cancellationToken);
+            httpContext.Response.Headers.CacheControl = "no-store";
+            httpContext.Response.Headers.Append("X-Content-Type-Options", "nosniff");
+            httpContext.Response.Headers.Append("X-BlueMagpie-Model-Revision", preview.ModelRevision);
+            httpContext.Response.Headers.Append("X-BlueMagpie-Voice", preview.Voice);
+            return Results.File(preview.Content, preview.ContentType);
+        })
+        .AddEndpointFilter<AntiforgeryEndpointFilter>()
+        .WithName("PreviewSeriesVoice");
+
         group.MapGet("/{seriesId:guid}", async (
             Guid seriesId,
             ISeriesService service,

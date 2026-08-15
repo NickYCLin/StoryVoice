@@ -26,6 +26,9 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+    networks:
+      - default
+      - bluemagpie-internal
     restart: unless-stopped
 
   api:
@@ -45,6 +48,13 @@ services:
       Narration__AudioRootPath: /data/audio
       Narration__AdmissionEnabled: ${NARRATION_ADMISSION_ENABLED:-false}
       Auth__DataProtectionKeysPath: /var/lib/storyvoice/data-protection-keys
+      BlueMagpie__Enabled: ${BLUEMAGPIE_ENABLED:-false}
+      BlueMagpie__BaseUrl: http://bluemagpie-gateway:8081/
+      BlueMagpie__InternalToken: ${BLUEMAGPIE_INTERNAL_TOKEN:-}
+      BlueMagpie__ModelRevision: 6f7cab914a1e27c56b504ec663c0144dc25cc0a3
+      BlueMagpie__QueueTimeoutSeconds: ${BLUEMAGPIE_QUEUE_TIMEOUT_SECONDS:-15}
+      BlueMagpie__SynthesisWatchdogSeconds: ${BLUEMAGPIE_SYNTHESIS_WATCHDOG_SECONDS:-120}
+      BlueMagpie__RequestTimeoutSeconds: ${BLUEMAGPIE_REQUEST_TIMEOUT_SECONDS:-180}
     volumes:
       - book-storage:/data/books
       - character-voice-storage:/data/character-voices
@@ -53,6 +63,9 @@ services:
       - data-protection-keys:/var/lib/storyvoice/data-protection-keys
     ports:
       - "127.0.0.1:${STORYVOICE_API_PORT:-8080}:8080"
+    networks:
+      - default
+      - bluemagpie-internal
     depends_on:
       postgres:
         condition: service_healthy
@@ -77,7 +90,8 @@ services:
       ThreeWaAiHub__BaseUrl: ${THREEWA_BASE_URL:-https://3wa.tw/3waAIHub/}
       ThreeWaAiHub__ApiToken: ${THREEWA_API_TOKEN:-}
       VoAi__BaseUrl: ${VOAI_BASE_URL:-https://connect.voai.ai/}
-      VoAi__ApiKey: ${VOAI_API_KEY:-}
+      # Paid VoAI calls are opt-in. A legacy VOAI_API_KEY is intentionally ignored.
+      VoAi__ApiKey: ${VOAI_PAID_API_KEY:-}
       Narration__AudioRootPath: /data/audio
       Narration__Voice: zh-TW-YunJheNeural
       Narration__Rate: -5%
@@ -93,6 +107,43 @@ services:
         condition: service_healthy
       api:
         condition: service_healthy
+    restart: unless-stopped
+
+  bluemagpie-gateway:
+    profiles: ["bluemagpie"]
+    build:
+      context: services/bluemagpie-gateway
+      dockerfile: Dockerfile
+    environment:
+      BLUEMAGPIE_INTERNAL_TOKEN: ${BLUEMAGPIE_INTERNAL_TOKEN:-}
+      BLUEMAGPIE_QUEUE_TIMEOUT_SECONDS: ${BLUEMAGPIE_QUEUE_TIMEOUT_SECONDS:-15}
+      BLUEMAGPIE_REDIS_URL: redis://redis:6379/0
+      BLUEMAGPIE_SYNTHESIS_WATCHDOG_SECONDS: ${BLUEMAGPIE_SYNTHESIS_WATCHDOG_SECONDS:-120}
+      BLUEMAGPIE_MODEL_LIFECYCLE_WATCHDOG_SECONDS: ${BLUEMAGPIE_MODEL_LIFECYCLE_WATCHDOG_SECONDS:-120}
+    volumes:
+      - ${BLUEMAGPIE_CACHE_PATH:-./.cache/bluemagpie}:/cache:ro
+    expose:
+      - "8081"
+    networks:
+      - bluemagpie-internal
+    gpus: all
+    cpus: 8.0
+    mem_limit: 32g
+    memswap_limit: 32g
+    shm_size: 1g
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=1g
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/health/ready', timeout=3).read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 180s
     restart: unless-stopped
 
   web:
@@ -121,3 +172,7 @@ volumes:
   character-avatar-storage:
   audio-storage:
   data-protection-keys:
+
+networks:
+  bluemagpie-internal:
+    internal: true

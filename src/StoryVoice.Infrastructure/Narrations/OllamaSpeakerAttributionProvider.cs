@@ -16,7 +16,8 @@ namespace StoryVoice.Infrastructure.Narrations;
 /// </summary>
 public sealed class OllamaSpeakerAttributionProvider(
     HttpClient httpClient,
-    IOptions<LocalLlmCharacterAnalysisOptions> options) : ISpeakerAttributionProvider
+    IOptions<LocalLlmCharacterAnalysisOptions> options,
+    ILocalGpuExecutionGate gpuExecutionGate) : ISpeakerAttributionProvider
 {
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web)
     {
@@ -51,7 +52,11 @@ public sealed class OllamaSpeakerAttributionProvider(
             throw new LocalSpeakerAttributionUnavailableException();
         }
 
-        await LocalOllamaExecutionGate.Gate.WaitAsync(cancellationToken);
+        await using var lease = await gpuExecutionGate.AcquireAsync(cancellationToken);
+        using var executionCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken,
+            lease.OwnershipLost);
+        var executorStopped = false;
         try
         {
             using var chatRequest = new HttpRequestMessage(HttpMethod.Post, "api/chat")
@@ -73,19 +78,20 @@ public sealed class OllamaSpeakerAttributionProvider(
             using var response = await httpClient.SendAsync(
                 chatRequest,
                 HttpCompletionOption.ResponseHeadersRead,
-                cancellationToken);
+                executionCancellation.Token);
             if (!response.IsSuccessStatusCode)
             {
                 throw new LocalSpeakerAttributionUnavailableException();
             }
 
-            var payload = await ReadBoundedBodyAsync(response.Content, cancellationToken);
+            var payload = await ReadBoundedBodyAsync(response.Content, executionCancellation.Token);
             var content = ParseCompletedChatContent(payload);
             if (Encoding.UTF8.GetByteCount(content) > MaximumInnerJsonBytes)
             {
                 throw new LocalSpeakerAttributionUnavailableException();
             }
 
+            lease.OwnershipLost.ThrowIfCancellationRequested();
             return ParseResults(content, request, dialogueIndexes);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -110,10 +116,18 @@ public sealed class OllamaSpeakerAttributionProvider(
             try
             {
                 await UnloadAsync();
+                executorStopped = true;
+                if (lease.OwnershipLost.IsCancellationRequested)
+                {
+                    throw new LocalSpeakerAttributionUnavailableException();
+                }
             }
             finally
             {
-                LocalOllamaExecutionGate.Gate.Release();
+                if (!executorStopped)
+                {
+                    lease.Abandon();
+                }
             }
         }
     }
