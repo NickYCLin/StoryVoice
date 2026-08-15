@@ -9,7 +9,8 @@ public sealed record VoAiAudioSegment(
 public sealed record FfmpegAudioSegment(
     string InputWavPath,
     string Volume,
-    int PauseBeforeMs);
+    int PauseBeforeMs,
+    bool DeleteInputAfterNormalization = true);
 
 public interface IVoAiAudioComposer
 {

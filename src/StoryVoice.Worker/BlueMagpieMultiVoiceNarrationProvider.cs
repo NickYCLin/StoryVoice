@@ -16,6 +16,7 @@ namespace StoryVoice.Worker;
 /// </summary>
 public sealed class BlueMagpieMultiVoiceNarrationProvider(
     IBlueMagpieTtsClient client,
+    IBlueMagpieChunkCache chunkCache,
     IFfmpegAudioComposer composer,
     IOptions<BlueMagpieOptions> options,
     ILogger<BlueMagpieMultiVoiceNarrationProvider> logger) : IVersionedMultiVoiceNarrationProvider
@@ -40,14 +41,18 @@ public sealed class BlueMagpieMultiVoiceNarrationProvider(
         Func<NarrationSynthesisProgress, CancellationToken, Task>? progressCallback,
         CancellationToken cancellationToken)
     {
-        string? workDirectory = null;
         string? ownedOutputPath = null;
         var completed = false;
+        var cacheHits = 0;
+        var cacheMisses = 0;
+        Guid? cacheJobId = null;
         try
         {
             ValidateRuntime();
             ArgumentNullException.ThrowIfNull(request);
             NarrationProviderContractValidator.Validate(this, ProviderName, request);
+            var cacheContext = ValidateCacheContext(request.CacheContext);
+            cacheJobId = cacheContext.JobId;
             var preparedTurns = PrepareTurns(request);
             var totalChunks = preparedTurns.Sum(turn => turn.Chunks.Count);
             if (totalChunks is < 1 or > MaximumChunksPerJob)
@@ -69,59 +74,63 @@ public sealed class BlueMagpieMultiVoiceNarrationProvider(
             ownedOutputPath = fullOutputPath;
             var outputDirectory = Path.GetDirectoryName(fullOutputPath)!;
             Directory.CreateDirectory(outputDirectory);
-            workDirectory = Path.Combine(outputDirectory, $"bluemagpie-tts-{Guid.NewGuid():N}");
-            Directory.CreateDirectory(workDirectory);
 
             var audioSegments = new List<FfmpegAudioSegment>(totalChunks);
             var completedChunks = 0;
-            long receivedAudioBytes = 0;
+            long resolvedAudioBytes = 0;
+            await using var cacheScope = await chunkCache.OpenScopeAsync(
+                cacheContext,
+                cancellationToken);
             for (var turnIndex = 0; turnIndex < preparedTurns.Count; turnIndex++)
             {
                 var turn = preparedTurns[turnIndex];
                 for (var chunkIndex = 0; chunkIndex < turn.Chunks.Count; chunkIndex++)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    var result = await client.SynthesizeAsync(
-                        turn.Chunks[chunkIndex],
-                        turn.Voice,
+                    var effectivePauseBeforeMs = chunkIndex == 0 ? turn.PauseBeforeMs : 0;
+                    var text = turn.Chunks[chunkIndex];
+                    var entry = await cacheScope.GetOrCreateAsync(
+                        new BlueMagpieChunkCacheRequest(
+                            completedChunks,
+                            text,
+                            turn.Voice,
+                            NeutralRate,
+                            NeutralPitch,
+                            turn.Volume,
+                            effectivePauseBeforeMs,
+                            ProviderVersion,
+                            BlueMagpieOptions.PinnedModelRevision),
+                        async synthesisCancellationToken =>
+                        {
+                            var result = await client.SynthesizeAsync(
+                                text,
+                                turn.Voice,
+                                synthesisCancellationToken);
+                            ValidateSynthesisResult(result, turn.Voice);
+                            return result.Content;
+                        },
                         cancellationToken);
-                    if (!string.Equals(
-                            result.ModelRevision,
-                            BlueMagpieOptions.PinnedModelRevision,
-                            StringComparison.Ordinal)
-                        || !string.Equals(result.ProviderVersion, ProviderVersion, StringComparison.Ordinal)
-                        || !string.Equals(result.Voice, turn.Voice, StringComparison.Ordinal)
-                        || !string.Equals(result.ContentType, "audio/wav", StringComparison.Ordinal)
-                        || result.Content.Length < 1)
+                    if (entry.CacheHit)
                     {
-                        throw PermanentFailure("BlueMagpie returned an invalid pinned WAV response.");
+                        cacheHits++;
+                    }
+                    else
+                    {
+                        cacheMisses++;
                     }
 
-                    receivedAudioBytes = checked(receivedAudioBytes + result.Content.LongLength);
-                    if (receivedAudioBytes > MaximumJobAudioBytes)
+                    resolvedAudioBytes = checked(resolvedAudioBytes + entry.AudioBytes);
+                    if (resolvedAudioBytes > MaximumJobAudioBytes)
                     {
                         throw PermanentFailure(
                             "BlueMagpie narration exceeds the aggregate audio budget.");
                     }
 
-                    var wavPath = Path.Combine(
-                        workDirectory,
-                        $"{turnIndex:00000}-{chunkIndex:00000}.wav");
-                    await using (var destination = new FileStream(
-                        wavPath,
-                        FileMode.CreateNew,
-                        FileAccess.Write,
-                        FileShare.None,
-                        bufferSize: 81_920,
-                        FileOptions.Asynchronous | FileOptions.SequentialScan))
-                    {
-                        await destination.WriteAsync(result.Content, cancellationToken);
-                    }
-
                     audioSegments.Add(new FfmpegAudioSegment(
-                        wavPath,
+                        entry.InputWavPath,
                         turn.Volume,
-                        chunkIndex == 0 ? turn.PauseBeforeMs : 0));
+                        effectivePauseBeforeMs,
+                        DeleteInputAfterNormalization: false));
                     completedChunks++;
                     if (progressCallback is not null)
                     {
@@ -152,6 +161,10 @@ public sealed class BlueMagpieMultiVoiceNarrationProvider(
         {
             throw;
         }
+        catch (BlueMagpieChunkCacheCapacityException exception)
+        {
+            throw new InvalidOperationException("bluemagpie_cache_capacity_exhausted", exception);
+        }
         catch (SeriesVoicePreviewUnavailableException exception)
             when (exception.FailureKind == SeriesVoicePreviewFailureKind.ContractViolation)
         {
@@ -177,7 +190,14 @@ public sealed class BlueMagpieMultiVoiceNarrationProvider(
                 TryDeleteFile(ownedOutputPath);
             }
 
-            TryDeleteDirectory(workDirectory);
+            if (cacheJobId is not null && cacheHits + cacheMisses > 0)
+            {
+                logger.LogInformation(
+                    "BlueMagpie cache activity for job {JobId}: {CacheHits} hits and {CacheMisses} misses",
+                    cacheJobId,
+                    cacheHits,
+                    cacheMisses);
+            }
         }
     }
 
@@ -300,23 +320,39 @@ public sealed class BlueMagpieMultiVoiceNarrationProvider(
         Exception? innerException = null) =>
         new("bluemagpie_provider_contract_invalid", message, innerException);
 
-    private void TryDeleteDirectory(string? path)
+    private static NarrationSynthesisCacheContext ValidateCacheContext(
+        NarrationSynthesisCacheContext? context)
     {
-        if (string.IsNullOrWhiteSpace(path))
+        if (context is null
+            || context.OwnerId == Guid.Empty
+            || context.JobId == Guid.Empty
+            || context.CastRevisionId == Guid.Empty
+            || string.IsNullOrWhiteSpace(context.SourceHash)
+            || string.IsNullOrWhiteSpace(context.CastFingerprint)
+            || string.IsNullOrWhiteSpace(context.SpeechPlanFingerprint)
+            || string.IsNullOrWhiteSpace(context.CompositionVersion)
+            || string.IsNullOrWhiteSpace(context.FfmpegProfile))
         {
-            return;
+            throw PermanentFailure("BlueMagpie formal narration requires an immutable cache context.");
         }
 
-        try
+        return context;
+    }
+
+    private static void ValidateSynthesisResult(
+        BlueMagpieSynthesisResult result,
+        string expectedVoice)
+    {
+        if (!string.Equals(
+                result.ModelRevision,
+                BlueMagpieOptions.PinnedModelRevision,
+                StringComparison.Ordinal)
+            || !string.Equals(result.ProviderVersion, PinnedProviderVersion, StringComparison.Ordinal)
+            || !string.Equals(result.Voice, expectedVoice, StringComparison.Ordinal)
+            || !string.Equals(result.ContentType, "audio/wav", StringComparison.Ordinal)
+            || result.Content.Length < 1)
         {
-            if (Directory.Exists(path))
-            {
-                Directory.Delete(path, recursive: true);
-            }
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            logger.LogWarning(exception, "Unable to remove a BlueMagpie synthesis working directory");
+            throw PermanentFailure("BlueMagpie returned an invalid pinned WAV response.");
         }
     }
 

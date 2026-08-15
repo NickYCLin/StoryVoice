@@ -27,7 +27,23 @@ public sealed class BlueMagpieOptions
 
     public int SynthesisWatchdogSeconds { get; set; } = 120;
 
+    public int ModelLifecycleWatchdogSeconds { get; set; } = 120;
+
     public int RequestTimeoutSeconds { get; set; } = 180;
 
     public int MaximumResponseBytes { get; set; } = 5 * 1024 * 1024;
+
+    /// <summary>
+    /// A cancelled HTTP request can leave an uncancellable CUDA worker holding the shared Redis
+    /// lease. A restarted Worker must wait beyond the gateway queue and the maximum possible
+    /// remaining lease before it claims the same durable job again.
+    /// </summary>
+    public TimeSpan RestartCooldown => TimeSpan.FromSeconds(checked(
+        QueueTimeoutSeconds
+        + Math.Max(
+            180,
+            Math.Max(
+                SynthesisWatchdogSeconds + 60,
+                ModelLifecycleWatchdogSeconds + 60))
+        + 30));
 }

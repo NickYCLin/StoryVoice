@@ -87,7 +87,10 @@ public sealed class FfmpegVoAiAudioComposer(
                     ],
                     cancellationToken);
                 normalizedPaths.Add(normalizedPath);
-                File.Delete(segment.InputWavPath);
+                if (segment.DeleteInputAfterNormalization)
+                {
+                    File.Delete(segment.InputWavPath);
+                }
             }
 
             var concatListPath = Path.Combine(workDirectory, "concat.txt");

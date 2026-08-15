@@ -55,6 +55,7 @@ services:
       BlueMagpie__ModelRevision: 6f7cab914a1e27c56b504ec663c0144dc25cc0a3
       BlueMagpie__QueueTimeoutSeconds: ${BLUEMAGPIE_QUEUE_TIMEOUT_SECONDS:-15}
       BlueMagpie__SynthesisWatchdogSeconds: ${BLUEMAGPIE_SYNTHESIS_WATCHDOG_SECONDS:-120}
+      BlueMagpie__ModelLifecycleWatchdogSeconds: ${BLUEMAGPIE_MODEL_LIFECYCLE_WATCHDOG_SECONDS:-120}
       BlueMagpie__RequestTimeoutSeconds: ${BLUEMAGPIE_REQUEST_TIMEOUT_SECONDS:-180}
     volumes:
       - book-storage:/data/books
@@ -100,15 +101,24 @@ services:
       BlueMagpie__ModelRevision: 6f7cab914a1e27c56b504ec663c0144dc25cc0a3
       BlueMagpie__QueueTimeoutSeconds: ${BLUEMAGPIE_QUEUE_TIMEOUT_SECONDS:-15}
       BlueMagpie__SynthesisWatchdogSeconds: ${BLUEMAGPIE_SYNTHESIS_WATCHDOG_SECONDS:-120}
+      BlueMagpie__ModelLifecycleWatchdogSeconds: ${BLUEMAGPIE_MODEL_LIFECYCLE_WATCHDOG_SECONDS:-120}
       BlueMagpie__RequestTimeoutSeconds: ${BLUEMAGPIE_REQUEST_TIMEOUT_SECONDS:-180}
+      BlueMagpieChunkCache__RootPath: /data/bluemagpie-cache
+      BlueMagpieChunkCache__MaximumBytes: ${BLUEMAGPIE_CHUNK_CACHE_MAXIMUM_BYTES:-34359738368}
+      BlueMagpieChunkCache__LowWatermarkBytes: ${BLUEMAGPIE_CHUNK_CACHE_LOW_WATERMARK_BYTES:-25769803776}
+      BlueMagpieChunkCache__MinimumFreeBytes: ${BLUEMAGPIE_CHUNK_CACHE_MINIMUM_FREE_BYTES:-68719476736}
+      BlueMagpieChunkCache__RetentionHours: ${BLUEMAGPIE_CHUNK_CACHE_RETENTION_HOURS:-168}
+      BlueMagpieChunkCache__CleanupIntervalMinutes: ${BLUEMAGPIE_CHUNK_CACHE_CLEANUP_INTERVAL_MINUTES:-30}
+      BlueMagpieChunkCache__TemporaryEntryRetentionMinutes: ${BLUEMAGPIE_CHUNK_CACHE_TEMP_RETENTION_MINUTES:-60}
       Narration__AudioRootPath: /data/audio
       Narration__Voice: zh-TW-YunJheNeural
       Narration__Rate: -5%
       Narration__ProviderTimeoutMinutes: ${NARRATION_PROVIDER_TIMEOUT_MINUTES:-180}
-      Narration__LeaseMinutes: ${NARRATION_LEASE_MINUTES:-185}
+      Narration__LeaseMinutes: ${NARRATION_LEASE_MINUTES:-5}
     volumes:
       - book-storage:/data/books
       - audio-storage:/data/audio
+      - bluemagpie-chunk-cache:/data/bluemagpie-cache
     depends_on:
       postgres:
         condition: service_healthy
@@ -119,6 +129,7 @@ services:
     networks:
       - default
       - bluemagpie-internal
+    stop_grace_period: 60s
     restart: unless-stopped
 
   bluemagpie-gateway:
@@ -183,6 +194,7 @@ volumes:
   character-voice-storage:
   character-avatar-storage:
   audio-storage:
+  bluemagpie-chunk-cache:
   data-protection-keys:
 
 networks:

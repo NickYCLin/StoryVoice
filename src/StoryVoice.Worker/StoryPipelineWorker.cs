@@ -1,3 +1,6 @@
+using System.Buffers.Binary;
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using StoryVoice.Application.Books;
@@ -14,6 +17,7 @@ public sealed class StoryPipelineWorker(
     INarrationProvider provider,
     NarrationProviderDispatcher multiVoiceDispatcher,
     IOptions<NarrationOptions> options,
+    IOptions<BlueMagpieOptions> blueMagpieOptions,
     ILogger<StoryPipelineWorker> logger) : BackgroundService
 {
     private readonly string _workerId = $"{Environment.ProcessId}:{Guid.NewGuid():N}";
@@ -271,9 +275,18 @@ public sealed class StoryPipelineWorker(
                         chapterPlans,
                         voiceProfiles,
                         characterProfileIdsByCharacterId);
+                    var cacheContext = new NarrationSynthesisCacheContext(
+                        job.OwnerId,
+                        job.Id,
+                        job.SourceHash,
+                        castRevision.Id,
+                        castRevision.Fingerprint,
+                        ComputeSpeechPlanFingerprint(chapterPlans),
+                        castRevision.CompositionVersion,
+                        castRevision.FfmpegProfile);
                     await multiVoiceDispatcher.SynthesizeAsync(
                         castRevision.NarratorProvider,
-                        CreateMultiVoiceNarrationRequest(castRevision, turns),
+                        CreateMultiVoiceNarrationRequest(castRevision, turns, cacheContext),
                         temporaryPath,
                         reportProgress,
                         providerCancellation.Token);
@@ -375,6 +388,16 @@ public sealed class StoryPipelineWorker(
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
+            if (CanResumeAfterWorkerStop(synthesisProviderName))
+            {
+                await RecordFailureAsync(
+                    claim,
+                    "worker_stopped",
+                    CancellationToken.None,
+                    retryDelay: blueMagpieOptions.Value.RestartCooldown);
+                return;
+            }
+
             throw;
         }
         catch (OperationCanceledException)
@@ -532,7 +555,8 @@ public sealed class StoryPipelineWorker(
 
     internal static MultiVoiceNarrationRequest CreateMultiVoiceNarrationRequest(
         NarrationCastRevision castRevision,
-        IReadOnlyList<NarrationTurn> turns)
+        IReadOnlyList<NarrationTurn> turns,
+        NarrationSynthesisCacheContext? cacheContext = null)
     {
         ArgumentNullException.ThrowIfNull(castRevision);
         ArgumentNullException.ThrowIfNull(turns);
@@ -545,7 +569,65 @@ public sealed class StoryPipelineWorker(
                 .Select(assignment => new NarrationProviderContract(
                     assignment.VoiceProvider,
                     assignment.ProviderVersion))
-                .ToArray());
+                .ToArray(),
+            cacheContext);
+    }
+
+    internal static bool CanResumeAfterWorkerStop(string? providerName) =>
+        string.Equals(
+            providerName,
+            CharacterVoiceProviders.BlueMagpie,
+            StringComparison.OrdinalIgnoreCase);
+
+    internal static DateTimeOffset? CalculateNextAttemptAt(
+        DateTimeOffset now,
+        int attempts,
+        bool finalFailure,
+        TimeSpan? retryDelay = null)
+    {
+        if (attempts < 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(attempts));
+        }
+
+        return finalFailure
+            ? null
+            : now.Add(retryDelay
+                ?? TimeSpan.FromSeconds(Math.Min(30, Math.Pow(2, attempts))));
+    }
+
+    internal static string ComputeSpeechPlanFingerprint(
+        IReadOnlyList<ChapterPlanSource> chapterPlans)
+    {
+        ArgumentNullException.ThrowIfNull(chapterPlans);
+        if (chapterPlans.Count == 0)
+        {
+            throw new ArgumentException(
+                "At least one confirmed speech plan is required.",
+                nameof(chapterPlans));
+        }
+
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        AppendFingerprintField(hash, "StoryVoice.NarrationSpeechPlanSet.v1");
+        foreach (var chapterPlan in chapterPlans.OrderBy(plan => plan.ChapterSortOrder))
+        {
+            AppendFingerprintField(
+                hash,
+                chapterPlan.ChapterSortOrder.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            AppendFingerprintField(hash, chapterPlan.Revision.Id.ToString("N"));
+            AppendFingerprintField(hash, chapterPlan.Revision.Fingerprint);
+        }
+
+        return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
+    }
+
+    private static void AppendFingerprintField(IncrementalHash hash, string value)
+    {
+        var bytes = Encoding.UTF8.GetBytes(value ?? string.Empty);
+        Span<byte> length = stackalloc byte[sizeof(int)];
+        BinaryPrimitives.WriteInt32BigEndian(length, bytes.Length);
+        hash.AppendData(length);
+        hash.AppendData(bytes);
     }
 
     internal static IQueryable<NarrationJob> SupportedJobs(IQueryable<NarrationJob> jobs) =>
@@ -592,48 +674,65 @@ public sealed class StoryPipelineWorker(
         CancellationTokenSource providerCancellation,
         CancellationToken stoppingToken)
     {
-        var renewEvery = TimeSpan.FromMinutes(Math.Max(1, options.Value.LeaseMinutes / 3d));
-        var nextRenewalAt = DateTimeOffset.UtcNow.Add(renewEvery);
-        while (!providerCancellation.IsCancellationRequested && !stoppingToken.IsCancellationRequested)
+        try
         {
-            await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
-            await using var scope = scopeFactory.CreateAsyncScope();
-            var db = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
-            var state = await SupportedJobs(db.NarrationJobs)
-                .AsNoTracking()
-                .Where(job => job.Id == claim.JobId)
-                .Select(job => new { job.Status, job.CancellationRequested, job.LeaseOwner })
-                .SingleOrDefaultAsync(stoppingToken);
-            if (state is null
-                || state.Status != NarrationJobStatus.Running
-                || state.CancellationRequested
-                || !string.Equals(state.LeaseOwner, claim.LeaseOwner, StringComparison.Ordinal))
+            var renewEvery = TimeSpan.FromMinutes(Math.Max(1, options.Value.LeaseMinutes / 3d));
+            var nextRenewalAt = DateTimeOffset.UtcNow.Add(renewEvery);
+            while (!providerCancellation.IsCancellationRequested && !stoppingToken.IsCancellationRequested)
             {
-                providerCancellation.Cancel();
-                return;
-            }
-
-            var now = DateTimeOffset.UtcNow;
-            if (now >= nextRenewalAt)
-            {
-                var renewed = await SupportedJobs(db.NarrationJobs)
-                    .Where(job => job.Id == claim.JobId
-                        && job.Status == NarrationJobStatus.Running
-                        && job.LeaseOwner == claim.LeaseOwner
-                        && !job.CancellationRequested)
-                    .ExecuteUpdateAsync(setters => setters
-                        .SetProperty(job => job.LeaseExpiresAt, now.AddMinutes(options.Value.LeaseMinutes))
-                        .SetProperty(job => job.UpdatedAt, now)
-                        .SetProperty(job => job.ConcurrencyStamp, Guid.NewGuid()),
-                        stoppingToken);
-                if (renewed != 1)
+                await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
+                await using var scope = scopeFactory.CreateAsyncScope();
+                var db = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+                var state = await SupportedJobs(db.NarrationJobs)
+                    .AsNoTracking()
+                    .Where(job => job.Id == claim.JobId)
+                    .Select(job => new { job.Status, job.CancellationRequested, job.LeaseOwner })
+                    .SingleOrDefaultAsync(stoppingToken);
+                if (state is null
+                    || state.Status != NarrationJobStatus.Running
+                    || state.CancellationRequested
+                    || !string.Equals(state.LeaseOwner, claim.LeaseOwner, StringComparison.Ordinal))
                 {
                     providerCancellation.Cancel();
                     return;
                 }
 
-                nextRenewalAt = now.Add(renewEvery);
+                var now = DateTimeOffset.UtcNow;
+                if (now >= nextRenewalAt)
+                {
+                    var renewed = await SupportedJobs(db.NarrationJobs)
+                        .Where(job => job.Id == claim.JobId
+                            && job.Status == NarrationJobStatus.Running
+                            && job.LeaseOwner == claim.LeaseOwner
+                            && !job.CancellationRequested)
+                        .ExecuteUpdateAsync(setters => setters
+                            .SetProperty(job => job.LeaseExpiresAt, now.AddMinutes(options.Value.LeaseMinutes))
+                            .SetProperty(job => job.UpdatedAt, now)
+                            .SetProperty(job => job.ConcurrencyStamp, Guid.NewGuid()),
+                            stoppingToken);
+                    if (renewed != 1)
+                    {
+                        providerCancellation.Cancel();
+                        return;
+                    }
+
+                    nextRenewalAt = now.Add(renewEvery);
+                }
             }
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            // A short renewable lease permits prompt crash recovery. If its monitor cannot
+            // confirm ownership, fail closed and cancel synthesis before another Worker can
+            // reclaim the job after lease expiry.
+            logger.LogWarning(
+                exception,
+                "Narration lease monitor failed for job {JobId}; cancelling provider execution",
+                claim.JobId);
+            providerCancellation.Cancel();
         }
     }
 
@@ -668,7 +767,8 @@ public sealed class StoryPipelineWorker(
         ClaimedJob claim,
         string errorCode,
         CancellationToken cancellationToken,
-        bool permanent = false)
+        bool permanent = false,
+        TimeSpan? retryDelay = null)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
@@ -693,9 +793,11 @@ public sealed class StoryPipelineWorker(
         }
 
         var finalFailure = permanent || state.Attempts >= options.Value.MaxAttempts;
-        var nextAttemptAt = finalFailure
-            ? (DateTimeOffset?)null
-            : now.AddSeconds(Math.Min(30, Math.Pow(2, state.Attempts)));
+        var nextAttemptAt = CalculateNextAttemptAt(
+            now,
+            state.Attempts,
+            finalFailure,
+            retryDelay);
         var failureUpdated = await SupportedJobs(db.NarrationJobs)
             .Where(job => job.Id == claim.JobId
                 && job.Status == NarrationJobStatus.Running

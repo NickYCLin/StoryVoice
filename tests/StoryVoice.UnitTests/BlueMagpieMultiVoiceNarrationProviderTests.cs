@@ -1,4 +1,5 @@
 using System.Text;
+using System.Buffers.Binary;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using StoryVoice.Application.Series;
@@ -264,6 +265,7 @@ public sealed class BlueMagpieMultiVoiceNarrationProviderTests
         var client = new RecordingClient();
         var provider = new BlueMagpieMultiVoiceNarrationProvider(
             client,
+            new EphemeralChunkCache(),
             new RecordingComposer(),
             Options.Create(new BlueMagpieOptions
             {
@@ -368,11 +370,129 @@ public sealed class BlueMagpieMultiVoiceNarrationProviderTests
         }
     }
 
+    [Fact]
+    public async Task Retry_after_third_chunk_failure_uses_two_durable_hits_and_only_requests_the_missing_chunk()
+    {
+        var root = CreateRoot();
+        var cacheRoot = Path.Combine(root, "cache");
+        var request = CreateRequest(
+        [
+            NeutralTurn() with { Text = "第一段" },
+            NeutralTurn() with { Text = "第二段" },
+            NeutralTurn() with { Text = "第三段" },
+        ]);
+        try
+        {
+            var firstClient = new FailOnCallClient(3);
+            var firstProvider = CreateProvider(
+                firstClient,
+                new RecordingComposer(),
+                CreatePersistentCache(cacheRoot));
+            var firstException = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                firstProvider.SynthesizeAsync(
+                    request,
+                    Path.Combine(root, "first.mp3"),
+                    null,
+                    TestContext.Current.CancellationToken));
+            Assert.Equal("bluemagpie_provider_unavailable", firstException.Message);
+            Assert.Equal(3, firstClient.Requests.Count);
+
+            var resumedClient = new RecordingClient();
+            var resumedComposer = new RecordingComposer();
+            var resumedProvider = CreateProvider(
+                resumedClient,
+                resumedComposer,
+                CreatePersistentCache(cacheRoot));
+            await resumedProvider.SynthesizeAsync(
+                request,
+                Path.Combine(root, "resumed.mp3"),
+                null,
+                TestContext.Current.CancellationToken);
+
+            var onlyRequest = Assert.Single(resumedClient.Requests);
+            Assert.Equal("第三段", onlyRequest.Text);
+            Assert.Equal(3, resumedComposer.Segments.Count);
+            Assert.All(resumedComposer.Segments, segment => Assert.True(File.Exists(segment.InputWavPath)));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Composer_failure_preserves_all_chunks_and_retry_makes_zero_HTTP_requests()
+    {
+        var root = CreateRoot();
+        var cacheRoot = Path.Combine(root, "cache");
+        var request = CreateRequest(
+        [
+            NeutralTurn() with { Text = "第一段" },
+            NeutralTurn() with { Text = "第二段" },
+        ]);
+        try
+        {
+            var firstClient = new RecordingClient();
+            var firstProvider = CreateProvider(
+                firstClient,
+                new ThrowingComposer(),
+                CreatePersistentCache(cacheRoot));
+            var firstException = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                firstProvider.SynthesizeAsync(
+                    request,
+                    Path.Combine(root, "failed-compose.mp3"),
+                    null,
+                    TestContext.Current.CancellationToken));
+            Assert.Equal("bluemagpie_provider_failed", firstException.Message);
+            Assert.Equal(2, firstClient.Requests.Count);
+
+            var resumedClient = new RecordingClient();
+            var resumedComposer = new RecordingComposer();
+            var resumedProvider = CreateProvider(
+                resumedClient,
+                resumedComposer,
+                CreatePersistentCache(cacheRoot));
+            await resumedProvider.SynthesizeAsync(
+                request,
+                Path.Combine(root, "complete.mp3"),
+                null,
+                TestContext.Current.CancellationToken);
+
+            Assert.Empty(resumedClient.Requests);
+            Assert.Equal(2, resumedComposer.Segments.Count);
+            Assert.All(resumedComposer.Segments, segment => Assert.True(File.Exists(segment.InputWavPath)));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Missing_cache_context_fails_closed_before_HTTP()
+    {
+        var client = new RecordingClient();
+        var provider = CreateProvider(client, new RecordingComposer());
+        var request = CreateRequest([NeutralTurn()]) with { CacheContext = null };
+
+        var exception = await Assert.ThrowsAsync<PermanentNarrationProviderException>(() =>
+            provider.SynthesizeAsync(
+                request,
+                "unused.mp3",
+                null,
+                TestContext.Current.CancellationToken));
+
+        Assert.Equal("bluemagpie_provider_contract_invalid", exception.ErrorCode);
+        Assert.Empty(client.Requests);
+    }
+
     private static BlueMagpieMultiVoiceNarrationProvider CreateProvider(
         IBlueMagpieTtsClient client,
-        IFfmpegAudioComposer composer) =>
+        IFfmpegAudioComposer composer,
+        IBlueMagpieChunkCache? cache = null) =>
         new(
             client,
+            cache ?? new EphemeralChunkCache(),
             composer,
             Options.Create(new BlueMagpieOptions
             {
@@ -382,6 +502,22 @@ public sealed class BlueMagpieMultiVoiceNarrationProviderTests
                 ModelRevision = BlueMagpieOptions.PinnedModelRevision,
             }),
             NullLogger<BlueMagpieMultiVoiceNarrationProvider>.Instance);
+
+    private static BlueMagpieChunkCache CreatePersistentCache(string root) =>
+        new(
+            Options.Create(new BlueMagpieChunkCacheOptions
+            {
+                RootPath = root,
+                MaximumBytes = 64 * 1024,
+                LowWatermarkBytes = 32 * 1024,
+                MinimumFreeBytes = 0,
+                RetentionHours = 168,
+                CleanupIntervalMinutes = 30,
+                TemporaryEntryRetentionMinutes = 60,
+                LockRetryMilliseconds = 25,
+            }),
+            Options.Create(new BlueMagpieOptions { MaximumResponseBytes = 1024 }),
+            NullLogger<BlueMagpieChunkCache>.Instance);
 
     private static MultiVoiceNarrationRequest CreateRequest(
         IReadOnlyList<NarrationTurn> turns,
@@ -396,7 +532,19 @@ public sealed class BlueMagpieMultiVoiceNarrationProviderTests
                 new NarrationProviderContract(
                     BlueMagpieOptions.ProviderName,
                     BlueMagpieMultiVoiceNarrationProvider.PinnedProviderVersion),
-            ]);
+            ],
+            CreateCacheContext());
+
+    private static NarrationSynthesisCacheContext CreateCacheContext() =>
+        new(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            new string('a', 64),
+            Guid.NewGuid(),
+            new string('b', 64),
+            new string('c', 64),
+            "bluemagpie-pcm16-concat-v1",
+            "wav-48khz-mono-to-mp3-concat-v1");
 
     private static NarrationTurn NeutralTurn() =>
         new(
@@ -433,7 +581,7 @@ public sealed class BlueMagpieMultiVoiceNarrationProviderTests
             }
 
             return Task.FromResult(new BlueMagpieSynthesisResult(
-                Encoding.ASCII.GetBytes("RIFF-mock"),
+                CreateWavBytes(),
                 "audio/wav",
                 ReturnedRevision,
                 ReturnedProviderVersion,
@@ -456,6 +604,31 @@ public sealed class BlueMagpieMultiVoiceNarrationProviderTests
         }
     }
 
+    private sealed class FailOnCallClient(int failingCall) : IBlueMagpieTtsClient
+    {
+        public List<(string Text, string Voice)> Requests { get; } = [];
+
+        public Task<BlueMagpieSynthesisResult> SynthesizeAsync(
+            string text,
+            string voice,
+            CancellationToken cancellationToken)
+        {
+            Requests.Add((text, voice));
+            if (Requests.Count == failingCall)
+            {
+                return Task.FromException<BlueMagpieSynthesisResult>(
+                    new SeriesVoicePreviewUnavailableException());
+            }
+
+            return Task.FromResult(new BlueMagpieSynthesisResult(
+                CreateWavBytes((short)Requests.Count),
+                "audio/wav",
+                BlueMagpieOptions.PinnedModelRevision,
+                BlueMagpieOptions.PinnedProviderVersion,
+                voice));
+        }
+    }
+
     private sealed class RecordingComposer : IFfmpegAudioComposer
     {
         public IReadOnlyList<FfmpegAudioSegment> Segments { get; private set; } = [];
@@ -470,10 +643,73 @@ public sealed class BlueMagpieMultiVoiceNarrationProviderTests
             Segments = segments.ToArray();
             OutputSampleRate = outputSampleRate;
             Assert.All(Segments, segment => Assert.True(File.Exists(segment.InputWavPath)));
+            Assert.All(Segments, segment => Assert.False(segment.DeleteInputAfterNormalization));
             await File.WriteAllBytesAsync(
                 outputPath,
                 Encoding.ASCII.GetBytes("ID3-mock"),
                 cancellationToken);
         }
+    }
+
+    private sealed class ThrowingComposer : IFfmpegAudioComposer
+    {
+        public Task ComposeAsync(
+            IReadOnlyList<FfmpegAudioSegment> segments,
+            string outputPath,
+            int outputSampleRate,
+            CancellationToken cancellationToken) =>
+            Task.FromException(new InvalidOperationException("synthetic composer failure"));
+    }
+
+    private sealed class EphemeralChunkCache : IBlueMagpieChunkCache
+    {
+        public Task<IBlueMagpieChunkCacheScope> OpenScopeAsync(
+            NarrationSynthesisCacheContext context,
+            CancellationToken cancellationToken) =>
+            Task.FromResult<IBlueMagpieChunkCacheScope>(new EphemeralScope());
+
+        public Task CleanupAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        private sealed class EphemeralScope : IBlueMagpieChunkCacheScope
+        {
+            private readonly string _root = CreateRoot();
+
+            public async Task<BlueMagpieChunkCacheEntry> GetOrCreateAsync(
+                BlueMagpieChunkCacheRequest request,
+                Func<CancellationToken, Task<byte[]>> createAudio,
+                CancellationToken cancellationToken)
+            {
+                var audio = await createAudio(cancellationToken);
+                var path = Path.Combine(_root, $"{request.Ordinal:00000}.wav");
+                await File.WriteAllBytesAsync(path, audio, cancellationToken);
+                return new BlueMagpieChunkCacheEntry(path, audio.LongLength, CacheHit: false);
+            }
+
+            public ValueTask DisposeAsync()
+            {
+                Directory.Delete(_root, recursive: true);
+                return ValueTask.CompletedTask;
+            }
+        }
+    }
+
+    private static byte[] CreateWavBytes(short sample = 0)
+    {
+        var bytes = new byte[46];
+        Encoding.ASCII.GetBytes("RIFF").CopyTo(bytes, 0);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(4, 4), 38);
+        Encoding.ASCII.GetBytes("WAVE").CopyTo(bytes, 8);
+        Encoding.ASCII.GetBytes("fmt ").CopyTo(bytes, 12);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(16, 4), 16);
+        BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(20, 2), 1);
+        BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(22, 2), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(24, 4), 48_000);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(28, 4), 96_000);
+        BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(32, 2), 2);
+        BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(34, 2), 16);
+        Encoding.ASCII.GetBytes("data").CopyTo(bytes, 36);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(40, 4), 2);
+        BinaryPrimitives.WriteInt16LittleEndian(bytes.AsSpan(44, 2), sample);
+        return bytes;
     }
 }

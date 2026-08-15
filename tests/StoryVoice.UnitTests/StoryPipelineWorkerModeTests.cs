@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using StoryVoice.Domain.Narrations;
+using StoryVoice.Infrastructure.Narrations;
 using StoryVoice.Worker;
 
 namespace StoryVoice.UnitTests;
@@ -87,8 +88,20 @@ public sealed class StoryPipelineWorkerModeTests
         [
             new("你好", "female_voice", "+0%", "+0Hz", "+0%", 0),
         ];
+        var cacheContext = new NarrationSynthesisCacheContext(
+            ownerId,
+            Guid.NewGuid(),
+            "source-hash",
+            revisionId,
+            revision.Fingerprint,
+            new string('a', 64),
+            revision.CompositionVersion,
+            revision.FfmpegProfile);
 
-        var request = StoryPipelineWorker.CreateMultiVoiceNarrationRequest(revision, turns);
+        var request = StoryPipelineWorker.CreateMultiVoiceNarrationRequest(
+            revision,
+            turns,
+            cacheContext);
 
         Assert.Same(turns, request.Turns);
         Assert.Equal(
@@ -101,6 +114,49 @@ public sealed class StoryPipelineWorkerModeTests
                 "bluemagpie",
                 BlueMagpieMultiVoiceNarrationProvider.PinnedProviderVersion),
             Assert.Single(request.CharacterProviders!));
+        Assert.Same(cacheContext, request.CacheContext);
+    }
+
+    [Theory]
+    [InlineData("bluemagpie", true)]
+    [InlineData("BLUEMAGPIE", true)]
+    [InlineData("edge", false)]
+    [InlineData("voai", false)]
+    [InlineData(null, false)]
+    public void Only_the_durable_local_provider_is_requeued_during_graceful_worker_stop(
+        string? providerName,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            StoryPipelineWorker.CanResumeAfterWorkerStop(providerName));
+    }
+
+    [Fact]
+    public void Graceful_BlueMagpie_restart_waits_beyond_queue_and_the_longest_GPU_lease()
+    {
+        var blueOptions = new BlueMagpieOptions
+        {
+            QueueTimeoutSeconds = 15,
+            SynthesisWatchdogSeconds = 120,
+            ModelLifecycleWatchdogSeconds = 300,
+        };
+        var expectedCooldown = TimeSpan.FromSeconds(405);
+        var now = DateTimeOffset.Parse("2026-08-15T12:00:00+00:00");
+
+        Assert.Equal(expectedCooldown, blueOptions.RestartCooldown);
+        Assert.Equal(
+            now.Add(expectedCooldown),
+            StoryPipelineWorker.CalculateNextAttemptAt(
+                now,
+                attempts: 1,
+                finalFailure: false,
+                blueOptions.RestartCooldown));
+        Assert.Null(StoryPipelineWorker.CalculateNextAttemptAt(
+            now,
+            attempts: 3,
+            finalFailure: true,
+            blueOptions.RestartCooldown));
     }
 
     private static NarrationJob CreateJob() =>

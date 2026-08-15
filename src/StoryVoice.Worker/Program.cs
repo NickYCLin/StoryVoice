@@ -10,6 +10,26 @@ builder.Services.AddSerilog((services, loggerConfiguration) => loggerConfigurati
     .Enrich.FromLogContext()
     .WriteTo.Console());
 builder.Services.AddStoryVoiceInfrastructure(builder.Configuration);
+builder.Services.AddOptions<BlueMagpieChunkCacheOptions>()
+    .Bind(builder.Configuration.GetSection(BlueMagpieChunkCacheOptions.SectionName))
+    .Validate(options => !string.IsNullOrWhiteSpace(options.RootPath),
+        "BlueMagpie chunk cache root is required.")
+    .Validate(options => options.MaximumBytes is >= 67_108_864 and <= 8_796_093_022_208,
+        "BlueMagpie chunk cache maximum must be between 64 MiB and 8 TiB.")
+    .Validate(options => options.LowWatermarkBytes >= 0
+            && options.LowWatermarkBytes < options.MaximumBytes,
+        "BlueMagpie chunk cache low watermark must be below its hard maximum.")
+    .Validate(options => options.MinimumFreeBytes is >= 0 and <= 8_796_093_022_208,
+        "BlueMagpie chunk cache free-space floor must be between 0 and 8 TiB.")
+    .Validate(options => options.RetentionHours is >= 1 and <= 8_760,
+        "BlueMagpie chunk cache retention must be between 1 hour and 1 year.")
+    .Validate(options => options.CleanupIntervalMinutes is >= 1 and <= 1_440,
+        "BlueMagpie chunk cache cleanup interval must be between 1 minute and 1 day.")
+    .Validate(options => options.TemporaryEntryRetentionMinutes is >= 1 and <= 1_440,
+        "BlueMagpie temporary cache retention must be between 1 minute and 1 day.")
+    .Validate(options => options.LockRetryMilliseconds is >= 25 and <= 2_000,
+        "BlueMagpie cache lock retry must be between 25 and 2000 milliseconds.")
+    .ValidateOnStart();
 builder.Services.AddOptions<VoAiOptions>()
     .Bind(builder.Configuration.GetSection(VoAiOptions.SectionName))
     .Validate(options => Uri.TryCreate(options.BaseUrl, UriKind.Absolute, out var baseUri)
@@ -37,6 +57,7 @@ builder.Services.AddHttpClient(VoAiTtsClient.HttpClientName, client =>
     .RedactLoggedHeaders(headerName =>
         string.Equals(headerName, "x-api-key", StringComparison.OrdinalIgnoreCase));
 builder.Services.AddSingleton<IVoAiTtsClient, VoAiTtsClient>();
+builder.Services.AddSingleton<IBlueMagpieChunkCache, BlueMagpieChunkCache>();
 builder.Services.AddSingleton<INarrationProvider, EdgeTtsNarrationProvider>();
 builder.Services.AddSingleton<IMultiVoiceNarrationProvider, EdgeTtsMultiVoiceNarrationProvider>();
 builder.Services.AddSingleton<IMultiVoiceNarrationProvider, ThreeWaVoxCpm2NarrationProvider>();
@@ -49,6 +70,7 @@ builder.Services.AddSingleton<IMultiVoiceNarrationProvider, VoAiMultiVoiceNarrat
 builder.Services.AddSingleton<IMultiVoiceNarrationProvider, BlueMagpieMultiVoiceNarrationProvider>();
 builder.Services.AddSingleton<INarrationProviderRegistry, NarrationProviderRegistry>();
 builder.Services.AddSingleton<NarrationProviderDispatcher>();
+builder.Services.AddHostedService<BlueMagpieChunkCacheCleanupService>();
 builder.Services.AddHostedService<StoryPipelineWorker>();
 
 var host = builder.Build();

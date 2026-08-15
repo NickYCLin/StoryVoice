@@ -62,11 +62,13 @@ preview. Formal series narration is a separate opt-in:
 multi-character jobs through the local Worker.
 
 The formal path is currently limited to short, private **staged canaries**. Keep it
-disabled for complete books and do not activate canary audio. Before full-book use,
-BlueMagpie still needs a durable deterministic chunk cache/resume mechanism and a
-long-form benchmark with restart/retry coverage. Its model weights are marked with
-license `other`, so this path is private/internal only; do not assume redistribution
-or commercial-use rights.
+disabled for complete books and do not activate canary audio. The Worker persists
+validated, deterministic WAV chunks in a separate private volume so a retry or
+controlled restart only synthesizes missing chunks. The cache is regenerable, capped
+at 32 GiB by default, retained for seven days, and deliberately excluded from published
+audio backups. Full-book use still requires a successful restart/resume canary and a
+long-form benchmark. The model weights are marked with license `other`, so this path is
+private/internal only; do not assume redistribution or commercial-use rights.
 
 Preload the pinned model cache, create a random secret of at least 32 characters,
 then set these values outside Git:

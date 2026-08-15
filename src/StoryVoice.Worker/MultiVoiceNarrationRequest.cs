@@ -21,7 +21,23 @@ public sealed record NarrationTurn(
 /// </summary>
 public sealed record NarrationProviderContract(string ProviderName, string ProviderVersion);
 
+/// <summary>
+/// Immutable, non-secret identity for resumable synthesis artifacts. Providers that persist
+/// intermediate audio must include every field in their cache scope instead of inferring identity
+/// from the attempt-specific output path.
+/// </summary>
+public sealed record NarrationSynthesisCacheContext(
+    Guid OwnerId,
+    Guid JobId,
+    string SourceHash,
+    Guid CastRevisionId,
+    string CastFingerprint,
+    string SpeechPlanFingerprint,
+    string CompositionVersion,
+    string FfmpegProfile);
+
 public sealed record MultiVoiceNarrationRequest(
     IReadOnlyList<NarrationTurn> Turns,
     NarrationProviderContract? NarratorProvider = null,
-    IReadOnlyList<NarrationProviderContract>? CharacterProviders = null);
+    IReadOnlyList<NarrationProviderContract>? CharacterProviders = null,
+    NarrationSynthesisCacheContext? CacheContext = null);

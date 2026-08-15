@@ -8,6 +8,6 @@ public sealed class NarrationOptions
     public string Voice { get; set; } = "zh-TW-YunJheNeural";
     public string Rate { get; set; } = "-5%";
     public int ProviderTimeoutMinutes { get; set; } = 20;
-    public int LeaseMinutes { get; set; } = 25;
+    public int LeaseMinutes { get; set; } = 5;
     public int MaxAttempts { get; set; } = 3;
 }

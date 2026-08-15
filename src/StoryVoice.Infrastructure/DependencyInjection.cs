@@ -50,7 +50,8 @@ public static class DependencyInjection
             .Validate(options => !string.IsNullOrWhiteSpace(options.Voice), "Narration voice is required.")
             .Validate(options => options.MaxAttempts is >= 1 and <= 10, "Narration attempts must be between 1 and 10.")
             .Validate(options => options.ProviderTimeoutMinutes >= 1, "Narration provider timeout must be positive.")
-            .Validate(options => options.LeaseMinutes > options.ProviderTimeoutMinutes, "Narration lease must exceed provider timeout.")
+            .Validate(options => options.LeaseMinutes is >= 2 and <= 60,
+                "Narration lease must be between 2 and 60 minutes; the Worker renews it while synthesis is active.")
             .ValidateOnStart();
         services.AddOptions<NarrationAdmissionOptions>()
             .Bind(configuration.GetSection(NarrationAdmissionOptions.SectionName))
@@ -99,6 +100,8 @@ public static class DependencyInjection
                 "BlueMagpie queue timeout 必須介於 1 至 60 秒。")
             .Validate(options => options.SynthesisWatchdogSeconds is >= 30 and <= 3_600,
                 "BlueMagpie synthesis watchdog 必須介於 30 至 3600 秒。")
+            .Validate(options => options.ModelLifecycleWatchdogSeconds is >= 30 and <= 3_600,
+                "BlueMagpie model lifecycle watchdog 必須介於 30 至 3600 秒。")
             .Validate(options => options.RequestTimeoutSeconds
                     >= options.ConnectTimeoutSeconds
                         + options.QueueTimeoutSeconds
