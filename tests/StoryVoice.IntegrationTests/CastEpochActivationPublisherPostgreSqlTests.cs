@@ -1771,7 +1771,7 @@ public sealed class CastEpochActivationPublisherPostgreSqlTests
             batch.Id,
             readyBatch.Members,
             previousJobs.Select(job => job.Id).ToArray(),
-            TruncateToPostgreSqlPrecision(DateTimeOffset.UtcNow.AddMinutes(10)));
+            TruncateToPostgreSqlPrecision(DateTimeOffset.UtcNow));
     }
 
     private static async Task<ReadyBatch> AddReadyBatchAsync(

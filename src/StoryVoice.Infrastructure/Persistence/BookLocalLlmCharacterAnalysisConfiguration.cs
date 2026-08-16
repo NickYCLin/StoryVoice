@@ -18,6 +18,10 @@ internal sealed class BookLocalLlmCharacterAnalysisConfiguration
         builder.Property(analysis => analysis.CandidatesJson).HasColumnType("jsonb").IsRequired();
         builder.Property(analysis => analysis.GeneratedAt).IsRequired();
         builder.HasIndex(analysis => new { analysis.OwnerId, analysis.ContentBookId });
+        // books.OwnerId is intentionally nullable for retained legacy imports, so EF cannot model
+        // it as an alternate key without silently making those rows required. The following simple
+        // relationships remain for EF; migration 20260816154216 additionally installs database-level
+        // composite owner FKs for this owner-scoped review-only data.
         builder.HasOne<StoryVoice.Domain.Books.Book>()
             .WithOne()
             .HasForeignKey<BookLocalLlmCharacterAnalysis>(analysis => analysis.BookId)
