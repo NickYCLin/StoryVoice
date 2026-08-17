@@ -1,5 +1,6 @@
 using StoryVoice.Application.Narrations.SpeechPlanning;
 using StoryVoice.Domain.Narrations;
+using StoryVoice.Infrastructure.Narrations;
 using StoryVoice.Worker;
 
 namespace StoryVoice.UnitTests;
@@ -296,6 +297,45 @@ public sealed class MultiCharacterTurnBuilderTests
     }
 
     [Fact]
+    public void An_edge_assignment_ignores_a_linked_legacy_design_profile()
+    {
+        var castRevision = BuildCastRevision(
+            narratorVoice: "narrator-voice",
+            aliceVoice: "alice-edge-voice",
+            aliceProvider: "edge");
+        var chapter = BuildConfirmedChapter(0, "序章", "「你回來了？」艾莉絲說。", AliceId);
+        var characterProfileIdsByCharacterId = new Dictionary<Guid, Guid> { [AliceId] = AliceCharacterProfileId };
+
+        var turns = MultiCharacterTurnBuilder.BuildTurns(
+            castRevision,
+            [chapter],
+            [BuildDesignedProfile()],
+            characterProfileIdsByCharacterId);
+
+        Assert.Contains(turns, turn => turn.Voice == "alice-edge-voice");
+    }
+
+    [Fact]
+    public void A_three_wa_assignment_with_a_linked_design_profile_fails_closed()
+    {
+        var castRevision = BuildCastRevision(
+            narratorVoice: "narrator-voice",
+            aliceVoice: "custom",
+            aliceProvider: CharacterVoiceProviders.ThreeWaVoxCpm2);
+        var chapter = BuildConfirmedChapter(0, "序章", "「你回來了？」艾莉絲說。", AliceId);
+        var characterProfileIdsByCharacterId = new Dictionary<Guid, Guid> { [AliceId] = AliceCharacterProfileId };
+
+        var exception = Assert.Throws<PermanentNarrationProviderException>(
+            () => MultiCharacterTurnBuilder.BuildTurns(
+                castRevision,
+                [chapter],
+                [BuildDesignedProfile()],
+                characterProfileIdsByCharacterId));
+
+        Assert.Equal(ThreeWaSynthesisCapabilities.DesignVoiceUnavailableCode, exception.ErrorCode);
+    }
+
+    [Fact]
     public void Inner_monologue_for_a_custom_provider_uses_base_even_when_text_looks_angry()
     {
         var castRevision = BuildCastRevision(
@@ -339,7 +379,7 @@ public sealed class MultiCharacterTurnBuilderTests
             taskId: "angry-task");
         var characterProfileIdsByCharacterId = new Dictionary<Guid, Guid> { [AliceId] = AliceCharacterProfileId };
 
-        var exception = Assert.Throws<SpeechPlanIntegrityException>(
+        var exception = Assert.Throws<PermanentNarrationProviderException>(
             () => MultiCharacterTurnBuilder.BuildTurns(
                 castRevision,
                 [chapter],
@@ -347,12 +387,12 @@ public sealed class MultiCharacterTurnBuilderTests
                 characterProfileIdsByCharacterId));
 
         Assert.Equal(
-            MultiCharacterTurnBuilder.IntegrityMismatchReasonCode,
-            exception.ReasonCode);
+            ThreeWaSynthesisCapabilities.CloneVoiceUnavailableCode,
+            exception.ErrorCode);
     }
 
     [Fact]
-    public void A_custom_provider_character_with_no_ready_profile_at_all_safely_falls_back_to_the_narrator_voice()
+    public void A_custom_provider_character_with_no_ready_profile_fails_closed_instead_of_using_the_narrator()
     {
         var castRevision = BuildCastRevision(
             narratorVoice: "narrator-voice",
@@ -360,9 +400,12 @@ public sealed class MultiCharacterTurnBuilderTests
             aliceProvider: "3wa-voxcpm2");
         var chapter = BuildConfirmedChapter(0, "序章", "「你回來了？」艾莉絲說。", AliceId);
 
-        var turns = MultiCharacterTurnBuilder.BuildTurns(castRevision, [chapter]);
+        var exception = Assert.Throws<PermanentNarrationProviderException>(
+            () => MultiCharacterTurnBuilder.BuildTurns(castRevision, [chapter]));
 
-        Assert.All(turns, turn => Assert.Equal("narrator-voice", turn.Voice));
+        Assert.Equal(
+            ThreeWaSynthesisCapabilities.CloneVoiceUnavailableCode,
+            exception.ErrorCode);
     }
 
     private static NarrationCastRevision BuildCastRevision(
@@ -493,6 +536,16 @@ public sealed class MultiCharacterTurnBuilderTests
             rightsConfirmedByUserId: OwnerId,
             DateTimeOffset.UtcNow);
     }
+
+    private static CharacterVoiceProfile BuildDesignedProfile() =>
+        CharacterVoiceProfile.CreateDesign(
+            Guid.NewGuid(),
+            OwnerId,
+            AliceCharacterProfileId,
+            CharacterVoiceProfileKind.Base,
+            null,
+            "溫柔、略帶沙啞的台灣華語女聲",
+            DateTimeOffset.UtcNow);
 
     private static string HashSlice(string text) =>
         Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(text)))

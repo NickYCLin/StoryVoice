@@ -20,7 +20,7 @@ public sealed class MultiCharacterNarrationOptions
     public Dictionary<string, string> CompositionVersions { get; set; } = new(StringComparer.OrdinalIgnoreCase)
     {
         ["edge"] = "edge-tts-multi-voice-v1",
-        ["3wa-voxcpm2"] = "3wa-voxcpm2-turn-concat-v1",
+        ["3wa-voxcpm2"] = "3wa-voxcpm2-turn-concat-v2",
         ["voai"] = "voai-speech-turn-concat-v1",
         ["bluemagpie"] = "bluemagpie-pcm16-concat-v1",
     };

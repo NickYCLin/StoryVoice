@@ -373,6 +373,7 @@ internal sealed class SeriesService(
         {
             EnsureFormalNarrationAvailable(provider);
         }
+        await EnsureThreeWaCharacterProfilesAvailableAsync(series, assignments, cancellationToken);
 
         var narratorParameters = ResolveEffectiveSynthesisParameters(
             narratorVoice.Provider,
@@ -436,6 +437,62 @@ internal sealed class SeriesService(
         await InvalidatePendingRebuildsAsync(series, cancellationToken);
         await SaveChangesAsync(cancellationToken);
         return await ToDetailsAsync(series, cancellationToken);
+    }
+
+    private async Task EnsureThreeWaCharacterProfilesAvailableAsync(
+        StorySeries series,
+        IReadOnlyDictionary<Guid, SeriesVoiceCatalogEntry> assignments,
+        CancellationToken cancellationToken)
+    {
+        var customCharacters = series.Characters
+            .Where(character => string.Equals(
+                assignments[character.Id].Provider,
+                CharacterVoiceProviders.ThreeWaVoxCpm2,
+                StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (customCharacters.Length == 0)
+        {
+            return;
+        }
+
+        if (customCharacters.Any(character => character.CharacterProfileId is null))
+        {
+            throw new InvalidOperationException(
+                ThreeWaSynthesisCapabilities.CloneVoiceUnavailableMessage);
+        }
+
+        var characterProfileIds = customCharacters
+            .Select(character => character.CharacterProfileId!.Value)
+            .Distinct()
+            .ToArray();
+        var containsDesignProfile = await dbContext.CharacterVoiceProfiles
+            .AsNoTracking()
+            .AnyAsync(
+                profile => profile.OwnerId == series.OwnerId
+                    && characterProfileIds.Contains(profile.CharacterProfileId)
+                    && profile.Mode == CharacterVoiceProfileMode.Design,
+                cancellationToken);
+        if (containsDesignProfile)
+        {
+            throw new InvalidOperationException(
+                ThreeWaSynthesisCapabilities.DesignVoiceUnavailableMessage);
+        }
+
+        var readyCloneBaseProfileIds = await dbContext.CharacterVoiceProfiles
+            .AsNoTracking()
+            .Where(profile => profile.OwnerId == series.OwnerId
+                && characterProfileIds.Contains(profile.CharacterProfileId)
+                && profile.Kind == CharacterVoiceProfileKind.Base
+                && profile.Mode == CharacterVoiceProfileMode.Clone
+                && profile.Status == CharacterVoiceProfileStatus.Ready)
+            .Select(profile => profile.CharacterProfileId)
+            .Distinct()
+            .ToArrayAsync(cancellationToken);
+        if (characterProfileIds.Except(readyCloneBaseProfileIds).Any())
+        {
+            throw new InvalidOperationException(
+                ThreeWaSynthesisCapabilities.CloneVoiceUnavailableMessage);
+        }
     }
 
     private async Task ConfigureNarrativeVoiceAsync(

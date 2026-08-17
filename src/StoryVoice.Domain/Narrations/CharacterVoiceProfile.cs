@@ -10,8 +10,9 @@ public enum CharacterVoiceProfileKind
 
 public enum CharacterVoiceProfileMode
 {
-    /// <summary>Synthesized purely from a text description (<see cref="CharacterVoiceProfile.VoicePromptText"/>) —
-    /// no reference audio, no consent tracking, ready to use immediately.</summary>
+    /// <summary>Legacy text-description profile metadata. Provider capability gates decide whether
+    /// it can be synthesized; storage readiness alone never implies that the resulting voice is
+    /// distinguishable or usable for formal narration.</summary>
     Design,
 
     /// <summary>Cloned from an uploaded reference recording. Requires <see cref="CharacterVoiceProfile.ConsentType"/>
@@ -198,9 +199,8 @@ public sealed class CharacterVoiceProfile
             rightsConfirmedByUserId: null,
             now);
 
-        // Design mode has no ASR/consent lifecycle at all — the 3wa `synthesize(mode=design)`
-        // call takes the voice_prompt text directly on every request, so there's nothing to
-        // prepare or confirm ahead of time.
+        // Ready here only means that the local metadata has no ASR/consent lifecycle. Runtime
+        // provider capability gates still decide whether Design may be previewed or narrated.
         profile.Status = CharacterVoiceProfileStatus.Ready;
         return profile;
     }

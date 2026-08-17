@@ -13,50 +13,22 @@ public sealed class ThreeWaSynthesisClientTests
     private const string ApiToken = "test-three-wa-token";
 
     [Fact]
-    public async Task SubmitAsync_posts_the_canonical_design_contract_and_accepts_a_numeric_task_id()
+    public async Task SubmitAsync_rejects_design_before_any_network_request()
     {
-        var handler = new RecordingHandler(() => JsonResponse(
-            """
-            {
-              "ok": true,
-              "task_id": 123,
-              "status_url": "/3waAIHub/tasks/123/status",
-              "result_url": "https://3wa.tw/3waAIHub/tasks/123/result",
-              "artifact_url_template": "/3waAIHub/artifacts/{artifact_id}"
-            }
-            """));
+        var handler = new RecordingHandler();
         using var httpClient = CreateHttpClient(handler);
         var client = CreateClient(httpClient);
 
-        var handle = await client.SubmitAsync(
+        var exception = await Assert.ThrowsAsync<ThreeWaAiHubException>(() => client.SubmitAsync(
             new ThreeWaSynthesisRequest(
                 "測試。",
                 "design",
                 VoiceProfileTaskId: null,
-                VoicePromptText: "台灣華語，中性自然。",
-                Seed: 42),
-            CancellationToken.None);
+                VoicePromptText: "台灣華語，中性自然。"),
+            CancellationToken.None));
 
-        var request = Assert.Single(handler.Requests);
-        Assert.Equal(HttpMethod.Post, request.Method);
-        Assert.Equal("https://3wa.tw/3waAIHub/api.php?mode=voice_generate", request.Uri.AbsoluteUri);
-        Assert.Equal("Bearer", request.AuthorizationScheme);
-        Assert.Equal(ApiToken, request.AuthorizationParameter);
-        using var body = JsonDocument.Parse(request.Body!);
-        var root = body.RootElement;
-        Assert.Equal("synthesize", root.GetProperty("operation").GetString());
-        Assert.Equal("design", root.GetProperty("mode").GetString());
-        Assert.Equal("測試。", root.GetProperty("text").GetString());
-        Assert.Equal("台灣華語，中性自然。", root.GetProperty("voice_prompt").GetString());
-        Assert.Equal(42, root.GetProperty("seed").GetInt32());
-        Assert.Equal("fixed", root.GetProperty("seed_policy").GetString());
-        Assert.Equal("voxcpm2", root.GetProperty("model").GetString());
-        Assert.Equal(0, root.GetProperty("priority").GetInt32());
-        Assert.False(root.TryGetProperty("voice_profile_task_id", out _));
-        Assert.Equal("123", handle.TaskId);
-        Assert.Equal("https://3wa.tw/3waAIHub/tasks/123/status", handle.StatusUrl);
-        Assert.Equal("https://3wa.tw/3waAIHub/tasks/123/result", handle.ResultUrl);
-        Assert.Equal("/3waAIHub/artifacts/{artifact_id}", handle.ArtifactUrlTemplate);
+        Assert.Equal(ThreeWaSynthesisCapabilities.DesignVoiceUnavailableMessage, exception.Message);
+        Assert.Empty(handler.Requests);
     }
 
     [Fact]
@@ -163,9 +135,9 @@ public sealed class ThreeWaSynthesisClientTests
         var exception = await Assert.ThrowsAsync<ThreeWaAiHubException>(() => client.SubmitAsync(
             new ThreeWaSynthesisRequest(
                 secretStoryText,
-                "design",
-                VoiceProfileTaskId: null,
-                VoicePromptText: "voice"),
+                "ultimate_clone",
+                VoiceProfileTaskId: "profile-task",
+                VoicePromptText: null),
             CancellationToken.None));
 
         Assert.Single(handler.Requests);
@@ -228,7 +200,7 @@ public sealed class ThreeWaSynthesisClientTests
         var client = CreateClient(httpClient);
 
         var exception = await Assert.ThrowsAsync<ThreeWaAiHubException>(() => client.SubmitAsync(
-            new ThreeWaSynthesisRequest("text", "design", null, "voice"),
+            new ThreeWaSynthesisRequest("text", "ultimate_clone", "profile-task", null),
             CancellationToken.None));
 
         Assert.Single(handler.Requests);

@@ -321,10 +321,11 @@ export function CharacterLibraryPage() {
   }
 
   const baseProfile = voiceProfiles.find((profile) => profile.kind === 'Base')
-  const sceneProfilesReady = voiceProfiles.filter((profile) => profile.kind === 'Scene' && profile.status === 'Ready').length
+  const baseProfileReady = baseProfile?.status === 'Ready' && baseProfile.mode === 'Clone'
+  const sceneProfilesReady = voiceProfiles.filter((profile) => profile.kind === 'Scene' && profile.status === 'Ready' && profile.mode === 'Clone').length
   const totalSampleSeconds = voiceProfiles.reduce((total, profile) => total + (profile.referenceAudioDurationSeconds ?? 0), 0)
   const inFlightProfile = voiceProfiles.find((profile) => profile.status === 'Pending' || profile.status === 'AwaitingTranscriptConfirmation')
-  const readyProfiles = voiceProfiles.filter((profile) => profile.status === 'Ready')
+  const readyProfiles = voiceProfiles.filter((profile) => profile.status === 'Ready' && profile.mode === 'Clone')
 
   const tabs: Array<{ key: Tab; label: string }> = [
     { key: 'basic', label: '基本資料' },
@@ -444,8 +445,8 @@ export function CharacterLibraryPage() {
                 <div className="mt-5 grid grid-cols-1 gap-3 border-t border-stone-200 pt-5 sm:grid-cols-4">
                   <div className="rounded-xl border border-stone-200 bg-stone-50 p-3">
                     <p className="text-[11px] text-stone-500">基礎聲線狀態</p>
-                    <p className={`mt-1 text-sm font-medium ${baseProfile?.status === 'Ready' ? 'text-emerald-700' : 'text-stone-600'}`}>
-                      {baseProfile ? STATUS_LABEL[baseProfile.status] : '尚未建立'}
+                    <p className={`mt-1 text-sm font-medium ${baseProfileReady ? 'text-emerald-700' : 'text-stone-600'}`}>
+                      {baseProfile?.mode === 'Design' ? '不可用（文字設計）' : baseProfile ? STATUS_LABEL[baseProfile.status] : '尚未建立'}
                     </p>
                   </div>
                   <div className="rounded-xl border border-stone-200 bg-stone-50 p-3">
@@ -561,7 +562,7 @@ export function CharacterLibraryPage() {
 
                 {activeTab === 'preview' && (
                   <div className="mt-6 border-t border-stone-200 pt-5">
-                    <p className="text-sm text-stone-500">選一組已完成的聲線，輸入任意文字試講，聲音會即時合成播放（不會存檔）。</p>
+                    <p className="text-sm text-stone-500">選一組已完成的錄音克隆聲線，輸入任意文字試講，聲音會即時合成播放（不會存檔）。文字設計聲線因 3wa 尚未將 voice_prompt 傳給 VoxCPM2，目前不可試音。</p>
                     {readyProfiles.length === 0 && <p className="mt-3 text-sm text-stone-500">這個角色還沒有已完成的聲線，先到「聲線管理」建立一組。</p>}
                     {readyProfiles.length > 0 && (
                       <div className="mt-3 space-y-3">

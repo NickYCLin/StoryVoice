@@ -517,7 +517,7 @@ public sealed class MultiCharacterNarrationApiTests(ApiFactory factory) : IClass
             {
                 name = $"3wa 混用測試系列 {Guid.NewGuid():N}",
                 narratorProvider = "3wa-voxcpm2",
-                narratorVoice = "custom",
+                narratorVoice = ThreeWaSynthesisCapabilities.NarratorFallbackVoice,
                 narratorRate = "-5%",
                 narratorPitch = "+0Hz",
                 narratorVolume = "+0%",
@@ -556,6 +556,223 @@ public sealed class MultiCharacterNarrationApiTests(ApiFactory factory) : IClass
         Assert.True(
             stageResponse.StatusCode == HttpStatusCode.Created,
             $"Unexpected response: {responseBody}");
+    }
+
+    [Fact]
+    public async Task Switching_an_existing_series_to_3wa_rejects_a_legacy_design_profile_atomically()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var owner = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        var book = await ImportTextAsync(owner, "legacy design voice switch", cancellationToken);
+
+        using var profileResponse = await owner.PostWithCsrfAsync(
+            "/api/character-profiles",
+            new
+            {
+                canonicalName = $"舊文字聲線切換角色-{Guid.NewGuid():N}",
+                age = (string?)null,
+                gender = (string?)null,
+                birthday = (string?)null,
+                personality = (string?)null,
+                catchphrase = (string?)null,
+                background = (string?)null,
+                speakingStyle = (string?)null
+            },
+            cancellationToken);
+        var characterProfile = await profileResponse.Content
+            .ReadFromJsonAsync<CharacterProfileResponse>(cancellationToken);
+        Assert.Equal(HttpStatusCode.Created, profileResponse.StatusCode);
+        Assert.NotNull(characterProfile);
+
+        await using (var seedScope = factory.Services.CreateAsyncScope())
+        {
+            var db = seedScope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+            var ownerId = await db.CharacterProfiles
+                .Where(profile => profile.Id == characterProfile.Id)
+                .Select(profile => profile.OwnerId)
+                .SingleAsync(cancellationToken);
+            db.CharacterVoiceProfiles.Add(CharacterVoiceProfile.CreateDesign(
+                Guid.NewGuid(),
+                ownerId,
+                characterProfile.Id,
+                CharacterVoiceProfileKind.Base,
+                null,
+                "自然台灣華語青年聲線",
+                DateTimeOffset.UtcNow));
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        var series = await CreateSeriesAsync(owner, cancellationToken);
+        await AddBookAsync(owner, series.Id, book.Id, cancellationToken);
+        using var characterResponse = await owner.PostWithCsrfAsync(
+            $"/api/series/{series.Id}/characters",
+            new
+            {
+                canonicalName = "舊文字聲線切換角色",
+                role = "Main",
+                voiceProvider = "edge",
+                voice = "zh-TW-HsiaoChenNeural",
+                rate = "+0%",
+                pitch = "+0Hz",
+                volume = "+0%",
+                notes = (string?)null,
+                characterProfileId = characterProfile.Id
+            },
+            cancellationToken);
+        var beforeSwitch = await characterResponse.Content
+            .ReadFromJsonAsync<StorySeriesDetailsResponse>(cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, characterResponse.StatusCode);
+        var beforeCharacter = Assert.Single(Assert.IsType<StorySeriesDetailsResponse>(beforeSwitch).Characters);
+
+        await ConfirmOnlyChapterPlanAsync(owner, series.Id, book, cancellationToken);
+        using var stageResponse = await owner.PostWithCsrfAsync(
+            $"/api/series/{series.Id}/narration-rebuilds",
+            new { rightsAttested = true },
+            cancellationToken);
+        var batch = await stageResponse.Content.ReadFromJsonAsync<SeriesNarrationRebuildResponse>(
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.Created, stageResponse.StatusCode);
+        Assert.NotNull(batch);
+
+        using var switchResponse = await owner.PutWithCsrfAsync(
+            $"/api/series/{series.Id}/voices",
+            new
+            {
+                narratorProvider = "3wa-voxcpm2",
+                narratorVoice = ThreeWaSynthesisCapabilities.NarratorFallbackVoice,
+                narratorRate = "+0%",
+                narratorPitch = "+0Hz",
+                narratorVolume = "+0%",
+                characters = new[]
+                {
+                    new
+                    {
+                        characterId = beforeCharacter.Id,
+                        voiceProvider = "3wa-voxcpm2",
+                        voice = ThreeWaSynthesisCapabilities.NarratorFallbackVoice,
+                        rate = "+0%",
+                        pitch = "+0Hz",
+                        volume = "+0%"
+                    }
+                }
+            },
+            cancellationToken);
+        var responseBody = await switchResponse.Content.ReadAsStringAsync(cancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, switchResponse.StatusCode);
+        Assert.Contains("voice_prompt", responseBody, StringComparison.Ordinal);
+
+        using var detailsResponse = await owner.GetAsync($"/api/series/{series.Id}", cancellationToken);
+        var afterSwitch = await detailsResponse.Content.ReadFromJsonAsync<StorySeriesDetailsResponse>(
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, detailsResponse.StatusCode);
+        var unchanged = Assert.IsType<StorySeriesDetailsResponse>(afterSwitch);
+        var unchangedCharacter = Assert.Single(unchanged.Characters);
+        Assert.Equal(series.NarratorProvider, unchanged.NarratorProvider);
+        Assert.Equal(series.NarratorVoice, unchanged.NarratorVoice);
+        Assert.Equal(beforeCharacter.VoiceProvider, unchangedCharacter.VoiceProvider);
+        Assert.Equal(beforeCharacter.Voice, unchangedCharacter.Voice);
+        Assert.Equal(beforeCharacter.CharacterProfileId, unchangedCharacter.CharacterProfileId);
+        await AssertBatchAndJobStateAsync(
+            batch,
+            SeriesCastRebuildBatchStatus.Building,
+            NarrationJobStatus.Queued,
+            cancellationRequested: false,
+            cancellationToken);
+    }
+
+    [Fact]
+    public async Task A_3wa_character_linked_to_a_legacy_design_profile_is_rejected_before_rebuild_staging()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var owner = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        var book = await ImportTextAsync(owner, "legacy design admission", cancellationToken);
+
+        using var profileResponse = await owner.PostWithCsrfAsync(
+            "/api/character-profiles",
+            new
+            {
+                canonicalName = $"舊文字聲線角色-{Guid.NewGuid():N}",
+                age = (string?)null,
+                gender = (string?)null,
+                birthday = (string?)null,
+                personality = (string?)null,
+                catchphrase = (string?)null,
+                background = (string?)null,
+                speakingStyle = (string?)null
+            },
+            cancellationToken);
+        var characterProfile = await profileResponse.Content
+            .ReadFromJsonAsync<CharacterProfileResponse>(cancellationToken);
+        Assert.Equal(HttpStatusCode.Created, profileResponse.StatusCode);
+        Assert.NotNull(characterProfile);
+
+        await using (var seedScope = factory.Services.CreateAsyncScope())
+        {
+            var db = seedScope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+            var ownerId = await db.CharacterProfiles
+                .Where(profile => profile.Id == characterProfile.Id)
+                .Select(profile => profile.OwnerId)
+                .SingleAsync(cancellationToken);
+            db.CharacterVoiceProfiles.Add(CharacterVoiceProfile.CreateDesign(
+                Guid.NewGuid(),
+                ownerId,
+                characterProfile.Id,
+                CharacterVoiceProfileKind.Base,
+                null,
+                "溫柔、略帶沙啞的台灣華語女聲",
+                DateTimeOffset.UtcNow));
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        using var seriesResponse = await owner.PostWithCsrfAsync(
+            "/api/series",
+            new
+            {
+                name = $"3wa Design admission {Guid.NewGuid():N}",
+                narratorProvider = "3wa-voxcpm2",
+                narratorVoice = ThreeWaSynthesisCapabilities.NarratorFallbackVoice,
+                narratorRate = "+0%",
+                narratorPitch = "+0Hz",
+                narratorVolume = "+0%",
+                defaultSpeakerPauseMs = 350
+            },
+            cancellationToken);
+        var series = await seriesResponse.Content.ReadFromJsonAsync<StorySeriesDetailsResponse>(cancellationToken);
+        Assert.Equal(HttpStatusCode.Created, seriesResponse.StatusCode);
+        Assert.NotNull(series);
+        await AddBookAsync(owner, series.Id, book.Id, cancellationToken);
+
+        using var characterResponse = await owner.PostWithCsrfAsync(
+            $"/api/series/{series.Id}/characters",
+            new
+            {
+                canonicalName = "舊文字聲線角色",
+                role = "Main",
+                voiceProvider = "3wa-voxcpm2",
+                voice = ThreeWaSynthesisCapabilities.NarratorFallbackVoice,
+                rate = "+0%",
+                pitch = "+0Hz",
+                volume = "+0%",
+                notes = (string?)null,
+                characterProfileId = characterProfile.Id
+            },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, characterResponse.StatusCode);
+
+        using var stageResponse = await owner.PostWithCsrfAsync(
+            $"/api/series/{series.Id}/narration-rebuilds",
+            new { rightsAttested = true },
+            cancellationToken);
+        var responseBody = await stageResponse.Content.ReadAsStringAsync(cancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, stageResponse.StatusCode);
+        Assert.Contains("voice_prompt", responseBody, StringComparison.Ordinal);
+
+        await using var verifyScope = factory.Services.CreateAsyncScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+        Assert.False(await verifyDb.SeriesCastRebuildBatches
+            .AnyAsync(batch => batch.SeriesId == series.Id, cancellationToken));
+        Assert.False(await verifyDb.NarrationJobs
+            .AnyAsync(job => job.SeriesId == series.Id, cancellationToken));
     }
 
     [Fact]

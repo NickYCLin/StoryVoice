@@ -56,11 +56,13 @@
 `/characters` 是獨立於任何系列的 owner-scoped 角色管理頁面：可以建立角色的基本
 資料（頭像、年齡、性別、生日、個性、口頭禪、人物背景、說話風格——AI 補完／AI
 全部重寫按鈕先保留位置，尚未接 LLM），也可以直接在同一頁替角色建立一組基礎
-聲線，以及緊張／開心／生氣／難過（加上「平常」）最多五組情境聲線；每一組都
-可以選「文字設計」（只給一段文字描述，立即可用）或「上傳錄音克隆」（需要選擇
-同意類型：本人親自錄製／已取得明確同意／已取得合法授權，上傳後走語音辨識草稿
-→人工確認文字稿的流程才會就緒）。角色建好之後，在「多角色系列配音」加入角色
-時可以直接從角色庫選入，同一個角色（與其聲線）能跨多個系列重複使用，不用每個
+聲線，以及緊張／開心／生氣／難過（加上「平常」）最多五組情境聲線。3wa 官方
+manifest 已明載目前不會把 `voice_prompt` 傳給 VoxCPM2，因此「文字設計」已在 API、
+試音、系列 admission 與 Worker 全部 fail closed；既有描述資料保留但不可視為可用聲線。
+可用流程只剩「上傳錄音克隆」（需要選擇同意類型：本人親自錄製／已取得明確同意／
+已取得合法授權，上傳後走語音辨識草稿→人工確認文字稿的流程才會就緒）。角色建好
+之後，在「多角色系列配音」加入角色時可以直接從角色庫選入，同一個角色（與其聲線）
+能跨多個系列重複使用，不用每個
 系列各自重建一次；系列裡的角色也可以不連結角色庫、維持原本手動設定固定 Edge
 聲線的舊流程。合成時依對白情緒查找對應情境聲線，找不到就退回基礎聲線；一般
 對白仍可使用旁白 fallback，但 `InnerMonologue` 缺少 POV 角色聲線時會 fail closed，
@@ -77,7 +79,7 @@
 - **角色 ID 顯示與複製**、建立時間／最後更新時間。
 - **摘要卡片**：基礎聲線狀態、情境聲線數量（已就緒／5）、樣本語料時數（所有克隆
   聲線參考音檔的 ffprobe 時長加總，API 容器已補上 ffmpeg）、最近進行中的任務。
-- **試講**：針對任一已就緒（`Ready`）的聲線，輸入一小段文字（上限 200 字）即時合成
+- **試講**：針對任一已就緒（`Ready`）的 Clone 聲線，輸入一小段文字（上限 200 字）即時合成
   播放；重用既有的 3wa 合成 client 同步跑一次 submit/poll/result/artifact，不進
   Worker 的 job 佇列、不落地存檔，純粹是 UI 預覽用途。
 - **任務紀錄**：以這個角色所有 `CharacterVoiceProfile`（含歷史 Pending／Failed 紀錄）
@@ -90,17 +92,21 @@
 引擎，分成兩條獨立的非同步流程：`profile_prepare/status/confirm`（Application 層，
 建立與確認聲線）、`synthesize` 的 submit/poll/result/artifact（Worker 層，實際產生
 朗讀音訊）。2026-08-17 已使用 production token 對官方 canonical endpoint 完成
-Design 模式的 submit/poll/result/artifact 短句實測：任務由 `running` 進入 `success`，
-回傳的 `task_id` 與 artifact ID 實際為 JSON number，產物為可解析的
-`audio/x-wav`（PCM 16-bit、48 kHz、mono）。Client 現已同時支援 number/string ID，
-只會將 Bearer token 送往設定的同源 HTTPS API 目錄，並限制 JSON/音訊回應大小。
+Design 模式的 submit/poll/result/artifact 短句實測：任務雖由 `running` 進入 `success`，
+但 11 組不同角色描述在相同文字與固定 seed 下回傳完全相同的 WAV；官方 manifest 亦
+明載 `voice_prompt` 目前不會傳入 VoxCPM2。這條路徑因此已固定停用，不能用 HTTP 200
+或 `Ready` 狀態冒充角色聲線已訓練完成。回傳的 `task_id` 與 artifact ID 實際為 JSON
+number，產物為可解析的 `audio/x-wav`（PCM 16-bit、48 kHz、mono）。Client 現已同時
+支援 number/string ID，只會將 Bearer token 送往設定的同源 HTTPS API 目錄，並限制
+JSON/音訊回應大小。
 新 canonical Clone 的 profile prepare/confirm 尚需以另一份授權短 WAV 完成實測；
 現存 legacy Clone task 的 ASR 轉錄失敗，不能視為可用聲線。
 
 已知限制（刻意排除的範圍，不是漏做）：
-- **旁白聲線無法克隆**：角色庫只服務 `SeriesCharacter`，系列旁白沒有對應的克隆／
-  設計流程。系列旁白 provider 設成 `3wa-voxcpm2` 時，角色可以自由混用 Edge 固定
-  聲線與 3wa 自訂聲線，但旁白本身永遠只能是 Edge 聲線。
+- **旁白聲線無法克隆**：角色庫只服務 `SeriesCharacter`，系列旁白沒有對應的克隆
+  流程。系列旁白 provider 設成 `3wa-voxcpm2` 時，角色可以混用 Edge 固定聲線與具備
+  合法授權、已完成的 3wa Clone 聲線；旁白本身永遠只能是 Edge 聲線。任何缺少 Ready
+  Clone Base 或仍含 Design profile 的 3wa 角色會在設定、staging 與 Worker 三層被拒絕。
 - 角色基本資料的「AI 補完」／「AI 全部重寫」按鈕只是預留位置，沒有接 LLM（3wa
   Cluster API 目前沒有對應的 chat/生成 mode）。
 - 已新增 BlueMagpie BM1 作為第二個固定聲線引擎；只有內建女聲 `female_voice` 與男聲

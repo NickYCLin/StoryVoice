@@ -50,6 +50,8 @@ const SLOTS: Slot[] = [
 ]
 
 const DEFAULT_PREVIEW_TEXT = '你好，這是我的聲音示範。'
+// Code-pinned to the verified provider contract; this must not be an environment toggle.
+const DESIGN_VOICE_AVAILABLE = false
 
 function formatDuration(seconds: number | null) {
   if (seconds === null) return '—'
@@ -193,6 +195,11 @@ export function CharacterVoiceProfilesPanel({ characterProfileId, characterName,
   }
 
   async function createDesigned(slotKey: string, sceneCode: string | null) {
+    if (!DESIGN_VOICE_AVAILABLE) {
+      setMessage('3wa 目前不會把 voice_prompt 傳給 VoxCPM2，文字設計聲線無法區分角色；請改用已授權的錄音克隆。')
+      return
+    }
+
     const text = promptText[slotKey]?.trim()
     if (!text) return
     setBusySlot(slotKey)
@@ -379,15 +386,21 @@ export function CharacterVoiceProfilesPanel({ characterProfileId, characterName,
   return (
     <div className="rounded-xl border border-stone-200 bg-white p-4">
       <p className="text-sm text-stone-500">
-        {characterName} 的自訂聲線 — 基礎聲線之外，可以替緊張／開心／生氣／難過各自設計或克隆一組聲線；找不到的情境會自動退回基礎聲線。
+        {characterName} 的自訂聲線 — 基礎聲線之外，可以替緊張／開心／生氣／難過各自克隆一組聲線；找不到的情境會自動退回基礎聲線。
       </p>
+      {!DESIGN_VOICE_AVAILABLE && (
+        <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
+          3wa 目前沒有把 voice_prompt 傳給 VoxCPM2，不同文字描述會產生同一聲音。文字設計已停用，現有資料仍會保留但不可試音或正式配音；請使用已取得授權的 WAV 錄音克隆。
+        </p>
+      )}
       <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {SLOTS.map((slot) => {
           const slotKey = `${characterProfileId}:${slot.sceneCode ?? 'base'}`
           const profile = profileFor(slot.sceneCode)
           const isOpen = openSlot === slotKey
           const isBusy = busySlot === slotKey || (profile !== null && busySlot === profile.id)
-          const slotMode = mode[slotKey] ?? 'Design'
+          const slotMode = mode[slotKey] ?? 'Clone'
+          const designUnavailable = profile?.mode === 'Design' && !DESIGN_VOICE_AVAILABLE
           const currentPreview = profile
             && previewAudio?.characterProfileId === characterProfileId
             && previewAudio.profileId === profile.id
@@ -399,8 +412,8 @@ export function CharacterVoiceProfilesPanel({ characterProfileId, characterName,
               <div className="flex items-center justify-between gap-2">
                 <p className="text-sm font-medium text-stone-800">{slot.label}</p>
                 {profile && (
-                  <span className={`rounded-full border px-3 py-1 text-xs ${STATUS_STYLE[profile.status]}`}>
-                    {STATUS_LABEL[profile.status]}
+                  <span className={`rounded-full border px-3 py-1 text-xs ${designUnavailable ? 'border-amber-200 bg-amber-50 text-amber-700' : STATUS_STYLE[profile.status]}`}>
+                    {designUnavailable ? '不可用' : STATUS_LABEL[profile.status]}
                   </span>
                 )}
               </div>
@@ -418,10 +431,11 @@ export function CharacterVoiceProfilesPanel({ characterProfileId, characterName,
                       <div className="flex gap-2 text-xs">
                         <button
                           className={`rounded-full border px-3 py-1 ${slotMode === 'Design' ? 'border-amber-300 bg-amber-50 text-amber-800' : 'border-stone-200 text-stone-500'}`}
+                          disabled={!DESIGN_VOICE_AVAILABLE}
                           onClick={() => setMode((current) => ({ ...current, [slotKey]: 'Design' }))}
                           type="button"
                         >
-                          文字設計
+                          文字設計（目前不支援）
                         </button>
                         <button
                           className={`rounded-full border px-3 py-1 ${slotMode === 'Clone' ? 'border-amber-300 bg-amber-50 text-amber-800' : 'border-stone-200 text-stone-500'}`}
@@ -491,14 +505,14 @@ export function CharacterVoiceProfilesPanel({ characterProfileId, characterName,
               {profile && (
                 <div className="mt-2 space-y-2 text-xs text-stone-600">
                   <p>
-                    {profile.mode === 'Design' ? '文字設計' : '錄音克隆'}
+                    {profile.mode === 'Design' ? '文字設計（供應商目前不支援）' : '錄音克隆'}
                     {' · 字數 '}
                     {(profile.transcript ?? profile.voicePromptText ?? '').length}
                     {' · 時長 '}
                     {formatDuration(profile.referenceAudioDurationSeconds)}
                   </p>
 
-                  {profile.status === 'Ready' && (
+                  {profile.status === 'Ready' && !designUnavailable && (
                     <button
                       className="secondary-button w-full px-3 py-2 text-xs disabled:cursor-wait disabled:opacity-60"
                       disabled={previewingId !== null}

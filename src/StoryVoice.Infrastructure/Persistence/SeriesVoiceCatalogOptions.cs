@@ -1,4 +1,5 @@
 using StoryVoice.Domain.Narrations;
+using StoryVoice.Infrastructure.Narrations;
 
 namespace StoryVoice.Infrastructure.Persistence;
 
@@ -84,14 +85,12 @@ public sealed class SeriesVoiceCatalogOptions
         },
         new()
         {
-            // The sentinel entry for the custom-voice provider — its actual per-character,
-            // per-emotion voice comes from CharacterVoiceProfile lookups at synthesis time (see
-            // MultiCharacterTurnBuilder), so "custom" here is just a placeholder that satisfies
-            // SeriesCharacter.Voice's NOT NULL/allow-listed constraint, not a real voice id. The
-            // provider name must stay in sync with ThreeWaVoxCpm2NarrationProvider.ProviderName.
+            // Characters resolve to linked Clone profiles at synthesis time. Narrator and
+            // explicitly confirmed narrator-fallback turns still need a real Edge voice because
+            // the narrator itself has no CharacterVoiceProfile.
             Provider = "3wa-voxcpm2",
-            Voice = "custom",
-            DisplayName = "自訂聲線（角色聲線工作室）",
+            Voice = ThreeWaSynthesisCapabilities.NarratorFallbackVoice,
+            DisplayName = "3wa 角色克隆（旁白：雲哲）",
             Locale = "zh-TW"
         }
     ];

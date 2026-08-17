@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using StoryVoice.Application.Characters;
 using StoryVoice.Application.Series;
+using StoryVoice.Infrastructure.Narrations;
 
 namespace StoryVoice.IntegrationTests;
 
@@ -121,7 +122,7 @@ public sealed class CharacterProfileApiTests(ApiFactory factory) : IClassFixture
             {
                 name = $"角色庫測試系列-{Guid.NewGuid():N}",
                 narratorProvider = "3wa-voxcpm2",
-                narratorVoice = "custom",
+                narratorVoice = ThreeWaSynthesisCapabilities.NarratorFallbackVoice,
                 narratorRate = "-5%",
                 narratorPitch = "+0Hz",
                 narratorVolume = "+0%",
@@ -138,7 +139,7 @@ public sealed class CharacterProfileApiTests(ApiFactory factory) : IClassFixture
                 canonicalName = characterProfile.CanonicalName,
                 role = "Supporting",
                 voiceProvider = "3wa-voxcpm2",
-                voice = "custom",
+                voice = ThreeWaSynthesisCapabilities.NarratorFallbackVoice,
                 rate = "+0%",
                 pitch = "+0Hz",
                 volume = "+0%",
@@ -162,7 +163,7 @@ public sealed class CharacterProfileApiTests(ApiFactory factory) : IClassFixture
                 canonicalName = "另一個角色",
                 role = "Supporting",
                 voiceProvider = "3wa-voxcpm2",
-                voice = "custom",
+                voice = ThreeWaSynthesisCapabilities.NarratorFallbackVoice,
                 rate = "+0%",
                 pitch = "+0Hz",
                 volume = "+0%",
@@ -189,7 +190,7 @@ public sealed class CharacterProfileApiTests(ApiFactory factory) : IClassFixture
             {
                 name = $"專用角色庫連結-{Guid.NewGuid():N}",
                 narratorProvider = "3wa-voxcpm2",
-                narratorVoice = "custom",
+                narratorVoice = ThreeWaSynthesisCapabilities.NarratorFallbackVoice,
                 narratorRate = "+0%",
                 narratorPitch = "+0Hz",
                 narratorVolume = "+0%",
@@ -213,7 +214,7 @@ public sealed class CharacterProfileApiTests(ApiFactory factory) : IClassFixture
                     canonicalName = character.Name,
                     role = character.Role,
                     voiceProvider = "3wa-voxcpm2",
-                    voice = "custom",
+                    voice = ThreeWaSynthesisCapabilities.NarratorFallbackVoice,
                     rate = "-5%",
                     pitch = "+2Hz",
                     volume = "-3%",
@@ -321,7 +322,7 @@ public sealed class CharacterProfileApiTests(ApiFactory factory) : IClassFixture
                 canonicalName = "Carol",
                 role = "Minor",
                 voiceProvider = "3wa-voxcpm2",
-                voice = "custom",
+                voice = ThreeWaSynthesisCapabilities.NarratorFallbackVoice,
                 rate = "+0%",
                 pitch = "+0Hz",
                 volume = "+0%",
@@ -369,7 +370,7 @@ public sealed class CharacterProfileApiTests(ApiFactory factory) : IClassFixture
             {
                 name = $"刪除保護測試系列-{Guid.NewGuid():N}",
                 narratorProvider = "3wa-voxcpm2",
-                narratorVoice = "custom",
+                narratorVoice = ThreeWaSynthesisCapabilities.NarratorFallbackVoice,
                 narratorRate = "-5%",
                 narratorPitch = "+0Hz",
                 narratorVolume = "+0%",
@@ -386,7 +387,7 @@ public sealed class CharacterProfileApiTests(ApiFactory factory) : IClassFixture
                 canonicalName = characterProfile.CanonicalName,
                 role = "Supporting",
                 voiceProvider = "3wa-voxcpm2",
-                voice = "custom",
+                voice = ThreeWaSynthesisCapabilities.NarratorFallbackVoice,
                 rate = "+0%",
                 pitch = "+0Hz",
                 volume = "+0%",

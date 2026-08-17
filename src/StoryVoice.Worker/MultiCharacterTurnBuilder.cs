@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using StoryVoice.Domain.Narrations;
+using StoryVoice.Infrastructure.Narrations;
 
 namespace StoryVoice.Worker;
 
@@ -51,7 +52,10 @@ public static class MultiCharacterTurnBuilder
             throw new SpeechPlanIntegrityException(IntegrityMismatchReasonCode);
         }
 
-        var profilesByCharacter = BuildProfileLookup(voiceProfiles, characterProfileIdsByCharacterId);
+        var profilesByCharacter = BuildProfileLookup(
+            castRevision,
+            voiceProfiles,
+            characterProfileIdsByCharacterId);
         var orderedChapters = chapterPlans.OrderBy(plan => plan.ChapterSortOrder).ToArray();
         var turns = new List<NarrationTurn>();
         string? previousVoice = null;
@@ -240,14 +244,17 @@ public static class MultiCharacterTurnBuilder
             castRevision.NarratorVolume);
     }
 
-    /// <summary>Packs a Ready <see cref="CharacterVoiceProfile"/> into the single opaque string
-    /// <see cref="NarrationTurn.Voice"/> carries, so <c>ThreeWaVoxCpm2NarrationProvider</c> can
-    /// tell a Clone-mode profile (replay via its 3wa task id) from a Design-mode one (replay via
-    /// its prompt text, which never went through profile_prepare) without a second lookup.</summary>
-    private static string EncodeVoiceReference(CharacterVoiceProfile profile) =>
-        profile.Mode == CharacterVoiceProfileMode.Clone
-            ? $"clone:{profile.VoiceProfileTaskId}"
-            : $"design:{profile.VoicePromptText}";
+    /// <summary>Packs a Ready Clone profile into the opaque reference carried by a narration turn.
+    /// Design profiles are rejected while the provider contract cannot distinguish voice prompts.</summary>
+    private static string EncodeVoiceReference(CharacterVoiceProfile profile)
+    {
+        if (profile.Mode != CharacterVoiceProfileMode.Clone)
+        {
+            throw UnsupportedDesignVoice();
+        }
+
+        return $"clone:{profile.VoiceProfileTaskId}";
+    }
 
     /// <summary>
     /// Voice profiles hang off a <c>CharacterProfile</c> library entry, not off any one series'
@@ -259,18 +266,50 @@ public static class MultiCharacterTurnBuilder
     /// like <see cref="ResolveVoice"/> already expects.
     /// </summary>
     private static Dictionary<Guid, CharacterVoiceProfileBundle> BuildProfileLookup(
+        NarrationCastRevision castRevision,
         IReadOnlyList<CharacterVoiceProfile>? voiceProfiles,
         IReadOnlyDictionary<Guid, Guid>? characterProfileIdsByCharacterId)
     {
         var result = new Dictionary<Guid, CharacterVoiceProfileBundle>();
-        if (voiceProfiles is null || voiceProfiles.Count == 0 || characterProfileIdsByCharacterId is null)
+        var threeWaCharacterIds = castRevision.Assignments
+            .Where(assignment => string.Equals(
+                assignment.VoiceProvider,
+                CharacterVoiceProviders.ThreeWaVoxCpm2,
+                StringComparison.OrdinalIgnoreCase))
+            .Select(assignment => assignment.CharacterId)
+            .ToHashSet();
+        if (threeWaCharacterIds.Count == 0)
         {
             return result;
+        }
+
+        if (voiceProfiles is null || characterProfileIdsByCharacterId is null)
+        {
+            throw MissingCloneVoice();
+        }
+
+        var threeWaCharacterProfileIds = characterProfileIdsByCharacterId
+            .Where(entry => threeWaCharacterIds.Contains(entry.Key))
+            .Select(entry => entry.Value)
+            .ToHashSet();
+        if (threeWaCharacterProfileIds.Count != threeWaCharacterIds.Count)
+        {
+            throw MissingCloneVoice();
         }
 
         var bundlesByCharacterProfileId = new Dictionary<Guid, CharacterVoiceProfileBundle>();
         foreach (var profile in voiceProfiles)
         {
+            if (!threeWaCharacterProfileIds.Contains(profile.CharacterProfileId))
+            {
+                continue;
+            }
+
+            if (profile.Mode == CharacterVoiceProfileMode.Design)
+            {
+                throw UnsupportedDesignVoice();
+            }
+
             if (profile.Status != CharacterVoiceProfileStatus.Ready)
             {
                 continue;
@@ -292,16 +331,30 @@ public static class MultiCharacterTurnBuilder
             }
         }
 
-        foreach (var (characterId, characterProfileId) in characterProfileIdsByCharacterId)
+        foreach (var characterId in threeWaCharacterIds)
         {
-            if (bundlesByCharacterProfileId.TryGetValue(characterProfileId, out var bundle))
+            if (!characterProfileIdsByCharacterId.TryGetValue(characterId, out var characterProfileId)
+                || !bundlesByCharacterProfileId.TryGetValue(characterProfileId, out var bundle)
+                || bundle.Base is null)
             {
-                result[characterId] = bundle;
+                throw MissingCloneVoice();
             }
+
+            result[characterId] = bundle;
         }
 
         return result;
     }
+
+    private static PermanentNarrationProviderException UnsupportedDesignVoice() =>
+        new(
+            ThreeWaSynthesisCapabilities.DesignVoiceUnavailableCode,
+            ThreeWaSynthesisCapabilities.DesignVoiceUnavailableMessage);
+
+    private static PermanentNarrationProviderException MissingCloneVoice() =>
+        new(
+            ThreeWaSynthesisCapabilities.CloneVoiceUnavailableCode,
+            ThreeWaSynthesisCapabilities.CloneVoiceUnavailableMessage);
 
     private sealed class CharacterVoiceProfileBundle
     {

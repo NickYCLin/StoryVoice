@@ -5,12 +5,11 @@ using StoryVoice.Infrastructure.Narrations;
 namespace StoryVoice.Worker;
 
 /// <summary>
-/// Multi-character synthesis provider backed by the 3wa Cluster API's VoxCPM2 clone/design engine.
+/// Multi-character synthesis provider backed by the 3wa Cluster API's VoxCPM2 clone engine.
 /// Each <see cref="NarrationTurn.Voice"/> is either an opaque reference produced by
 /// <c>MultiCharacterTurnBuilder.EncodeVoiceReference</c> — <c>clone:&lt;task_id&gt;</c> (a confirmed
-/// <see cref="CharacterVoiceProfileMode.Clone"/> profile, replayed via its 3wa task id) or
-/// <c>design:&lt;prompt text&gt;</c> (a Design-mode profile, replayed by sending its prompt text on
-/// every call) — or, for characters (and the narrator — voice cloning isn't wired up for the
+/// <see cref="CharacterVoiceProfileMode.Clone"/> profile, replayed via its 3wa task id) — or, for
+/// characters (and the narrator — voice cloning isn't wired up for the
 /// narrator yet, so it always stays on Edge; see <c>SeriesNarrationService.EnsureSingleSynthesisProvider</c>)
 /// that stayed on <c>edge</c>, a literal Edge voice id delegated to the same
 /// <c>edge_tts_provider.py</c> script the plain Edge provider uses. Every turn is synthesized one
@@ -49,6 +48,13 @@ public sealed class ThreeWaVoxCpm2NarrationProvider(
             }
         }
 
+        // Validate every voice reference before creating a work directory or submitting the first
+        // chunk. A later Design turn must not be discovered after earlier Clone turns have already
+        // caused non-idempotent provider work.
+        var parsedReferences = request.Turns
+            .Select(turn => ParseVoiceReference(turn.Voice))
+            .ToArray();
+
         var outputDirectory = Path.GetDirectoryName(Path.GetFullPath(outputPath))!;
         Directory.CreateDirectory(outputDirectory);
         var workDirectory = Path.Combine(outputDirectory, $"3wa-voxcpm2-{Guid.NewGuid():N}");
@@ -69,7 +75,7 @@ public sealed class ThreeWaVoxCpm2NarrationProvider(
             for (var turnIndex = 0; turnIndex < turnChunks.Length; turnIndex++)
             {
                 var (turn, chunks) = turnChunks[turnIndex];
-                var reference = ParseVoiceReference(turn.Voice);
+                var reference = parsedReferences[turnIndex];
 
                 if (turn.PauseBeforeMs > 0)
                 {
@@ -129,9 +135,8 @@ public sealed class ThreeWaVoxCpm2NarrationProvider(
             return;
         }
 
-        var mode = reference.Kind == VoiceReferenceKind.Clone ? "ultimate_clone" : "design";
         var handle = await client.SubmitAsync(
-            new ThreeWaSynthesisRequest(text, mode, reference.TaskId, reference.PromptText),
+            new ThreeWaSynthesisRequest(text, "ultimate_clone", reference.TaskId, VoicePromptText: null),
             cancellationToken);
 
         string status;
@@ -186,11 +191,10 @@ public sealed class ThreeWaVoxCpm2NarrationProvider(
     private enum VoiceReferenceKind
     {
         Clone,
-        Design,
         Edge,
     }
 
-    private sealed record ParsedVoiceReference(VoiceReferenceKind Kind, string? TaskId, string? PromptText, string? EdgeVoice);
+    private sealed record ParsedVoiceReference(VoiceReferenceKind Kind, string? TaskId, string? EdgeVoice);
 
     /// <summary>
     /// A bare (unprefixed) voice reference is a literal Edge voice id — either a character that
@@ -208,21 +212,24 @@ public sealed class ThreeWaVoxCpm2NarrationProvider(
                 throw new InvalidOperationException("3wa 克隆聲線參照缺少 task id。");
             }
 
-            return new ParsedVoiceReference(VoiceReferenceKind.Clone, taskId, null, null);
+            return new ParsedVoiceReference(VoiceReferenceKind.Clone, taskId, null);
         }
 
         if (voiceReference.StartsWith("design:", StringComparison.Ordinal))
         {
-            var promptText = voiceReference["design:".Length..];
-            if (string.IsNullOrWhiteSpace(promptText))
-            {
-                throw new InvalidOperationException("3wa 設計聲線參照缺少描述文字。");
-            }
-
-            return new ParsedVoiceReference(VoiceReferenceKind.Design, null, promptText, null);
+            throw new PermanentNarrationProviderException(
+                ThreeWaSynthesisCapabilities.DesignVoiceUnavailableCode,
+                ThreeWaSynthesisCapabilities.DesignVoiceUnavailableMessage);
         }
 
-        return new ParsedVoiceReference(VoiceReferenceKind.Edge, null, null, voiceReference);
+        if (string.Equals(voiceReference, "custom", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new PermanentNarrationProviderException(
+                ThreeWaSynthesisCapabilities.LegacyNarratorVoiceUnavailableCode,
+                ThreeWaSynthesisCapabilities.LegacyNarratorVoiceUnavailableMessage);
+        }
+
+        return new ParsedVoiceReference(VoiceReferenceKind.Edge, null, voiceReference);
     }
 
     private static async Task SynthesizeEdgeFallbackChunkAsync(

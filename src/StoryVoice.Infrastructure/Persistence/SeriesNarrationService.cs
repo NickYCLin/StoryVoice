@@ -106,6 +106,7 @@ internal sealed class SeriesNarrationService(
             }
 
             EnsureSingleSynthesisProvider(series);
+            await EnsureThreeWaCharacterProfilesAvailableAsync(ownerId, series, cancellationToken);
             var sourceBooks = await LoadSeriesBooksAsync(ownerId, memberships, cancellationToken);
             var confirmedPlans = await LoadLatestConfirmedPlansAsync(
                 ownerId,
@@ -692,6 +693,62 @@ internal sealed class SeriesNarrationService(
                 && string.Equals(character.VoiceProvider, CharacterVoiceProviders.Edge, StringComparison.OrdinalIgnoreCase))))
         {
             throw new InvalidOperationException("目前多聲線合成必須使用與旁白相同的語音 provider（3wa 聲線系列除外，角色可混用 Edge 聲線）。");
+        }
+    }
+
+    private async Task EnsureThreeWaCharacterProfilesAvailableAsync(
+        Guid ownerId,
+        StorySeries series,
+        CancellationToken cancellationToken)
+    {
+        var customCharacters = series.Characters
+            .Where(character => string.Equals(
+                character.VoiceProvider,
+                CharacterVoiceProviders.ThreeWaVoxCpm2,
+                StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (customCharacters.Length == 0)
+        {
+            return;
+        }
+
+        if (customCharacters.Any(character => character.CharacterProfileId is null))
+        {
+            throw new InvalidOperationException(
+                ThreeWaSynthesisCapabilities.CloneVoiceUnavailableMessage);
+        }
+
+        var characterProfileIds = customCharacters
+            .Select(character => character.CharacterProfileId!.Value)
+            .Distinct()
+            .ToArray();
+        var containsDesignProfile = await dbContext.CharacterVoiceProfiles
+            .AsNoTracking()
+            .AnyAsync(
+                profile => profile.OwnerId == ownerId
+                    && characterProfileIds.Contains(profile.CharacterProfileId)
+                    && profile.Mode == CharacterVoiceProfileMode.Design,
+                cancellationToken);
+        if (containsDesignProfile)
+        {
+            throw new InvalidOperationException(
+                ThreeWaSynthesisCapabilities.DesignVoiceUnavailableMessage);
+        }
+
+        var readyCloneBaseProfileIds = await dbContext.CharacterVoiceProfiles
+            .AsNoTracking()
+            .Where(profile => profile.OwnerId == ownerId
+                && characterProfileIds.Contains(profile.CharacterProfileId)
+                && profile.Kind == CharacterVoiceProfileKind.Base
+                && profile.Mode == CharacterVoiceProfileMode.Clone
+                && profile.Status == CharacterVoiceProfileStatus.Ready)
+            .Select(profile => profile.CharacterProfileId)
+            .Distinct()
+            .ToArrayAsync(cancellationToken);
+        if (characterProfileIds.Except(readyCloneBaseProfileIds).Any())
+        {
+            throw new InvalidOperationException(
+                ThreeWaSynthesisCapabilities.CloneVoiceUnavailableMessage);
         }
     }
 

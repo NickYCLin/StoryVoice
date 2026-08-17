@@ -102,7 +102,7 @@ export function BookInsightsPanel({ book, books, csrfToken, onBookUpdated }: Boo
     if (!selectedSeries) return []
     return voiceOptions.filter((voice) => voice.provider === selectedSeries.narratorProvider
       || (selectedSeries.narratorProvider === '3wa-voxcpm2' && voice.provider === 'edge'))
-      .filter((voice) => voice.voice !== 'custom')
+      .filter((voice) => voice.provider !== '3wa-voxcpm2')
   }, [selectedSeries, voiceOptions])
 
   useEffect(() => {

@@ -53,7 +53,7 @@ test('角色候選聲線跟隨目標系列 provider，不會由全域 catalog �
   assert.ok(app.includes('narratorProvider: string'))
   assert.ok(app.includes("voice.provider === selectedSeries.narratorProvider"))
   assert.ok(app.includes("selectedSeries.narratorProvider === '3wa-voxcpm2' && voice.provider === 'edge'"))
-  assert.ok(app.includes(".filter((voice) => voice.voice !== 'custom')"))
+  assert.ok(app.includes(".filter((voice) => voice.provider !== '3wa-voxcpm2')"))
   assert.ok(app.includes('applicableVoiceOptions.find((option) => voiceKey(option) === draft.voiceKey)'))
   assert.ok(app.includes('applicableVoiceOptions.map((voice) => <option'))
   assert.ok(!app.includes('voiceOptions.find((option) => voiceKey(option) === draft.voiceKey)'))

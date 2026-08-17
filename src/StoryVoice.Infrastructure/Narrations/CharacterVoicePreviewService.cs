@@ -47,6 +47,13 @@ internal sealed class CharacterVoicePreviewService(
             return null;
         }
 
+        if (profile.Mode == CharacterVoiceProfileMode.Design
+            && !ThreeWaSynthesisCapabilities.SupportsVoiceDesign)
+        {
+            throw new InvalidOperationException(
+                ThreeWaSynthesisCapabilities.DesignVoiceUnavailableMessage);
+        }
+
         if (profile.Status != CharacterVoiceProfileStatus.Ready)
         {
             throw new InvalidOperationException("這組聲線還沒就緒，無法試講。");

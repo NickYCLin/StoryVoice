@@ -1,11 +1,15 @@
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using StoryVoice.Application.Characters;
 using StoryVoice.Application.Narrations;
+using StoryVoice.Domain.Narrations;
 using StoryVoice.Infrastructure.Narrations;
+using StoryVoice.Infrastructure.Persistence;
 
 namespace StoryVoice.IntegrationTests;
 
@@ -32,7 +36,7 @@ public sealed class CharacterVoiceProfileApiTests(ApiFactory factory) : IClassFi
     }
 
     [Fact]
-    public async Task A_designed_base_profile_is_ready_immediately_and_a_second_base_profile_is_rejected()
+    public async Task Design_creation_is_fail_closed_for_base_and_scene_without_persisting_a_profile()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
@@ -42,13 +46,17 @@ public sealed class CharacterVoiceProfileApiTests(ApiFactory factory) : IClassFi
             $"/api/character-profiles/{characterProfileId}/voice-profiles/base/design",
             new { voicePrompt = "溫柔、略帶沙啞的女聲" },
             cancellationToken);
-        Assert.Equal(HttpStatusCode.OK, createResponse.StatusCode);
-        var created = await createResponse.Content.ReadFromJsonAsync<CharacterVoiceProfileResponse>(cancellationToken);
-        Assert.NotNull(created);
-        Assert.Equal("Base", created.Kind);
-        Assert.Equal("Design", created.Mode);
-        Assert.Equal("Ready", created.Status);
-        Assert.Null(created.SceneCode);
+        Assert.Equal(HttpStatusCode.BadRequest, createResponse.StatusCode);
+        Assert.Contains(
+            "voice_prompt",
+            await createResponse.Content.ReadAsStringAsync(cancellationToken),
+            StringComparison.Ordinal);
+
+        using var sceneResponse = await client.PostWithCsrfAsync(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/scenes/angry/design",
+            new { voicePrompt = "生氣、提高音量的聲音" },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, sceneResponse.StatusCode);
 
         using var listResponse = await client.GetAsync(
             $"/api/character-profiles/{characterProfileId}/voice-profiles",
@@ -56,60 +64,25 @@ public sealed class CharacterVoiceProfileApiTests(ApiFactory factory) : IClassFi
         var profiles = await listResponse.Content
             .ReadFromJsonAsync<CharacterVoiceProfileResponse[]>(cancellationToken);
         Assert.NotNull(profiles);
-        Assert.Contains(profiles, profile => profile.Id == created.Id);
-
-        using var duplicateResponse = await client.PostWithCsrfAsync(
-            $"/api/character-profiles/{characterProfileId}/voice-profiles/base/design",
-            new { voicePrompt = "另一種聲音描述" },
-            cancellationToken);
-        Assert.Equal(HttpStatusCode.BadRequest, duplicateResponse.StatusCode);
+        Assert.Empty(profiles);
     }
 
     [Fact]
-    public async Task A_designed_scene_profile_can_coexist_with_a_base_profile_for_the_same_character()
-    {
-        var cancellationToken = TestContext.Current.CancellationToken;
-        using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
-        var characterProfileId = await CreateCharacterProfileAsync(client, cancellationToken);
-
-        using var baseResponse = await client.PostWithCsrfAsync(
-            $"/api/character-profiles/{characterProfileId}/voice-profiles/base/design",
-            new { voicePrompt = "平常說話的聲音" },
-            cancellationToken);
-        Assert.Equal(HttpStatusCode.OK, baseResponse.StatusCode);
-
-        using var angryResponse = await client.PostWithCsrfAsync(
-            $"/api/character-profiles/{characterProfileId}/voice-profiles/scenes/angry/design",
-            new { voicePrompt = "生氣、提高音量的聲音" },
-            cancellationToken);
-        Assert.Equal(HttpStatusCode.OK, angryResponse.StatusCode);
-        var angryProfile = await angryResponse.Content
-            .ReadFromJsonAsync<CharacterVoiceProfileResponse>(cancellationToken);
-        Assert.NotNull(angryProfile);
-        Assert.Equal("Scene", angryProfile.Kind);
-        Assert.Equal("angry", angryProfile.SceneCode);
-
-        using var duplicateSceneResponse = await client.PostWithCsrfAsync(
-            $"/api/character-profiles/{characterProfileId}/voice-profiles/scenes/angry/design",
-            new { voicePrompt = "又一種生氣的聲音" },
-            cancellationToken);
-        Assert.Equal(HttpStatusCode.BadRequest, duplicateSceneResponse.StatusCode);
-    }
-
-    [Fact]
-    public async Task Voice_profiles_are_owner_scoped_and_a_designed_profile_has_no_reference_audio()
+    public async Task An_existing_designed_profile_remains_listed_but_has_no_reference_audio()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         using var ownerAClient = await factory.CreateAuthenticatedClientAsync(cancellationToken);
         using var ownerBClient = await factory.CreateAuthenticatedClientAsync(cancellationToken);
         var characterProfileId = await CreateCharacterProfileAsync(ownerAClient, cancellationToken);
-
-        using var createResponse = await ownerAClient.PostWithCsrfAsync(
-            $"/api/character-profiles/{characterProfileId}/voice-profiles/base/design",
-            new { voicePrompt = "溫柔、略帶沙啞的女聲" },
+        var profileId = await SeedDesignedVoiceProfileAsync(
+            factory,
+            characterProfileId,
             cancellationToken);
-        var created = await createResponse.Content.ReadFromJsonAsync<CharacterVoiceProfileResponse>(cancellationToken);
-        Assert.NotNull(created);
+
+        var profiles = await ownerAClient.GetFromJsonAsync<CharacterVoiceProfileResponse[]>(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles",
+            cancellationToken);
+        Assert.Contains(Assert.IsType<CharacterVoiceProfileResponse[]>(profiles), profile => profile.Id == profileId);
 
         using var otherOwnerListResponse = await ownerBClient.GetAsync(
             $"/api/character-profiles/{characterProfileId}/voice-profiles",
@@ -117,7 +90,7 @@ public sealed class CharacterVoiceProfileApiTests(ApiFactory factory) : IClassFi
         Assert.Equal(HttpStatusCode.NotFound, otherOwnerListResponse.StatusCode);
 
         using var referenceAudioResponse = await ownerAClient.GetAsync(
-            $"/api/character-profiles/{characterProfileId}/voice-profiles/{created.Id}/reference-audio",
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/{profileId}/reference-audio",
             cancellationToken);
         Assert.Equal(HttpStatusCode.NotFound, referenceAudioResponse.StatusCode);
     }
@@ -128,22 +101,16 @@ public sealed class CharacterVoiceProfileApiTests(ApiFactory factory) : IClassFi
         var cancellationToken = TestContext.Current.CancellationToken;
         using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
         var characterProfileId = await CreateCharacterProfileAsync(client, cancellationToken);
-
-        using var createResponse = await client.PostWithCsrfAsync(
-            $"/api/character-profiles/{characterProfileId}/voice-profiles/base/design",
-            new { voicePrompt = "溫柔、略帶沙啞的女聲" },
-            cancellationToken);
-        var created = await createResponse.Content.ReadFromJsonAsync<CharacterVoiceProfileResponse>(cancellationToken);
-        Assert.NotNull(created);
+        var profileId = await SeedDesignedVoiceProfileAsync(factory, characterProfileId, cancellationToken);
 
         using var blankResponse = await client.PostWithCsrfAsync(
-            $"/api/character-profiles/{characterProfileId}/voice-profiles/{created.Id}/preview",
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/{profileId}/preview",
             new { text = "   " },
             cancellationToken);
         Assert.Equal(HttpStatusCode.BadRequest, blankResponse.StatusCode);
 
         using var overlongResponse = await client.PostWithCsrfAsync(
-            $"/api/character-profiles/{characterProfileId}/voice-profiles/{created.Id}/preview",
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/{profileId}/preview",
             new { text = new string('a', 500) },
             cancellationToken);
         Assert.Equal(HttpStatusCode.BadRequest, overlongResponse.StatusCode);
@@ -156,7 +123,7 @@ public sealed class CharacterVoiceProfileApiTests(ApiFactory factory) : IClassFi
     }
 
     [Fact]
-    public async Task Ready_designed_profile_preview_is_owner_scoped_CSRF_protected_and_returns_exact_audio()
+    public async Task Existing_designed_profile_preview_is_owner_scoped_CSRF_protected_and_rejected_without_calling_3wa()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         var fake = new FakeThreeWaSynthesisClient(
@@ -167,8 +134,8 @@ public sealed class CharacterVoiceProfileApiTests(ApiFactory factory) : IClassFi
         using var otherOwner = await previewFactory.CreateAuthenticatedClientAsync(cancellationToken);
         using var anonymous = previewFactory.CreateClient();
         var characterProfileId = await CreateCharacterProfileAsync(owner, cancellationToken);
-        var profile = await CreateDesignedVoiceProfileAsync(owner, characterProfileId, cancellationToken);
-        var previewPath = $"/api/character-profiles/{characterProfileId}/voice-profiles/{profile.Id}/preview";
+        var profileId = await SeedDesignedVoiceProfileAsync(previewFactory, characterProfileId, cancellationToken);
+        var previewPath = $"/api/character-profiles/{characterProfileId}/voice-profiles/{profileId}/preview";
 
         using var anonymousResponse = await anonymous.PostAsJsonAsync(
             previewPath,
@@ -194,21 +161,15 @@ public sealed class CharacterVoiceProfileApiTests(ApiFactory factory) : IClassFi
             new { text = "  你好，台灣。  " },
             cancellationToken);
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal("audio/wav", response.Content.Headers.ContentType?.MediaType);
-        Assert.Equal(fake.Audio.Length, response.Content.Headers.ContentLength);
-        Assert.Equal("no-store", response.Headers.CacheControl?.ToString());
-        Assert.Equal("nosniff", Assert.Single(response.Headers.GetValues("X-Content-Type-Options")));
-        Assert.Equal(fake.Audio, await response.Content.ReadAsByteArrayAsync(cancellationToken));
-        Assert.Equal(1, fake.SubmitCount);
-        Assert.Equal(1, fake.StatusCount);
-        Assert.Equal(1, fake.ResultCount);
-        Assert.Equal(1, fake.DownloadCount);
-        Assert.NotNull(fake.Request);
-        Assert.Equal("你好，台灣。", fake.Request.Text);
-        Assert.Equal("design", fake.Request.Mode);
-        Assert.Null(fake.Request.VoiceProfileTaskId);
-        Assert.Equal("溫柔、略帶沙啞的台灣華語女聲", fake.Request.VoicePromptText);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains(
+            "voice_prompt",
+            await response.Content.ReadAsStringAsync(cancellationToken),
+            StringComparison.Ordinal);
+        Assert.Equal(0, fake.SubmitCount);
+        Assert.Equal(0, fake.StatusCount);
+        Assert.Equal(0, fake.ResultCount);
+        Assert.Equal(0, fake.DownloadCount);
     }
 
     [Theory]
@@ -222,10 +183,10 @@ public sealed class CharacterVoiceProfileApiTests(ApiFactory factory) : IClassFi
         using var previewFactory = CreatePreviewFactory(fake);
         using var owner = await previewFactory.CreateAuthenticatedClientAsync(cancellationToken);
         var characterProfileId = await CreateCharacterProfileAsync(owner, cancellationToken);
-        var profile = await CreateDesignedVoiceProfileAsync(owner, characterProfileId, cancellationToken);
+        var profileId = await SeedReadyCloneVoiceProfileAsync(previewFactory, characterProfileId, cancellationToken);
 
         using var response = await owner.PostWithCsrfAsync(
-            $"/api/character-profiles/{characterProfileId}/voice-profiles/{profile.Id}/preview",
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/{profileId}/preview",
             new { text = "你好" },
             cancellationToken);
 
@@ -242,10 +203,10 @@ public sealed class CharacterVoiceProfileApiTests(ApiFactory factory) : IClassFi
         using var previewFactory = CreatePreviewFactory(fake, maximumAudioResponseBytes: 64 * 1024);
         using var owner = await previewFactory.CreateAuthenticatedClientAsync(cancellationToken);
         var characterProfileId = await CreateCharacterProfileAsync(owner, cancellationToken);
-        var profile = await CreateDesignedVoiceProfileAsync(owner, characterProfileId, cancellationToken);
+        var profileId = await SeedReadyCloneVoiceProfileAsync(previewFactory, characterProfileId, cancellationToken);
 
         using var response = await owner.PostWithCsrfAsync(
-            $"/api/character-profiles/{characterProfileId}/voice-profiles/{profile.Id}/preview",
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/{profileId}/preview",
             new { text = "你好" },
             cancellationToken);
 
@@ -302,21 +263,59 @@ public sealed class CharacterVoiceProfileApiTests(ApiFactory factory) : IClassFi
         return created.Id;
     }
 
-    private static async Task<CharacterVoiceProfileResponse> CreateDesignedVoiceProfileAsync(
-        HttpClient client,
+    private static async Task<Guid> SeedDesignedVoiceProfileAsync(
+        WebApplicationFactory<Program> appFactory,
         Guid characterProfileId,
         CancellationToken cancellationToken)
     {
-        using var response = await client.PostWithCsrfAsync(
-            $"/api/character-profiles/{characterProfileId}/voice-profiles/base/design",
-            new { voicePrompt = "溫柔、略帶沙啞的台灣華語女聲" },
-            cancellationToken);
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var profile = await response.Content.ReadFromJsonAsync<CharacterVoiceProfileResponse>(cancellationToken);
-        Assert.NotNull(profile);
-        Assert.Equal("Design", profile.Mode);
-        Assert.Equal("Ready", profile.Status);
-        return profile;
+        await using var scope = appFactory.Services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+        var ownerId = await dbContext.CharacterProfiles
+            .Where(profile => profile.Id == characterProfileId)
+            .Select(profile => profile.OwnerId)
+            .SingleAsync(cancellationToken);
+        var profile = CharacterVoiceProfile.CreateDesign(
+            Guid.NewGuid(),
+            ownerId,
+            characterProfileId,
+            CharacterVoiceProfileKind.Base,
+            null,
+            "溫柔、略帶沙啞的台灣華語女聲",
+            DateTimeOffset.UtcNow);
+        dbContext.CharacterVoiceProfiles.Add(profile);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return profile.Id;
+    }
+
+    private static async Task<Guid> SeedReadyCloneVoiceProfileAsync(
+        WebApplicationFactory<Program> appFactory,
+        Guid characterProfileId,
+        CancellationToken cancellationToken)
+    {
+        await using var scope = appFactory.Services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+        var ownerId = await dbContext.CharacterProfiles
+            .Where(profile => profile.Id == characterProfileId)
+            .Select(profile => profile.OwnerId)
+            .SingleAsync(cancellationToken);
+        var now = DateTimeOffset.UtcNow;
+        var profile = CharacterVoiceProfile.CreateClone(
+            Guid.NewGuid(),
+            ownerId,
+            characterProfileId,
+            CharacterVoiceProfileKind.Base,
+            null,
+            CharacterVoiceConsentTypes.SelfRecorded,
+            "seeded/reference.wav",
+            new string('a', 64),
+            8,
+            ownerId,
+            now);
+        profile.AttachDraftTranscript("seeded-profile-task", "你好，台灣。", now);
+        profile.ConfirmTranscript("你好，台灣。", now);
+        dbContext.CharacterVoiceProfiles.Add(profile);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return profile.Id;
     }
 
     private Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program> CreatePreviewFactory(

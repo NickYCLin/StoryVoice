@@ -6,7 +6,7 @@ public sealed class MultiCharacterNarrationOptionsTests
 {
     [Theory]
     [InlineData("edge", "edge-tts-7.2.8", "edge-tts-multi-voice-v1", "concat-demuxer-mp3-v1")]
-    [InlineData("3WA-VOXCPM2", "3wa-voxcpm2-api-v1", "3wa-voxcpm2-turn-concat-v1", "mixed-audio-to-mp3-concat-v1")]
+    [InlineData("3WA-VOXCPM2", "3wa-voxcpm2-api-v1", "3wa-voxcpm2-turn-concat-v2", "mixed-audio-to-mp3-concat-v1")]
     [InlineData("voai", "voai-voice-api-v1", "voai-speech-turn-concat-v1", "wav-32khz-to-mp3-concat-v1")]
     [InlineData("bluemagpie", "bm1-d2d7ef3e81456915eb7a3cfe2446a9f19417c21b", "bluemagpie-pcm16-concat-v1", "wav-48khz-mono-to-mp3-concat-v1")]
     public void Provider_metadata_is_resolved_per_synthesis_provider(

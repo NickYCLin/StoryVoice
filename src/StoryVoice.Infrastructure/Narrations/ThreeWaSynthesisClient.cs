@@ -26,6 +26,16 @@ public sealed class ThreeWaSynthesisClient(HttpClient httpClient, IOptions<Three
         ArgumentNullException.ThrowIfNull(request);
         var text = Require(request.Text, "3wa synthesis text is required.");
         var mode = Require(request.Mode, "3wa synthesis mode is required.");
+        if (string.Equals(mode, "design", StringComparison.Ordinal))
+        {
+            throw ContractViolation(ThreeWaSynthesisCapabilities.DesignVoiceUnavailableMessage);
+        }
+
+        if (!string.Equals(mode, "ultimate_clone", StringComparison.Ordinal))
+        {
+            throw ContractViolation("3wa synthesis mode is not supported.");
+        }
+
         var payload = new Dictionary<string, object>
         {
             ["operation"] = "synthesize",
@@ -35,23 +45,10 @@ public sealed class ThreeWaSynthesisClient(HttpClient httpClient, IOptions<Three
             ["seed_policy"] = CanonicalSeedPolicy,
             ["model"] = CanonicalModel,
             ["priority"] = CanonicalPriority,
-        };
-        if (string.Equals(mode, "design", StringComparison.Ordinal))
-        {
-            payload["voice_prompt"] = Require(
-                request.VoicePromptText,
-                "3wa design synthesis requires voice_prompt.");
-        }
-        else if (string.Equals(mode, "ultimate_clone", StringComparison.Ordinal))
-        {
-            payload["voice_profile_task_id"] = Require(
+            ["voice_profile_task_id"] = Require(
                 request.VoiceProfileTaskId,
-                "3wa clone synthesis requires voice_profile_task_id.");
-        }
-        else
-        {
-            throw ContractViolation("3wa synthesis mode is not supported.");
-        }
+                "3wa clone synthesis requires voice_profile_task_id."),
+        };
 
         using var content = JsonContent.Create(payload);
         using var document = await SendJsonAsync(

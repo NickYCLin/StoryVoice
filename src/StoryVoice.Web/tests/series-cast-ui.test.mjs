@@ -150,13 +150,17 @@ test('自訂聲線工作室固定使用 owner-scoped 角色庫 voice-profiles AP
   assert.doesNotMatch(voiceProfilesPanel, /fuzzy|模糊比對/i)
 })
 
-test('Design 聲線由 owner-scoped slot endpoint 建立並送出 CSRF 與 voicePrompt', () => {
-  assert.match(voiceProfilesPanel, /const slotMode = mode\[slotKey\] \?\? 'Design'/)
-  assert.match(voiceProfilesPanel, /`\$\{slotPath\(characterProfileId, sceneCode\)\}\/design`/)
-  assert.match(voiceProfilesPanel, /method: 'POST'/)
-  assert.match(voiceProfilesPanel, /csrfToken,/)
-  assert.match(voiceProfilesPanel, /body: \{ voicePrompt: text \}/)
-  assert.match(voiceProfilesPanel, /文字設計模式不需要等待處理/)
+test('3wa Design 依驗證過的 provider contract 固定 fail closed，existing profile 也不可試音', () => {
+  assert.match(voiceProfilesPanel, /const DESIGN_VOICE_AVAILABLE = false/)
+  assert.match(voiceProfilesPanel, /const slotMode = mode\[slotKey\] \?\? 'Clone'/)
+  assert.match(voiceProfilesPanel, /disabled=\{!DESIGN_VOICE_AVAILABLE\}/)
+  assert.match(voiceProfilesPanel, /文字設計（目前不支援）/)
+  assert.match(voiceProfilesPanel, /profile\?\.mode === 'Design' && !DESIGN_VOICE_AVAILABLE/)
+  assert.match(voiceProfilesPanel, /profile\.status === 'Ready' && !designUnavailable/)
+  assert.match(voiceProfilesPanel, /voice_prompt/)
+  assert.match(voiceProfilesPanel, /現有資料仍會保留但不可試音或正式配音/)
+  assert.match(characterLibraryPage, /profile\.status === 'Ready' && profile\.mode === 'Clone'/)
+  assert.match(characterLibraryPage, /文字設計聲線因 3wa 尚未將 voice_prompt 傳給 VoxCPM2/)
 })
 
 test('系列角色只有連結角色庫時才顯示自訂聲線，且加入角色時可以選角色庫既有角色', () => {

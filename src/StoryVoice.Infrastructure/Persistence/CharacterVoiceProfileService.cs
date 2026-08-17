@@ -10,8 +10,8 @@ namespace StoryVoice.Infrastructure.Persistence;
 /// <summary>
 /// Owner-scoped lifecycle service for <see cref="CharacterVoiceProfile"/>, hanging off a
 /// <see cref="CharacterProfile"/> library entry rather than any one series — the same character's
-/// voices are reused everywhere that character is cast. Design-mode profiles are ready the moment
-/// they're created (no 3wa round trip needed); Clone-mode profiles proxy the 3wa Cluster API's
+/// voices are reused everywhere that character is cast. Design-mode creation is fail-closed while
+/// 3wa does not forward voice_prompt to VoxCPM2; Clone-mode profiles proxy the 3wa Cluster API's
 /// profile_prepare/status/confirm sequence, keeping the locally stored WAV + confirmed transcript
 /// as the canonical, rebuildable asset behind whatever opaque task id the pinned station currently
 /// has.
@@ -119,6 +119,12 @@ internal sealed class CharacterVoiceProfileService(
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
+        if (!ThreeWaSynthesisCapabilities.SupportsVoiceDesign)
+        {
+            throw new InvalidOperationException(
+                ThreeWaSynthesisCapabilities.DesignVoiceUnavailableMessage);
+        }
+
         var ownerId = EnsureCurrentOwnerId();
         var parsedKind = ParseKind(kind);
         var character = await LoadCharacterProfileAsync(ownerId, characterProfileId, cancellationToken);
