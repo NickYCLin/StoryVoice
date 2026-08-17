@@ -159,6 +159,75 @@ public sealed class StoryPipelineWorkerModeTests
             blueOptions.RestartCooldown));
     }
 
+    [Fact]
+    public void Synthesis_progress_only_persists_when_the_integer_percentage_increases()
+    {
+        var checkpoint = new StoryPipelineWorker.SynthesisProgressCheckpoint();
+        var persistedPercentages = new List<int>();
+
+        for (var completedChunks = 1; completedChunks <= 200; completedChunks++)
+        {
+            if (checkpoint.TryAdvance(
+                new NarrationSynthesisProgress(completedChunks, 200),
+                out var progressPercent))
+            {
+                persistedPercentages.Add(progressPercent);
+            }
+        }
+
+        Assert.Equal(Enumerable.Range(11, 85), persistedPercentages);
+        Assert.False(checkpoint.TryAdvance(
+            new NarrationSynthesisProgress(200, 200),
+            out var repeatedProgressPercent));
+        Assert.Equal(95, repeatedProgressPercent);
+        Assert.Contains(
+            File.ReadAllLines(GetWorkerSourcePath()),
+            line => line.Contains(
+                ".SetProperty(item => item.ProgressPercent, 100)",
+                StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Retryable_BlueMagpie_failures_use_the_safe_restart_cooldown()
+    {
+        var blueOptions = new BlueMagpieOptions
+        {
+            QueueTimeoutSeconds = 15,
+            SynthesisWatchdogSeconds = 120,
+            ModelLifecycleWatchdogSeconds = 300,
+        };
+        var now = DateTimeOffset.Parse("2026-08-15T12:00:00+00:00");
+
+        var retryDelay = StoryPipelineWorker.ResolveProviderRetryDelay(
+            CharacterVoiceProviders.BlueMagpie,
+            permanent: false,
+            blueOptions);
+
+        Assert.Equal(blueOptions.RestartCooldown, retryDelay);
+        Assert.Equal(
+            now.Add(blueOptions.RestartCooldown),
+            StoryPipelineWorker.CalculateNextAttemptAt(
+                now,
+                attempts: 1,
+                finalFailure: false,
+                retryDelay));
+    }
+
+    [Theory]
+    [InlineData("edge", false)]
+    [InlineData("voai", false)]
+    [InlineData("bluemagpie", true)]
+    [InlineData(null, false)]
+    public void BlueMagpie_retry_cooldown_does_not_change_other_or_permanent_failures(
+        string? providerName,
+        bool permanent)
+    {
+        Assert.Null(StoryPipelineWorker.ResolveProviderRetryDelay(
+            providerName,
+            permanent,
+            new BlueMagpieOptions()));
+    }
+
     private static NarrationJob CreateJob() =>
         NarrationJob.Create(
             Guid.NewGuid(),

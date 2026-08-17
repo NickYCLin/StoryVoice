@@ -57,6 +57,9 @@ services:
       BlueMagpie__SynthesisWatchdogSeconds: ${BLUEMAGPIE_SYNTHESIS_WATCHDOG_SECONDS:-120}
       BlueMagpie__ModelLifecycleWatchdogSeconds: ${BLUEMAGPIE_MODEL_LIFECYCLE_WATCHDOG_SECONDS:-120}
       BlueMagpie__RequestTimeoutSeconds: ${BLUEMAGPIE_REQUEST_TIMEOUT_SECONDS:-180}
+      BlueMagpie__MaximumResponseBytes: ${BLUEMAGPIE_MAXIMUM_RESPONSE_BYTES:-5242880}
+      BlueMagpie__MaximumChunksPerJob: ${BLUEMAGPIE_MAXIMUM_CHUNKS_PER_JOB:-10000}
+      BlueMagpie__MaximumJobAudioBytes: ${BLUEMAGPIE_MAXIMUM_JOB_AUDIO_BYTES:-8589934592}
     volumes:
       - book-storage:/data/books
       - character-voice-storage:/data/character-voices
@@ -103,6 +106,9 @@ services:
       BlueMagpie__SynthesisWatchdogSeconds: ${BLUEMAGPIE_SYNTHESIS_WATCHDOG_SECONDS:-120}
       BlueMagpie__ModelLifecycleWatchdogSeconds: ${BLUEMAGPIE_MODEL_LIFECYCLE_WATCHDOG_SECONDS:-120}
       BlueMagpie__RequestTimeoutSeconds: ${BLUEMAGPIE_REQUEST_TIMEOUT_SECONDS:-180}
+      BlueMagpie__MaximumResponseBytes: ${BLUEMAGPIE_MAXIMUM_RESPONSE_BYTES:-5242880}
+      BlueMagpie__MaximumChunksPerJob: ${BLUEMAGPIE_MAXIMUM_CHUNKS_PER_JOB:-10000}
+      BlueMagpie__MaximumJobAudioBytes: ${BLUEMAGPIE_MAXIMUM_JOB_AUDIO_BYTES:-8589934592}
       BlueMagpieChunkCache__RootPath: /data/bluemagpie-cache
       BlueMagpieChunkCache__MaximumBytes: ${BLUEMAGPIE_CHUNK_CACHE_MAXIMUM_BYTES:-34359738368}
       BlueMagpieChunkCache__LowWatermarkBytes: ${BLUEMAGPIE_CHUNK_CACHE_LOW_WATERMARK_BYTES:-25769803776}

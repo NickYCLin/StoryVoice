@@ -244,9 +244,17 @@ public sealed class StoryPipelineWorker(
             var cancellationMonitor = MonitorCancellationAsync(claim, providerCancellation, stoppingToken);
             try
             {
+                var progressCheckpoint = new SynthesisProgressCheckpoint();
                 Func<NarrationSynthesisProgress, CancellationToken, Task> reportProgress = async (progress, progressCancellationToken) =>
                 {
-                    await ReportSynthesisProgressAsync(db, claim, progress, progressCancellationToken);
+                    if (progressCheckpoint.TryAdvance(progress, out var progressPercent))
+                    {
+                        await ReportSynthesisProgressAsync(
+                            db,
+                            claim,
+                            progressPercent,
+                            progressCancellationToken);
+                    }
                 };
 
                 if (job.Mode == NarrationMode.MultiCharacter)
@@ -410,7 +418,11 @@ public sealed class StoryPipelineWorker(
                 claim,
                 "provider_timeout",
                 CancellationToken.None,
-                permanent: preventAutomaticReplay);
+                permanent: preventAutomaticReplay,
+                retryDelay: ResolveProviderRetryDelay(
+                    synthesisProviderName,
+                    preventAutomaticReplay,
+                    blueMagpieOptions.Value));
         }
         catch (Exception exception)
         {
@@ -433,7 +445,11 @@ public sealed class StoryPipelineWorker(
                 claim,
                 errorCode,
                 CancellationToken.None,
-                permanent: isPermanentErrorCode);
+                permanent: isPermanentErrorCode,
+                retryDelay: ResolveProviderRetryDelay(
+                    synthesisProviderName,
+                    isPermanentErrorCode,
+                    blueMagpieOptions.Value));
         }
         finally
         {
@@ -553,6 +569,37 @@ public sealed class StoryPipelineWorker(
         return Math.Clamp(mapped, 11, 95);
     }
 
+    internal sealed class SynthesisProgressCheckpoint
+    {
+        private int _lastProgressPercent = 10;
+
+        public bool TryAdvance(
+            NarrationSynthesisProgress progress,
+            out int progressPercent)
+        {
+            ArgumentNullException.ThrowIfNull(progress);
+            progressPercent = CalculateSynthesisProgress(
+                progress.CompletedChunks,
+                progress.TotalChunks);
+            while (true)
+            {
+                var current = Volatile.Read(ref _lastProgressPercent);
+                if (progressPercent <= current)
+                {
+                    return false;
+                }
+
+                if (Interlocked.CompareExchange(
+                    ref _lastProgressPercent,
+                    progressPercent,
+                    current) == current)
+                {
+                    return true;
+                }
+            }
+        }
+    }
+
     internal static MultiVoiceNarrationRequest CreateMultiVoiceNarrationRequest(
         NarrationCastRevision castRevision,
         IReadOnlyList<NarrationTurn> turns,
@@ -578,6 +625,17 @@ public sealed class StoryPipelineWorker(
             providerName,
             CharacterVoiceProviders.BlueMagpie,
             StringComparison.OrdinalIgnoreCase);
+
+    internal static TimeSpan? ResolveProviderRetryDelay(
+        string? providerName,
+        bool permanent,
+        BlueMagpieOptions blueOptions)
+    {
+        ArgumentNullException.ThrowIfNull(blueOptions);
+        return !permanent && CanResumeAfterWorkerStop(providerName)
+            ? blueOptions.RestartCooldown
+            : null;
+    }
 
     internal static DateTimeOffset? CalculateNextAttemptAt(
         DateTimeOffset now,
@@ -636,12 +694,9 @@ public sealed class StoryPipelineWorker(
     private async Task ReportSynthesisProgressAsync(
         StoryVoiceDbContext db,
         ClaimedJob claim,
-        NarrationSynthesisProgress progress,
+        int progressPercent,
         CancellationToken cancellationToken)
     {
-        var progressPercent = CalculateSynthesisProgress(
-            progress.CompletedChunks,
-            progress.TotalChunks);
         var updatedAt = DateTimeOffset.UtcNow;
         try
         {

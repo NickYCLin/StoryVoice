@@ -44,6 +44,21 @@ public static class SeriesNarrationEndpoints
         .Produces<SeriesNarrationRebuildResponse>(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status404NotFound);
 
+        group.MapPost("/{batchId:guid}/discard", async (
+            Guid seriesId,
+            Guid batchId,
+            ISeriesNarrationService service,
+            CancellationToken cancellationToken) =>
+        {
+            var batch = await service.DiscardRebuildAsync(seriesId, batchId, cancellationToken);
+            return batch is null ? Results.NotFound() : Results.Ok(batch);
+        })
+        .AddEndpointFilter<AntiforgeryEndpointFilter>()
+        .WithName("DiscardSeriesNarrationRebuild")
+        .Produces<SeriesNarrationRebuildResponse>(StatusCodes.Status200OK)
+        .ProducesProblem(StatusCodes.Status400BadRequest)
+        .Produces(StatusCodes.Status404NotFound);
+
         group.MapPost("/{batchId:guid}/activate", async (
             Guid seriesId,
             Guid batchId,

@@ -111,6 +111,13 @@ public static class DependencyInjection
                 "BlueMagpie API request timeout 必須涵蓋 connect、queue、synthesis watchdog 與安全餘裕。")
             .Validate(options => options.MaximumResponseBytes is >= 64 * 1024 and <= 16 * 1024 * 1024,
                 "BlueMagpie response 上限必須介於 64 KiB 至 16 MiB。")
+            .Validate(options => options.MaximumChunksPerJob is >= 1 and <= 10_000,
+                "BlueMagpie 單一工作分段上限必須介於 1 至 10000。")
+            .Validate(options => options.MaximumJobAudioBytes is >= 64L * 1024 * 1024
+                    and <= 8L * 1024 * 1024 * 1024,
+                "BlueMagpie 單一工作 PCM 音訊上限必須介於 64 MiB 至 8 GiB。")
+            .Validate(options => options.MaximumJobAudioBytes >= options.MaximumResponseBytes,
+                "BlueMagpie 單一工作 PCM 音訊上限不得小於單一 response 上限。")
             .ValidateOnStart();
         services.AddOptions<MultiCharacterNarrationOptions>()
             .Bind(configuration.GetSection(MultiCharacterNarrationOptions.SectionName))

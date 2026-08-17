@@ -12,6 +12,7 @@ using StoryVoice.Application.Narrations;
 using StoryVoice.Application.Narrations.SpeechPlanning;
 using StoryVoice.Application.Series;
 using StoryVoice.Domain.Narrations;
+using StoryVoice.Domain.Series;
 using StoryVoice.Infrastructure.Narrations;
 using StoryVoice.Infrastructure.Persistence;
 
@@ -110,6 +111,173 @@ public sealed class MultiCharacterNarrationApiTests(ApiFactory factory) : IClass
 
         Assert.Equal(SeriesCastRebuildBatchStatus.ReadyToActivate, batch.Status);
         Assert.Equal(SeriesCastRebuildMemberStatus.Ready, member.Status);
+    }
+
+    [Fact]
+    public async Task Owner_can_discard_a_queued_rebuild_idempotently_without_touching_published_audio()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var owner = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        using var stranger = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        var setup = await CreateBuildingBatchAsync(owner, "discard queued rebuild", cancellationToken);
+
+        Guid publishedJobId;
+        await using (var seedScope = factory.Services.CreateAsyncScope())
+        {
+            var db = seedScope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+            var seriesBook = await db.SeriesBooks.SingleAsync(
+                candidate => candidate.SeriesId == setup.Series.Id && candidate.BookId == setup.Book.Id,
+                cancellationToken);
+            var published = NarrationJob.Create(
+                seriesBook.OwnerId,
+                setup.Book.Id,
+                setup.Book.Id,
+                $"published-{Guid.NewGuid():N}",
+                "published-test-voice",
+                "+0%",
+                DateTimeOffset.UtcNow);
+            var claimedAt = Assert.IsType<DateTimeOffset>(published.NextAttemptAt);
+            published.Claim("discard-published-safety", claimedAt.AddMinutes(5), claimedAt);
+            published.Complete("synthetic/active-before-discard.mp3", 137);
+            publishedJobId = published.Id;
+            db.NarrationJobs.Add(published);
+            db.Entry(seriesBook).Property(nameof(SeriesBook.ActiveNarrationJobId)).CurrentValue = published.Id;
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        using var forbiddenResponse = await stranger.PostWithCsrfAsync(
+            $"/api/series/{setup.Series.Id}/narration-rebuilds/{setup.Batch.Id}/discard",
+            new { },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.NotFound, forbiddenResponse.StatusCode);
+        await AssertBatchAndJobStateAsync(
+            setup.Batch,
+            SeriesCastRebuildBatchStatus.Building,
+            NarrationJobStatus.Queued,
+            cancellationRequested: false,
+            cancellationToken);
+
+        using var discardResponse = await owner.PostWithCsrfAsync(
+            $"/api/series/{setup.Series.Id}/narration-rebuilds/{setup.Batch.Id}/discard",
+            new { },
+            cancellationToken);
+        var discarded = await discardResponse.Content.ReadFromJsonAsync<SeriesNarrationRebuildResponse>(
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, discardResponse.StatusCode);
+        Assert.Equal(nameof(SeriesCastRebuildBatchStatus.Failed), Assert.IsType<SeriesNarrationRebuildResponse>(discarded).Status);
+        await AssertBatchAndJobStateAsync(
+            setup.Batch,
+            SeriesCastRebuildBatchStatus.Failed,
+            NarrationJobStatus.Cancelled,
+            cancellationRequested: true,
+            cancellationToken);
+
+        using var repeatResponse = await owner.PostWithCsrfAsync(
+            $"/api/series/{setup.Series.Id}/narration-rebuilds/{setup.Batch.Id}/discard",
+            new { },
+            cancellationToken);
+        var repeated = await repeatResponse.Content.ReadFromJsonAsync<SeriesNarrationRebuildResponse>(
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, repeatResponse.StatusCode);
+        Assert.Equal(nameof(SeriesCastRebuildBatchStatus.Failed), Assert.IsType<SeriesNarrationRebuildResponse>(repeated).Status);
+
+        await using var verifyScope = factory.Services.CreateAsyncScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+        var activeBook = await verifyDb.SeriesBooks.SingleAsync(
+            candidate => candidate.SeriesId == setup.Series.Id && candidate.BookId == setup.Book.Id,
+            cancellationToken);
+        var publishedJob = await verifyDb.NarrationJobs.SingleAsync(
+            candidate => candidate.Id == publishedJobId,
+            cancellationToken);
+        Assert.Equal(publishedJobId, activeBook.ActiveNarrationJobId);
+        Assert.Equal(NarrationArtifactVisibility.Published, publishedJob.Visibility);
+        Assert.Equal(NarrationJobStatus.Completed, publishedJob.Status);
+        Assert.Equal("synthetic/active-before-discard.mp3", publishedJob.AudioRelativePath);
+        Assert.Equal(137, publishedJob.AudioBytes);
+        Assert.False(publishedJob.CancellationRequested);
+    }
+
+    [Fact]
+    public async Task Discard_requests_cancellation_for_a_running_staged_job()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var owner = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        var setup = await CreateBuildingBatchAsync(owner, "discard running rebuild", cancellationToken);
+        var stagedJobId = Assert.IsType<Guid>(Assert.Single(setup.Batch.Members).StagedNarrationJobId);
+
+        await using (var seedScope = factory.Services.CreateAsyncScope())
+        {
+            var db = seedScope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+            var stagedJob = await db.NarrationJobs.SingleAsync(
+                candidate => candidate.Id == stagedJobId,
+                cancellationToken);
+            var claimedAt = Assert.IsType<DateTimeOffset>(stagedJob.NextAttemptAt);
+            stagedJob.Claim("discard-running-test", claimedAt.AddMinutes(5), claimedAt);
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        using var discardResponse = await owner.PostWithCsrfAsync(
+            $"/api/series/{setup.Series.Id}/narration-rebuilds/{setup.Batch.Id}/discard",
+            new { },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, discardResponse.StatusCode);
+        await AssertBatchAndJobStateAsync(
+            setup.Batch,
+            SeriesCastRebuildBatchStatus.Failed,
+            NarrationJobStatus.Running,
+            cancellationRequested: true,
+            cancellationToken);
+    }
+
+    [Fact]
+    public async Task Discard_invalidates_a_ready_batch_but_preserves_its_completed_staged_artifact()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var owner = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        var setup = await CreateBuildingBatchAsync(owner, "discard completed rebuild", cancellationToken);
+        var stagedJobId = Assert.IsType<Guid>(Assert.Single(setup.Batch.Members).StagedNarrationJobId);
+
+        await using (var seedScope = factory.Services.CreateAsyncScope())
+        {
+            var db = seedScope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+            var stagedJob = await db.NarrationJobs.SingleAsync(
+                candidate => candidate.Id == stagedJobId,
+                cancellationToken);
+            var completedAt = Assert.IsType<DateTimeOffset>(stagedJob.NextAttemptAt);
+            stagedJob.Claim("discard-completed-test", completedAt.AddMinutes(5), completedAt);
+            stagedJob.Complete("synthetic/completed-staged-discard.mp3", 211);
+            await db.SaveChangesAsync(cancellationToken);
+
+            var progress = seedScope.ServiceProvider.GetRequiredService<IStagedNarrationBatchProgressService>();
+            await progress.SynchronizeAsync(stagedJob.Id, cancellationToken);
+            db.ChangeTracker.Clear();
+            Assert.Equal(
+                SeriesCastRebuildBatchStatus.ReadyToActivate,
+                (await db.SeriesCastRebuildBatches.SingleAsync(
+                    candidate => candidate.Id == setup.Batch.Id,
+                    cancellationToken)).Status);
+        }
+
+        using var discardResponse = await owner.PostWithCsrfAsync(
+            $"/api/series/{setup.Series.Id}/narration-rebuilds/{setup.Batch.Id}/discard",
+            new { },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, discardResponse.StatusCode);
+
+        await using var verifyScope = factory.Services.CreateAsyncScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+        var batch = await verifyDb.SeriesCastRebuildBatches.SingleAsync(
+            candidate => candidate.Id == setup.Batch.Id,
+            cancellationToken);
+        var stagedArtifact = await verifyDb.NarrationJobs.SingleAsync(
+            candidate => candidate.Id == stagedJobId,
+            cancellationToken);
+        Assert.Equal(SeriesCastRebuildBatchStatus.Failed, batch.Status);
+        Assert.Equal(NarrationJobStatus.Completed, stagedArtifact.Status);
+        Assert.Equal(NarrationArtifactVisibility.Staged, stagedArtifact.Visibility);
+        Assert.Equal("synthetic/completed-staged-discard.mp3", stagedArtifact.AudioRelativePath);
+        Assert.Equal(211, stagedArtifact.AudioBytes);
+        Assert.False(stagedArtifact.CancellationRequested);
     }
 
     [Fact]

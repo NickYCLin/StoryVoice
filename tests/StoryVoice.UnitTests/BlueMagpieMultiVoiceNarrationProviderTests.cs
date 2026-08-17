@@ -11,6 +11,17 @@ namespace StoryVoice.UnitTests;
 public sealed class BlueMagpieMultiVoiceNarrationProviderTests
 {
     [Fact]
+    public void Job_budget_defaults_preserve_the_existing_formal_runtime_contract()
+    {
+        var options = new BlueMagpieOptions();
+
+        Assert.Equal(10_000, options.MaximumChunksPerJob);
+        Assert.Equal(8L * 1024 * 1024 * 1024, options.MaximumJobAudioBytes);
+        Assert.Equal(120, BlueMagpieOptions.MaximumTextScalarsPerChunk);
+        Assert.Equal(61, BlueMagpieOptions.MinimumTextScalarsPerNonFinalChunk);
+    }
+
+    [Fact]
     public void Provider_identity_is_the_exact_BM1_runtime_contract()
     {
         var provider = CreateProvider(new RecordingClient(), new RecordingComposer());
@@ -130,6 +141,62 @@ public sealed class BlueMagpieMultiVoiceNarrationProviderTests
                 1,
                 BlueMagpieMultiVoiceNarrationProvider.MaximumTextScalarsPerChunk));
         Assert.Equal(121, emojiChunks.Sum(chunk => chunk.EnumerateRunes().Count()));
+    }
+
+    [Fact]
+    public async Task SynthesizeAsync_uses_the_configured_chunk_budget_before_HTTP()
+    {
+        var client = new RecordingClient();
+        var composer = new RecordingComposer();
+        var provider = CreateProvider(
+            client,
+            composer,
+            providerOptions: new BlueMagpieOptions { MaximumChunksPerJob = 1 });
+
+        var exception = await Assert.ThrowsAsync<PermanentNarrationProviderException>(() =>
+            provider.SynthesizeAsync(
+                CreateRequest([
+                    NeutralTurn() with { Text = new string('甲', 121) },
+                ]),
+                "unused.mp3",
+                null,
+                TestContext.Current.CancellationToken));
+
+        Assert.Equal("bluemagpie_provider_contract_invalid", exception.ErrorCode);
+        Assert.Empty(client.Requests);
+        Assert.Empty(composer.Segments);
+    }
+
+    [Fact]
+    public async Task SynthesizeAsync_uses_the_configured_aggregate_audio_budget()
+    {
+        var root = CreateRoot();
+        var client = new RecordingClient();
+        var composer = new RecordingComposer();
+        var provider = CreateProvider(
+            client,
+            composer,
+            cache: new ReportedSizeChunkCache((64L * 1024 * 1024) + 1),
+            providerOptions: new BlueMagpieOptions { MaximumJobAudioBytes = 64L * 1024 * 1024 });
+
+        try
+        {
+            var exception = await Assert.ThrowsAsync<PermanentNarrationProviderException>(() =>
+                provider.SynthesizeAsync(
+                    CreateRequest([NeutralTurn()]),
+                    Path.Combine(root, "over-budget.mp3"),
+                    null,
+                    TestContext.Current.CancellationToken));
+
+            Assert.Equal("bluemagpie_provider_contract_invalid", exception.ErrorCode);
+            Assert.Empty(client.Requests);
+            Assert.Empty(composer.Segments);
+            Assert.False(File.Exists(Path.Combine(root, "over-budget.mp3")));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     [Theory]
@@ -489,19 +556,21 @@ public sealed class BlueMagpieMultiVoiceNarrationProviderTests
     private static BlueMagpieMultiVoiceNarrationProvider CreateProvider(
         IBlueMagpieTtsClient client,
         IFfmpegAudioComposer composer,
-        IBlueMagpieChunkCache? cache = null) =>
-        new(
+        IBlueMagpieChunkCache? cache = null,
+        BlueMagpieOptions? providerOptions = null)
+    {
+        var configured = providerOptions ?? new BlueMagpieOptions();
+        configured.Enabled = true;
+        configured.FormalNarrationEnabled = true;
+        configured.InternalToken = new string('t', 32);
+        configured.ModelRevision = BlueMagpieOptions.PinnedModelRevision;
+        return new(
             client,
             cache ?? new EphemeralChunkCache(),
             composer,
-            Options.Create(new BlueMagpieOptions
-            {
-                Enabled = true,
-                FormalNarrationEnabled = true,
-                InternalToken = new string('t', 32),
-                ModelRevision = BlueMagpieOptions.PinnedModelRevision,
-            }),
+            Options.Create(configured),
             NullLogger<BlueMagpieMultiVoiceNarrationProvider>.Instance);
+    }
 
     private static BlueMagpieChunkCache CreatePersistentCache(string root) =>
         new(
@@ -683,6 +752,43 @@ public sealed class BlueMagpieMultiVoiceNarrationProviderTests
                 var path = Path.Combine(_root, $"{request.Ordinal:00000}.wav");
                 await File.WriteAllBytesAsync(path, audio, cancellationToken);
                 return new BlueMagpieChunkCacheEntry(path, audio.LongLength, CacheHit: false);
+            }
+
+            public ValueTask DisposeAsync()
+            {
+                Directory.Delete(_root, recursive: true);
+                return ValueTask.CompletedTask;
+            }
+        }
+    }
+
+    private sealed class ReportedSizeChunkCache(long reportedAudioBytes) : IBlueMagpieChunkCache
+    {
+        public Task<IBlueMagpieChunkCacheScope> OpenScopeAsync(
+            NarrationSynthesisCacheContext context,
+            CancellationToken cancellationToken) =>
+            Task.FromResult<IBlueMagpieChunkCacheScope>(new ReportedSizeScope(reportedAudioBytes));
+
+        public Task CleanupAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        private sealed class ReportedSizeScope : IBlueMagpieChunkCacheScope
+        {
+            private readonly long _reportedAudioBytes;
+            private readonly string _root = CreateRoot();
+
+            internal ReportedSizeScope(long reportedAudioBytes)
+            {
+                _reportedAudioBytes = reportedAudioBytes;
+            }
+
+            public async Task<BlueMagpieChunkCacheEntry> GetOrCreateAsync(
+                BlueMagpieChunkCacheRequest request,
+                Func<CancellationToken, Task<byte[]>> createAudio,
+                CancellationToken cancellationToken)
+            {
+                var path = Path.Combine(_root, $"{request.Ordinal:00000}.wav");
+                await File.WriteAllBytesAsync(path, CreateWavBytes(), cancellationToken);
+                return new BlueMagpieChunkCacheEntry(path, _reportedAudioBytes, CacheHit: true);
             }
 
             public ValueTask DisposeAsync()

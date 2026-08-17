@@ -22,9 +22,7 @@ public sealed class BlueMagpieMultiVoiceNarrationProvider(
     ILogger<BlueMagpieMultiVoiceNarrationProvider> logger) : IVersionedMultiVoiceNarrationProvider
 {
     public const string PinnedProviderVersion = BlueMagpieOptions.PinnedProviderVersion;
-    internal const int MaximumTextScalarsPerChunk = 120;
-    private const int MaximumChunksPerJob = 10_000;
-    private const long MaximumJobAudioBytes = 8L * 1024 * 1024 * 1024;
+    internal const int MaximumTextScalarsPerChunk = BlueMagpieOptions.MaximumTextScalarsPerChunk;
     private const int OutputSampleRate = 48_000;
     private const int MaximumPauseBeforeMs = 60_000;
     private const string NeutralRate = "+0%";
@@ -48,17 +46,19 @@ public sealed class BlueMagpieMultiVoiceNarrationProvider(
         Guid? cacheJobId = null;
         try
         {
-            ValidateRuntime();
+            var configured = ValidateRuntime();
             ArgumentNullException.ThrowIfNull(request);
             NarrationProviderContractValidator.Validate(this, ProviderName, request);
             var cacheContext = ValidateCacheContext(request.CacheContext);
             cacheJobId = cacheContext.JobId;
             var preparedTurns = PrepareTurns(request);
-            var totalChunks = preparedTurns.Sum(turn => turn.Chunks.Count);
-            if (totalChunks is < 1 or > MaximumChunksPerJob)
+            var estimatedChunkCount = preparedTurns.Sum(turn => (long)turn.Chunks.Count);
+            if (estimatedChunkCount is < 1 || estimatedChunkCount > configured.MaximumChunksPerJob)
             {
                 throw PermanentFailure("BlueMagpie narration exceeds the safe chunk budget.");
             }
+
+            var totalChunks = checked((int)estimatedChunkCount);
 
             if (string.IsNullOrWhiteSpace(outputPath))
             {
@@ -120,7 +120,7 @@ public sealed class BlueMagpieMultiVoiceNarrationProvider(
                     }
 
                     resolvedAudioBytes = checked(resolvedAudioBytes + entry.AudioBytes);
-                    if (resolvedAudioBytes > MaximumJobAudioBytes)
+                    if (resolvedAudioBytes > configured.MaximumJobAudioBytes)
                     {
                         throw PermanentFailure(
                             "BlueMagpie narration exceeds the aggregate audio budget.");
@@ -217,7 +217,7 @@ public sealed class BlueMagpieMultiVoiceNarrationProvider(
             var end = limit;
             if (limit < runes.Length)
             {
-                var minimumBoundary = start + (MaximumTextScalarsPerChunk / 2);
+                var minimumBoundary = start + BlueMagpieOptions.PreferredBreakSearchFloorScalars;
                 for (var index = limit - 1; index >= minimumBoundary; index--)
                 {
                     if (IsBreak(runes[index]))
@@ -294,7 +294,7 @@ public sealed class BlueMagpieMultiVoiceNarrationProvider(
         return prepared;
     }
 
-    private void ValidateRuntime()
+    private BlueMagpieOptions ValidateRuntime()
     {
         var configured = options.Value;
         if (!configured.Enabled
@@ -310,6 +310,8 @@ public sealed class BlueMagpieMultiVoiceNarrationProvider(
                 "provider_version_mismatch",
                 "BlueMagpie formal narration is disabled or its pinned runtime configuration does not match.");
         }
+
+        return configured;
     }
 
     private static bool IsBreak(Rune rune) =>

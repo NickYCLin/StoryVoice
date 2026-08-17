@@ -8,6 +8,9 @@ public sealed class BlueMagpieOptions
     public const string FemaleVoice = "female_voice";
     public const string PinnedModelRevision = "6f7cab914a1e27c56b504ec663c0144dc25cc0a3";
     public const string PinnedProviderVersion = "bm1-d2d7ef3e81456915eb7a3cfe2446a9f19417c21b";
+    public const int MaximumTextScalarsPerChunk = 120;
+    public const int PreferredBreakSearchFloorScalars = MaximumTextScalarsPerChunk / 2;
+    public const int MinimumTextScalarsPerNonFinalChunk = PreferredBreakSearchFloorScalars + 1;
 
     public bool Enabled { get; set; }
 
@@ -32,6 +35,20 @@ public sealed class BlueMagpieOptions
     public int RequestTimeoutSeconds { get; set; } = 180;
 
     public int MaximumResponseBytes { get; set; } = 5 * 1024 * 1024;
+
+    /// <summary>
+    /// Per-book hard ceiling for a formal BlueMagpie narration job. Admission uses a conservative
+    /// upper bound before it creates a cast revision, batch, or job; the Worker enforces the same
+    /// configured value after it has built the exact turn stream.
+    /// </summary>
+    public int MaximumChunksPerJob { get; set; } = 10_000;
+
+    /// <summary>
+    /// Aggregate ceiling for validated PCM16/48 kHz/mono WAV payloads resolved by one job. The API
+    /// conservatively reserves one <see cref="MaximumResponseBytes"/> response for every estimated
+    /// chunk, while the Worker accounts the actual cache or gateway WAV bytes.
+    /// </summary>
+    public long MaximumJobAudioBytes { get; set; } = 8L * 1024 * 1024 * 1024;
 
     /// <summary>
     /// A cancelled HTTP request can leave an uncancellable CUDA worker holding the shared Redis

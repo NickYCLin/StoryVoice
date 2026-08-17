@@ -39,6 +39,11 @@ public interface ISeriesNarrationService
         Guid batchId,
         CancellationToken cancellationToken);
 
+    Task<SeriesNarrationRebuildResponse?> DiscardRebuildAsync(
+        Guid seriesId,
+        Guid batchId,
+        CancellationToken cancellationToken);
+
     Task<SeriesNarrationRebuildResponse?> ActivateRebuildAsync(
         Guid seriesId,
         Guid batchId,

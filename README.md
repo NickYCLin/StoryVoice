@@ -61,14 +61,16 @@ preview. Formal series narration is a separate opt-in:
 (`female_voice` and `hung_yi_lee`) in the series voice catalog and admits staged
 multi-character jobs through the local Worker.
 
-The formal path is currently limited to short, private **staged canaries**. Keep it
-disabled for complete books and do not activate canary audio. The Worker persists
+The formal path remains an explicit, private/internal opt-in. The Worker persists
 validated, deterministic WAV chunks in a separate private volume so a retry or
 controlled restart only synthesizes missing chunks. The cache is regenerable, capped
 at 32 GiB by default, retained for seven days, and deliberately excluded from published
-audio backups. Full-book use still requires a successful restart/resume canary and a
-long-form benchmark. The model weights are marked with license `other`, so this path is
-private/internal only; do not assume redistribution or commercial-use rights.
+audio backups. A restart/resume canary and a bounded 36-chunk cold long-form benchmark
+have passed without activating their staged audio. Admission now rejects oversized jobs
+before creating rows, progress writes are percentage-throttled, and owners can discard a
+staged rebuild. Keep complete-book use disabled until exhausted-attempt recovery,
+structured long-run metrics, and GPU/LLM coexistence are verified. The model weights are
+marked with license `other`, so do not assume redistribution or commercial-use rights.
 
 Preload the pinned model cache, create a random secret of at least 32 characters,
 then set these values outside Git:

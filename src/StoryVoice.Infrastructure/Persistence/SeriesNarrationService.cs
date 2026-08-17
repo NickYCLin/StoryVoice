@@ -63,11 +63,11 @@ internal sealed class SeriesNarrationService(
                 return null;
             }
 
-            if (string.Equals(
-                    series.NarratorProvider,
-                    CharacterVoiceProviders.BlueMagpie,
-                    StringComparison.OrdinalIgnoreCase)
-                && !blueMagpieOptions.Value.FormalNarrationEnabled)
+            var isBlueMagpie = string.Equals(
+                series.NarratorProvider,
+                CharacterVoiceProviders.BlueMagpie,
+                StringComparison.OrdinalIgnoreCase);
+            if (isBlueMagpie && !blueMagpieOptions.Value.FormalNarrationEnabled)
             {
                 throw new InvalidOperationException(
                     "BlueMagpie 目前只開放固定句試音；正式小說配音尚未由管理員啟用。");
@@ -105,13 +105,6 @@ internal sealed class SeriesNarrationService(
                 throw new InvalidOperationException("這個系列已有尚未完成啟用的多聲線重建批次。");
             }
 
-            // A batch and its draft cast revision are each usable exactly once
-            // (UX_rebuild_batches_draft_cast / UX_ncast_revs_fingerprint). A batch that already
-            // failed will never be activated, so it's safe to clear it out before staging a fresh
-            // attempt — otherwise retrying with an unchanged voice cast would deterministically
-            // collide with the leftover row from the failed attempt.
-            await PurgeFailedBatchesAsync(ownerId, seriesId, cancellationToken);
-
             EnsureSingleSynthesisProvider(series);
             var sourceBooks = await LoadSeriesBooksAsync(ownerId, memberships, cancellationToken);
             var confirmedPlans = await LoadLatestConfirmedPlansAsync(
@@ -125,6 +118,18 @@ internal sealed class SeriesNarrationService(
                 confirmedPlans,
                 series.NarrativeVoiceMode,
                 cancellationToken);
+
+            if (isBlueMagpie)
+            {
+                EnsureBlueMagpieJobAdmissionBudget(sourceAndPlans, blueMagpieOptions.Value);
+            }
+
+            // Budget preflight above must be read-only: an oversized retry cannot purge its old
+            // failed batch (or make any other database mutation). Once admission succeeds, a batch
+            // and its draft cast revision are each usable exactly once
+            // (UX_rebuild_batches_draft_cast / UX_ncast_revs_fingerprint). A failed batch can then
+            // be safely removed before staging the fresh attempt.
+            await PurgeFailedBatchesAsync(ownerId, seriesId, cancellationToken);
 
             var configuration = compositionOptions.Value;
             ValidateComposition(configuration, series);
@@ -307,6 +312,133 @@ internal sealed class SeriesNarrationService(
                     && candidate.OwnerId == ownerId,
                 cancellationToken);
         return batch is null ? null : ToResponse(batch);
+    }
+
+    public async Task<SeriesNarrationRebuildResponse?> DiscardRebuildAsync(
+        Guid seriesId,
+        Guid batchId,
+        CancellationToken cancellationToken)
+    {
+        EnsureId(seriesId, nameof(seriesId));
+        EnsureId(batchId, nameof(batchId));
+        var ownerId = EnsureCurrentOwnerId();
+        var usesPostgresRowLocks = dbContext.Database.ProviderName
+            == "Npgsql.EntityFrameworkCore.PostgreSQL";
+        await using var transaction = await BeginTransactionAsync(
+            cancellationToken,
+            IsolationLevel.ReadCommitted);
+        try
+        {
+            SeriesCastRebuildBatch? batch;
+            if (usesPostgresRowLocks)
+            {
+                // Match activation's series -> batch lock order. Whichever transition wins the
+                // series lock is durable before the other reads the batch, so a discarded batch
+                // can never race back into Activated and an Activated batch is never rewritten.
+                var series = await dbContext.StorySeries
+                    .FromSqlInterpolated($"""
+                        SELECT *
+                        FROM story_series
+                        WHERE "OwnerId" = {ownerId}
+                            AND "Id" = {seriesId}
+                        FOR UPDATE
+                        """)
+                    .SingleOrDefaultAsync(cancellationToken);
+                if (series is null)
+                {
+                    return null;
+                }
+
+                batch = await dbContext.SeriesCastRebuildBatches
+                    .FromSqlInterpolated($"""
+                        SELECT *
+                        FROM series_cast_rebuild_batches
+                        WHERE "OwnerId" = {ownerId}
+                            AND "SeriesId" = {seriesId}
+                            AND "Id" = {batchId}
+                        FOR UPDATE
+                        """)
+                    .SingleOrDefaultAsync(cancellationToken);
+                if (batch is not null)
+                {
+                    await dbContext.Entry(batch)
+                        .Collection(candidate => candidate.Members)
+                        .LoadAsync(cancellationToken);
+                }
+            }
+            else
+            {
+                batch = await dbContext.SeriesCastRebuildBatches
+                    .AsSplitQuery()
+                    .Include(candidate => candidate.Members)
+                    .SingleOrDefaultAsync(
+                        candidate => candidate.Id == batchId
+                            && candidate.SeriesId == seriesId
+                            && candidate.OwnerId == ownerId,
+                        cancellationToken);
+            }
+
+            if (batch is null)
+            {
+                return null;
+            }
+
+            if (batch.Status == SeriesCastRebuildBatchStatus.Activated)
+            {
+                throw new InvalidOperationException("已啟用的多聲線重建批次不可丟棄。");
+            }
+
+            var stagedJobs = usesPostgresRowLocks
+                ? await dbContext.NarrationJobs
+                    .FromSqlInterpolated($"""
+                        SELECT *
+                        FROM narration_jobs
+                        WHERE "OwnerId" = {ownerId}
+                            AND "SeriesId" = {seriesId}
+                            AND "RebuildBatchId" = {batchId}
+                            AND "Mode" = 'MultiCharacter'
+                            AND "Visibility" = 'Staged'
+                        ORDER BY "Id"
+                        FOR UPDATE
+                        """)
+                    .ToListAsync(cancellationToken)
+                : await dbContext.NarrationJobs
+                    .Where(job => job.OwnerId == ownerId
+                        && job.SeriesId == seriesId
+                        && job.RebuildBatchId == batchId
+                        && job.Mode == NarrationMode.MultiCharacter
+                        && job.Visibility == NarrationArtifactVisibility.Staged)
+                    .OrderBy(job => job.Id)
+                    .ToListAsync(cancellationToken);
+
+            foreach (var job in stagedJobs.Where(job =>
+                         job.Status is NarrationJobStatus.Queued or NarrationJobStatus.Running))
+            {
+                job.RequestCancellation();
+            }
+
+            if (batch.Status != SeriesCastRebuildBatchStatus.Failed)
+            {
+                batch.Invalidate(DateTimeOffset.UtcNow);
+            }
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+            if (transaction is not null)
+            {
+                await transaction.CommitAsync(cancellationToken);
+            }
+
+            return ToResponse(batch);
+        }
+        catch
+        {
+            if (transaction is not null)
+            {
+                await transaction.RollbackAsync(CancellationToken.None);
+            }
+
+            throw;
+        }
     }
 
     public async Task<SeriesNarrationRebuildResponse?> ActivateRebuildAsync(
@@ -505,6 +637,43 @@ internal sealed class SeriesNarrationService(
         return result;
     }
 
+    private static void EnsureBlueMagpieJobAdmissionBudget(
+        IReadOnlyDictionary<Guid, SourceAndPlanSnapshot> sourceAndPlans,
+        BlueMagpieOptions options)
+    {
+        foreach (var snapshot in sourceAndPlans.Values)
+        {
+            long estimatedChunks = 0;
+            foreach (var segment in snapshot.Plans
+                         .SelectMany(plan => plan.Revision.Segments))
+            {
+                // Confirmed offsets use UTF-16 code units. Treating each code unit as a scalar is
+                // conservative for surrogate pairs. The runtime splitter never emits a non-final
+                // chunk shorter than 61 scalars, and estimating every confirmed segment as its own
+                // turn also safely overstates what adjacent-profile turn merging can produce.
+                estimatedChunks = checked(
+                    estimatedChunks
+                    + ((segment.Length + (long)BlueMagpieOptions.MinimumTextScalarsPerNonFinalChunk - 1)
+                        / BlueMagpieOptions.MinimumTextScalarsPerNonFinalChunk));
+                if (estimatedChunks > options.MaximumChunksPerJob)
+                {
+                    throw new InvalidOperationException(
+                        "BlueMagpie 配音工作預估分段數超過管理員設定的安全上限。請拆分書冊後再建立配音批次。");
+                }
+            }
+
+            // Every gateway WAV is pinned PCM16/48 kHz/mono and cannot exceed
+            // MaximumResponseBytes. Reserving that full amount for every conservatively estimated
+            // chunk is deliberately stricter than expected speech duration and prevents a job
+            // from being staged when its raw audio could cross the runtime aggregate ceiling.
+            if (estimatedChunks > options.MaximumJobAudioBytes / options.MaximumResponseBytes)
+            {
+                throw new InvalidOperationException(
+                    "BlueMagpie 配音工作預估 PCM 音訊量超過管理員設定的安全上限。請拆分書冊後再建立配音批次。");
+            }
+        }
+    }
+
     private static void EnsureSingleSynthesisProvider(StorySeries series)
     {
         // The 3wa VoxCPM2 job dispatch provider also knows how to fall back to plain Edge voices
@@ -583,9 +752,11 @@ internal sealed class SeriesNarrationService(
                     member.Status.ToString()))
                 .ToArray());
 
-    private async Task<IDbContextTransaction?> BeginTransactionAsync(CancellationToken cancellationToken) =>
+    private async Task<IDbContextTransaction?> BeginTransactionAsync(
+        CancellationToken cancellationToken,
+        IsolationLevel isolationLevel = IsolationLevel.Serializable) =>
         dbContext.Database.IsRelational()
-            ? await dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken)
+            ? await dbContext.Database.BeginTransactionAsync(isolationLevel, cancellationToken)
             : null;
 
     private Guid EnsureCurrentOwnerId()
