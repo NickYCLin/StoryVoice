@@ -174,6 +174,182 @@ public sealed class CharacterProfileApiTests(ApiFactory factory) : IClassFixture
     }
 
     [Fact]
+    public async Task Dedicated_series_link_is_owner_scoped_preserves_cast_and_enforces_active_unique_profiles()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var owner = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        using var otherOwner = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+
+        var firstProfile = await CreateProfileAsync(owner, "第一位共用角色", cancellationToken);
+        var secondProfile = await CreateProfileAsync(owner, "第二位共用角色", cancellationToken);
+        var foreignProfile = await CreateProfileAsync(otherOwner, "外部角色", cancellationToken);
+        using var seriesResponse = await owner.PostWithCsrfAsync(
+            "/api/series",
+            new
+            {
+                name = $"專用角色庫連結-{Guid.NewGuid():N}",
+                narratorProvider = "3wa-voxcpm2",
+                narratorVoice = "custom",
+                narratorRate = "+0%",
+                narratorPitch = "+0Hz",
+                narratorVolume = "+0%",
+                defaultSpeakerPauseMs = 350
+            },
+            cancellationToken);
+        var series = await seriesResponse.Content.ReadFromJsonAsync<StorySeriesDetailsResponse>(cancellationToken);
+        Assert.NotNull(series);
+
+        StorySeriesDetailsResponse current = series;
+        foreach (var character in new[]
+                 {
+                     new { Name = "Alice", Role = "Main", Notes = "必須保留的主角提示" },
+                     new { Name = "Bob", Role = "Supporting", Notes = "必須保留的配角提示" }
+                 })
+        {
+            using var addResponse = await owner.PostWithCsrfAsync(
+                $"/api/series/{series.Id}/characters",
+                new
+                {
+                    canonicalName = character.Name,
+                    role = character.Role,
+                    voiceProvider = "3wa-voxcpm2",
+                    voice = "custom",
+                    rate = "-5%",
+                    pitch = "+2Hz",
+                    volume = "-3%",
+                    notes = character.Notes
+                },
+                cancellationToken);
+            current = Assert.IsType<StorySeriesDetailsResponse>(
+                await addResponse.Content.ReadFromJsonAsync<StorySeriesDetailsResponse>(cancellationToken));
+            Assert.Equal(HttpStatusCode.OK, addResponse.StatusCode);
+        }
+
+        var firstCharacter = current.Characters.Single(character => character.CanonicalName == "Alice");
+        var secondCharacter = current.Characters.Single(character => character.CanonicalName == "Bob");
+
+        using var otherOwnerResponse = await otherOwner.PutWithCsrfAsync(
+            $"/api/series/{series.Id}/characters/{firstCharacter.Id}/character-profile",
+            new { characterProfileId = foreignProfile.Id },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.NotFound, otherOwnerResponse.StatusCode);
+
+        using var missingCharacterResponse = await owner.PutWithCsrfAsync(
+            $"/api/series/{series.Id}/characters/{Guid.NewGuid()}/character-profile",
+            new { characterProfileId = firstProfile.Id },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.NotFound, missingCharacterResponse.StatusCode);
+
+        using var linkFirstResponse = await owner.PutWithCsrfAsync(
+            $"/api/series/{series.Id}/characters/{firstCharacter.Id}/character-profile",
+            new { characterProfileId = firstProfile.Id },
+            cancellationToken);
+        var linked = await linkFirstResponse.Content.ReadFromJsonAsync<StorySeriesDetailsResponse>(cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, linkFirstResponse.StatusCode);
+        var linkedFirst = Assert.IsType<StorySeriesDetailsResponse>(linked).Characters
+            .Single(character => character.Id == firstCharacter.Id);
+        Assert.Equal(firstProfile.Id, linkedFirst.CharacterProfileId);
+        Assert.Equal(
+            (
+                firstCharacter.CanonicalName,
+                firstCharacter.Role,
+                firstCharacter.VoiceProvider,
+                firstCharacter.Voice,
+                firstCharacter.Rate,
+                firstCharacter.Pitch,
+                firstCharacter.Volume,
+                firstCharacter.Notes),
+            (
+                linkedFirst.CanonicalName,
+                linkedFirst.Role,
+                linkedFirst.VoiceProvider,
+                linkedFirst.Voice,
+                linkedFirst.Rate,
+                linkedFirst.Pitch,
+                linkedFirst.Volume,
+                linkedFirst.Notes));
+
+        using var duplicateResponse = await owner.PutWithCsrfAsync(
+            $"/api/series/{series.Id}/characters/{secondCharacter.Id}/character-profile",
+            new { characterProfileId = firstProfile.Id },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, duplicateResponse.StatusCode);
+
+        using var foreignProfileResponse = await owner.PutWithCsrfAsync(
+            $"/api/series/{series.Id}/characters/{secondCharacter.Id}/character-profile",
+            new { characterProfileId = foreignProfile.Id },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, foreignProfileResponse.StatusCode);
+
+        using var linkSecondResponse = await owner.PutWithCsrfAsync(
+            $"/api/series/{series.Id}/characters/{secondCharacter.Id}/character-profile",
+            new { characterProfileId = secondProfile.Id },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, linkSecondResponse.StatusCode);
+
+        using var deactivateResponse = await owner.PostWithCsrfAsync(
+            $"/api/character-profiles/{secondProfile.Id}/deactivate",
+            new { },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, deactivateResponse.StatusCode);
+
+        using var inactiveNoOpResponse = await owner.PutWithCsrfAsync(
+            $"/api/series/{series.Id}/characters/{secondCharacter.Id}/character-profile",
+            new { characterProfileId = secondProfile.Id },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, inactiveNoOpResponse.StatusCode);
+
+        using var unlinkResponse = await owner.PutWithCsrfAsync(
+            $"/api/series/{series.Id}/characters/{secondCharacter.Id}/character-profile",
+            new { characterProfileId = (Guid?)null },
+            cancellationToken);
+        var unlinked = await unlinkResponse.Content.ReadFromJsonAsync<StorySeriesDetailsResponse>(cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, unlinkResponse.StatusCode);
+        Assert.Null(Assert.IsType<StorySeriesDetailsResponse>(unlinked).Characters
+            .Single(character => character.Id == secondCharacter.Id).CharacterProfileId);
+
+        using var inactiveNewLinkResponse = await owner.PutWithCsrfAsync(
+            $"/api/series/{series.Id}/characters/{secondCharacter.Id}/character-profile",
+            new { characterProfileId = secondProfile.Id },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, inactiveNewLinkResponse.StatusCode);
+
+        using var inactiveAddResponse = await owner.PostWithCsrfAsync(
+            $"/api/series/{series.Id}/characters",
+            new
+            {
+                canonicalName = "Carol",
+                role = "Minor",
+                voiceProvider = "3wa-voxcpm2",
+                voice = "custom",
+                rate = "+0%",
+                pitch = "+0Hz",
+                volume = "+0%",
+                notes = (string?)null,
+                characterProfileId = secondProfile.Id
+            },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, inactiveAddResponse.StatusCode);
+
+        using var inactiveFullUpdateResponse = await owner.PutWithCsrfAsync(
+            $"/api/series/{series.Id}/characters/{secondCharacter.Id}",
+            new
+            {
+                canonicalName = secondCharacter.CanonicalName,
+                role = secondCharacter.Role,
+                voiceProvider = secondCharacter.VoiceProvider,
+                voice = secondCharacter.Voice,
+                rate = secondCharacter.Rate,
+                pitch = secondCharacter.Pitch,
+                volume = secondCharacter.Volume,
+                notes = secondCharacter.Notes,
+                characterProfileId = secondProfile.Id
+            },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, inactiveFullUpdateResponse.StatusCode);
+    }
+
+    [Fact]
     public async Task Deleting_a_character_profile_still_linked_to_a_series_character_is_rejected()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -269,4 +445,18 @@ public sealed class CharacterProfileApiTests(ApiFactory factory) : IClassFixture
         background = (string?)null,
         speakingStyle = (string?)null
     };
+
+    private static async Task<CharacterProfileResponse> CreateProfileAsync(
+        HttpClient client,
+        string canonicalName,
+        CancellationToken cancellationToken)
+    {
+        using var response = await client.PostWithCsrfAsync(
+            "/api/character-profiles",
+            CreateCharacterBody(canonicalName),
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        return Assert.IsType<CharacterProfileResponse>(
+            await response.Content.ReadFromJsonAsync<CharacterProfileResponse>(cancellationToken));
+    }
 }

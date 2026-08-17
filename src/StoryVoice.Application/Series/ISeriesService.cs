@@ -29,6 +29,12 @@ public interface ISeriesService
         UpdateSeriesCharacterRequest request,
         CancellationToken cancellationToken);
 
+    Task<StorySeriesDetailsResponse?> SetCharacterProfileAsync(
+        Guid seriesId,
+        Guid characterId,
+        SetSeriesCharacterProfileRequest request,
+        CancellationToken cancellationToken);
+
     Task<StorySeriesDetailsResponse?> AddAliasAsync(
         Guid seriesId,
         Guid characterId,

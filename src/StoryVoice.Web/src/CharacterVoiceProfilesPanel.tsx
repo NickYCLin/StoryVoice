@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 
 import { apiUrl, fetchJson, responseProblem } from './api'
 
@@ -20,6 +20,27 @@ type VoiceProfile = {
 
 type Slot = { sceneCode: string | null; label: string; description: string }
 
+type PreviewAudio = {
+  characterProfileId: string
+  profileId: string
+  url: string
+  fileName: string
+}
+
+type PreviewRequestState = {
+  characterProfileId: string
+  profileId: string
+}
+
+type PreviewRequest = PreviewRequestState & {
+  controller: AbortController
+}
+
+type LoadedProfiles = {
+  characterProfileId: string
+  items: VoiceProfile[]
+}
+
 const SLOTS: Slot[] = [
   { sceneCode: null, label: '基礎聲線', description: '沒有更精確情境時的預設聲音，也是日常對話狀態使用的聲音' },
   { sceneCode: 'nervous', label: '緊張', description: '感到緊張或不安時' },
@@ -36,6 +57,37 @@ function formatDuration(seconds: number | null) {
   const minutes = Math.floor(totalSeconds / 60)
   const remainder = totalSeconds % 60
   return `${minutes}:${remainder.toString().padStart(2, '0')}`
+}
+
+function safeDownloadFileNamePart(value: string) {
+  const withoutControlCharacters = Array.from(value, (character) => {
+    const codePoint = character.codePointAt(0) ?? 0
+    return codePoint < 32 || codePoint === 127 ? '_' : character
+  }).join('')
+  const cleaned = withoutControlCharacters
+    .trim()
+    .replace(/[<>:"/\\|?*]/g, '_')
+    .replace(/[. ]+$/g, '')
+    .slice(0, 80)
+    .replace(/[. ]+$/g, '')
+  const candidate = cleaned || '角色'
+  return /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(candidate) ? `_${candidate}` : candidate
+}
+
+function audioFileExtension(contentType: string) {
+  const mediaType = contentType.split(';', 1)[0].trim().toLowerCase()
+  if (mediaType === 'audio/wav' || mediaType === 'audio/x-wav' || mediaType === 'audio/vnd.wave') return 'wav'
+  if (mediaType === 'audio/mpeg') return 'mp3'
+  if (mediaType === 'audio/mp4' || mediaType === 'audio/x-m4a' || mediaType === 'audio/aac') return 'm4a'
+  if (mediaType === 'audio/ogg') return 'ogg'
+
+  const subtype = mediaType.startsWith('audio/') ? mediaType.slice('audio/'.length).replace(/^x-/, '') : ''
+  return /^[a-z0-9]+$/.test(subtype) ? subtype : 'audio'
+}
+
+function previewSlotLabel(profile: VoiceProfile) {
+  if (profile.kind === 'Base') return '基礎聲線'
+  return SLOTS.find((slot) => slot.sceneCode === profile.sceneCode)?.label ?? '情境聲線'
 }
 
 const CONSENT_OPTIONS: Array<{ value: string; label: string }> = [
@@ -74,7 +126,7 @@ type Props = {
 }
 
 export function CharacterVoiceProfilesPanel({ characterProfileId, characterName, csrfToken }: Props) {
-  const [profiles, setProfiles] = useState<VoiceProfile[] | null>(null)
+  const [profilesState, setProfilesState] = useState<LoadedProfiles | null>(null)
   const [message, setMessage] = useState('')
   const [busySlot, setBusySlot] = useState<string | null>(null)
   const [openSlot, setOpenSlot] = useState<string | null>(null)
@@ -82,20 +134,59 @@ export function CharacterVoiceProfilesPanel({ characterProfileId, characterName,
   const [promptText, setPromptText] = useState<Record<string, string>>({})
   const [consentType, setConsentType] = useState<Record<string, string>>({})
   const [transcriptDraft, setTranscriptDraft] = useState<Record<string, string>>({})
-  const [previewingId, setPreviewingId] = useState<string | null>(null)
+  const [previewing, setPreviewing] = useState<PreviewRequestState | null>(null)
+  const [previewAudio, setPreviewAudio] = useState<PreviewAudio | null>(null)
+  const currentCharacterProfileIdRef = useRef(characterProfileId)
+  const loadGenerationRef = useRef(0)
+  const previewAudioRef = useRef<PreviewAudio | null>(null)
+  const previewRequestRef = useRef<PreviewRequest | null>(null)
 
-  const load = useCallback(async () => {
+  currentCharacterProfileIdRef.current = characterProfileId
+
+  const profiles = profilesState?.characterProfileId === characterProfileId ? profilesState.items : null
+  const previewingId = previewing?.characterProfileId === characterProfileId ? previewing.profileId : null
+
+  const load = useCallback(async (signal?: AbortSignal) => {
+    const requestedCharacterProfileId = characterProfileId
+    const requestedGeneration = loadGenerationRef.current
     try {
-      const list = await fetchJson<VoiceProfile[]>(basePath(characterProfileId))
-      setProfiles(list)
+      const list = await fetchJson<VoiceProfile[]>(basePath(requestedCharacterProfileId), { signal })
+      if (signal?.aborted
+        || loadGenerationRef.current !== requestedGeneration
+        || currentCharacterProfileIdRef.current !== requestedCharacterProfileId) return
+      setProfilesState({ characterProfileId: requestedCharacterProfileId, items: list })
     } catch (error) {
+      if (signal?.aborted
+        || loadGenerationRef.current !== requestedGeneration
+        || currentCharacterProfileIdRef.current !== requestedCharacterProfileId) return
       setMessage(error instanceof Error ? error.message : '無法讀取這個角色的自訂聲線。')
     }
   }, [characterProfileId])
 
   useEffect(() => {
-    void load()
+    loadGenerationRef.current += 1
+    const controller = new AbortController()
+    setProfilesState(null)
+    void load(controller.signal)
+    return () => {
+      loadGenerationRef.current += 1
+      controller.abort()
+    }
   }, [load])
+
+  useEffect(() => {
+    setPreviewAudio(null)
+    setPreviewing(null)
+    return () => {
+      const request = previewRequestRef.current
+      previewRequestRef.current = null
+      request?.controller.abort()
+
+      const audio = previewAudioRef.current
+      previewAudioRef.current = null
+      if (audio) URL.revokeObjectURL(audio.url)
+    }
+  }, [characterProfileId])
 
   function profileFor(sceneCode: string | null) {
     return profiles?.find((profile) => (sceneCode === null ? profile.kind === 'Base' : profile.sceneCode === sceneCode)) ?? null
@@ -202,41 +293,77 @@ export function CharacterVoiceProfilesPanel({ characterProfileId, characterName,
   }
 
   async function playPreview(profile: VoiceProfile, text: string) {
-    setPreviewingId(profile.id)
+    if (previewingId !== null) return
+
+    previewRequestRef.current?.controller.abort()
+    const controller = new AbortController()
+    const request = { characterProfileId, profileId: profile.id, controller }
+    previewRequestRef.current = request
+    setPreviewing({ characterProfileId, profileId: profile.id })
     try {
       const response = await fetch(apiUrl(`${basePath(characterProfileId)}/${profile.id}/preview`), {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken },
         body: JSON.stringify({ text }),
+        signal: controller.signal,
       })
       if (!response.ok) throw new Error(await responseProblem(response, '試講失敗'))
       const blob = await response.blob()
       const url = URL.createObjectURL(blob)
-      const audio = new Audio(url)
-      let released = false
-      const releaseUrl = () => {
-        if (released) return
-        released = true
+      if (controller.signal.aborted) {
         URL.revokeObjectURL(url)
+        return
       }
-      audio.addEventListener('ended', releaseUrl, { once: true })
-      audio.addEventListener('error', releaseUrl, { once: true })
-      try {
-        await audio.play()
-      } catch (error) {
-        releaseUrl()
-        throw error
+
+      const previousAudio = previewAudioRef.current
+      const nextAudio = {
+        characterProfileId,
+        profileId: profile.id,
+        url,
+        fileName: `${safeDownloadFileNamePart(characterName)}-${safeDownloadFileNamePart(previewSlotLabel(profile))}-試音.${audioFileExtension(blob.type)}`,
       }
-      setMessage('正在播放試講，聲音直接來自這組聲線的即時合成。')
+      previewAudioRef.current = nextAudio
+      setPreviewAudio(nextAudio)
+      if (previousAudio) URL.revokeObjectURL(previousAudio.url)
+      setMessage('試講已產生，可以重複播放或下載；聲音直接來自這組聲線的即時合成。')
     } catch (error) {
+      if (controller.signal.aborted) return
       setMessage(error instanceof Error ? error.message : '試講失敗。')
     } finally {
-      setPreviewingId(null)
+      if (previewRequestRef.current === request) {
+        previewRequestRef.current = null
+        setPreviewing((current) => current?.characterProfileId === characterProfileId && current.profileId === profile.id ? null : current)
+      }
     }
   }
 
+  function releasePreviewAfterError(url: string) {
+    const current = previewAudioRef.current
+    if (current?.url !== url) return
+    previewAudioRef.current = null
+    URL.revokeObjectURL(current.url)
+    setPreviewAudio((audio) => audio?.url === current.url ? null : audio)
+    setMessage('瀏覽器無法播放這段試講，已釋放暫存音訊，請重新產生。')
+  }
+
+  function releasePreviewForProfile(profileId: string) {
+    const request = previewRequestRef.current
+    if (request?.characterProfileId === characterProfileId && request.profileId === profileId) {
+      previewRequestRef.current = null
+      request.controller.abort()
+      setPreviewing((current) => current?.characterProfileId === characterProfileId && current.profileId === profileId ? null : current)
+    }
+
+    const current = previewAudioRef.current
+    if (current?.characterProfileId !== characterProfileId || current.profileId !== profileId) return
+    previewAudioRef.current = null
+    URL.revokeObjectURL(current.url)
+    setPreviewAudio((audio) => audio?.url === current.url ? null : audio)
+  }
+
   async function remove(profile: VoiceProfile) {
+    releasePreviewForProfile(profile.id)
     setBusySlot(profile.id)
     try {
       await fetchJson(`${basePath(characterProfileId)}/${profile.id}`, { method: 'DELETE', csrfToken })
@@ -261,6 +388,11 @@ export function CharacterVoiceProfilesPanel({ characterProfileId, characterName,
           const isOpen = openSlot === slotKey
           const isBusy = busySlot === slotKey || (profile !== null && busySlot === profile.id)
           const slotMode = mode[slotKey] ?? 'Design'
+          const currentPreview = profile
+            && previewAudio?.characterProfileId === characterProfileId
+            && previewAudio.profileId === profile.id
+            ? previewAudio
+            : null
 
           return (
             <div className="rounded-xl border border-stone-200 bg-stone-50 p-3" key={slotKey}>
@@ -369,12 +501,31 @@ export function CharacterVoiceProfilesPanel({ characterProfileId, characterName,
                   {profile.status === 'Ready' && (
                     <button
                       className="secondary-button w-full px-3 py-2 text-xs disabled:cursor-wait disabled:opacity-60"
-                      disabled={previewingId === profile.id}
+                      disabled={previewingId !== null}
                       onClick={() => void playPreview(profile, DEFAULT_PREVIEW_TEXT)}
                       type="button"
                     >
                       {previewingId === profile.id ? '合成中…' : '▶ 播放試講'}
                     </button>
+                  )}
+
+                  {currentPreview && (
+                    <div className="space-y-2 rounded-lg border border-stone-200 bg-white p-2">
+                      <audio
+                        aria-label={`${characterName}的${previewSlotLabel(profile)}試音`}
+                        autoPlay
+                        className="w-full"
+                        controls
+                        onError={() => releasePreviewAfterError(currentPreview.url)}
+                        preload="metadata"
+                        src={currentPreview.url}
+                      >
+                        你的瀏覽器無法播放這段試音。
+                      </audio>
+                      <a className="block text-center text-xs text-amber-700 underline" download={currentPreview.fileName} href={currentPreview.url}>
+                        下載試音
+                      </a>
+                    </div>
                   )}
 
                   {profile.status === 'Pending' && (

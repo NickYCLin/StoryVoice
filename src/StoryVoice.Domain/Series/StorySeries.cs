@@ -166,6 +166,7 @@ public sealed class StorySeries
         Guid? characterProfileId = null)
     {
         EnsureMutationAggregateComplete();
+        EnsureCharacterProfileAvailable(characterProfileId);
         EnsureIdentityKeyAvailable(canonicalName, SeriesFieldLimits.CharacterName);
 
         var now = DateTimeOffset.UtcNow;
@@ -275,6 +276,7 @@ public sealed class StorySeries
         EnsureId(characterId, nameof(characterId));
         var character = _characters.SingleOrDefault(candidate => candidate.Id == characterId)
             ?? throw new InvalidOperationException("角色不屬於這個系列。");
+        EnsureCharacterProfileAvailable(characterProfileId, characterId);
         var canonicalKey = _identityKeys.SingleOrDefault(key => key.Id == character.CanonicalIdentityKeyId)
             ?? throw new InvalidOperationException("角色缺少 canonical identity key。");
         EnsureCanonicalRelationship(character, canonicalKey);
@@ -297,6 +299,21 @@ public sealed class StorySeries
             now);
         canonicalKey.RenameCanonical(character.CanonicalName);
         Touch(now);
+    }
+
+    public void SetCharacterProfile(Guid characterId, Guid? characterProfileId)
+    {
+        EnsureMutationAggregateComplete();
+        EnsureId(characterId, nameof(characterId));
+        var character = _characters.SingleOrDefault(candidate => candidate.Id == characterId)
+            ?? throw new InvalidOperationException("角色不屬於這個系列。");
+        EnsureCharacterProfileAvailable(characterProfileId, characterId);
+
+        var now = DateTimeOffset.UtcNow;
+        if (character.SetCharacterProfile(characterProfileId, now))
+        {
+            Touch(now);
+        }
     }
 
     public void SetNarratorVoice(
@@ -477,6 +494,26 @@ public sealed class StorySeries
                 && string.Equals(key.NormalizedValue, normalizedValue, StringComparison.Ordinal)))
         {
             throw new InvalidOperationException("同一系列內的 canonical name 與 alias 不可使用相同的識別文字。");
+        }
+    }
+
+    private void EnsureCharacterProfileAvailable(
+        Guid? characterProfileId,
+        Guid? ignoredCharacterId = null)
+    {
+        if (characterProfileId == Guid.Empty)
+        {
+            throw new ArgumentException(
+                "角色庫識別碼在有值時不可為空白 Guid。",
+                nameof(characterProfileId));
+        }
+
+        if (characterProfileId is Guid profileId
+            && _characters.Any(character =>
+                character.Id != ignoredCharacterId
+                && character.CharacterProfileId == profileId))
+        {
+            throw new InvalidOperationException("同一系列內的角色庫角色不可重複連結。");
         }
     }
 

@@ -38,6 +38,12 @@ public sealed record UpdateSeriesCharacterRequest(
     string? Notes,
     Guid? CharacterProfileId = null);
 
+/// <summary>
+/// Links an active, owner-scoped library profile, or unlinks with <see langword="null"/>.
+/// Repeating an existing link is a no-op even if that profile was later deactivated.
+/// </summary>
+public sealed record SetSeriesCharacterProfileRequest(Guid? CharacterProfileId);
+
 public sealed record AddSeriesCharacterAliasRequest(string Alias);
 
 public sealed record ApplyAnalyzedSeriesCharacterRequest(

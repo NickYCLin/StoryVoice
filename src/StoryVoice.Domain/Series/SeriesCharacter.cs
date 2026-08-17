@@ -250,6 +250,26 @@ public sealed class SeriesCharacter
         return true;
     }
 
+    internal bool SetCharacterProfile(Guid? characterProfileId, DateTimeOffset now)
+    {
+        if (characterProfileId == Guid.Empty)
+        {
+            throw new ArgumentException(
+                "角色庫識別碼在有值時不可為空白 Guid。",
+                nameof(characterProfileId));
+        }
+
+        if (CharacterProfileId == characterProfileId)
+        {
+            return false;
+        }
+
+        CharacterProfileId = characterProfileId;
+        UpdatedAt = now;
+        ConcurrencyStamp = Guid.NewGuid();
+        return true;
+    }
+
     private static void EnsureId(Guid value, string parameterName)
     {
         if (value == Guid.Empty)

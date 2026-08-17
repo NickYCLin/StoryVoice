@@ -167,6 +167,32 @@ test('系列角色只有連結角色庫時才顯示自訂聲線，且加入角�
   assert.match(panel, /characterProfileId: usingLibraryCharacter \? selectedCharacterProfileId : null/)
 })
 
+test('既有系列角色可以透過專用原子 API 後補或解除角色庫連結', () => {
+  assert.match(panel, /characterProfileSelections/)
+  assert.match(panel, /saveCharacterProfileLink/)
+  assert.match(panel, /\/api\/series\/\$\{details\.id\}\/characters\/\$\{character\.id\}\/character-profile/)
+  assert.match(panel, /body: \{ characterProfileId: characterProfileId \|\| null \}/)
+  assert.match(panel, /method: 'PUT'/)
+  assert.match(panel, /setDetails\(updated\)/)
+  assert.match(panel, /setBatch\(null\)/)
+  assert.match(panel, /setFormState\('loading'\)/)
+  assert.match(panel, /setFormState\('idle'\)/)
+  assert.match(panel, /目前固定聲線與已啟用音訊不變/)
+  assert.match(panel, /儲存單角連結/)
+  assert.match(panel, /不連結角色庫（保留目前固定聲線）/)
+})
+
+test('同系列中已被其他角色使用的角色庫 identity 會停用，跨系列共用則有明確提示', () => {
+  assert.match(panel, /findCharacterProfileLinkOwner/)
+  assert.match(panel, /const unavailable = Boolean\(linkedBy\) \|\| \(!profile\.isActive && !isCurrentProfile\)/)
+  assert.match(panel, /<option disabled=\{unavailable\}/)
+  assert.match(panel, /已連結：\$\{linkedBy\.canonicalName\}/)
+  assert.match(panel, /系統允許跨系列共用角色庫角色/)
+  assert.match(panel, /同一系列中已被另一角色連結的選項會停用/)
+  assert.match(panel, /libraryCharacterAlreadyLinked/)
+  assert.match(panel, /這個角色庫角色已停用或已被本系列使用/)
+})
+
 test('角色管理頁面走 owner-scoped 角色庫 API，並串接自訂聲線工作室', () => {
   assert.match(characterLibraryPage, /\/api\/character-profiles/)
   assert.match(characterLibraryPage, /<CharacterVoiceProfilesPanel/)
@@ -181,7 +207,7 @@ test('App 與主導覽都能開啟角色管理頁面', () => {
   assert.match(appLayout, /to="\/characters"/)
 })
 
-test('聲線卡片顯示字數與時長，並提供即時播放試講', () => {
+test('聲線卡片顯示字數與時長，並提供可重播與下載的即時試講', () => {
   assert.match(voiceProfilesPanel, /referenceAudioDurationSeconds/)
   assert.match(voiceProfilesPanel, /字數/)
   assert.match(voiceProfilesPanel, /formatDuration/)
@@ -193,11 +219,49 @@ test('聲線卡片顯示字數與時長，並提供即時播放試講', () => {
   assert.match(voiceProfilesPanel, /body: JSON\.stringify\(\{ text \}\)/)
   assert.match(voiceProfilesPanel, /response\.blob\(\)/)
   assert.match(voiceProfilesPanel, /URL\.createObjectURL\(blob\)/)
-  assert.match(voiceProfilesPanel, /new Audio\(url\)/)
-  assert.match(voiceProfilesPanel, /addEventListener\('ended', releaseUrl, \{ once: true \}\)/)
-  assert.match(voiceProfilesPanel, /addEventListener\('error', releaseUrl, \{ once: true \}\)/)
-  assert.match(voiceProfilesPanel, /catch \(error\) \{[\s\S]*releaseUrl\(\)[\s\S]*throw error/)
-  assert.match(voiceProfilesPanel, /URL\.revokeObjectURL\(url\)/)
+  assert.match(voiceProfilesPanel, /<audio/)
+  assert.match(voiceProfilesPanel, /controls/)
+  assert.match(voiceProfilesPanel, /download=\{currentPreview\.fileName\}/)
+  assert.match(voiceProfilesPanel, /下載試音/)
+  assert.match(voiceProfilesPanel, /safeDownloadFileNamePart/)
+  assert.match(voiceProfilesPanel, /codePointAt/)
+  assert.match(voiceProfilesPanel, /\[<>:"\/\\\\\|\?\*\]/)
+})
+
+test('試音 Blob URL 在取代、播放錯誤與 unmount 時都會釋放', () => {
+  assert.match(voiceProfilesPanel, /const previousAudio = previewAudioRef\.current/)
+  assert.match(voiceProfilesPanel, /if \(previousAudio\) URL\.revokeObjectURL\(previousAudio\.url\)/)
+  assert.match(voiceProfilesPanel, /request\?\.controller\.abort\(\)/)
+  assert.match(voiceProfilesPanel, /const audio = previewAudioRef\.current[\s\S]*previewAudioRef\.current = null[\s\S]*if \(audio\) URL\.revokeObjectURL\(audio\.url\)/)
+  assert.match(voiceProfilesPanel, /onError=\{\(\) => releasePreviewAfterError\(currentPreview\.url\)\}/)
+  assert.match(voiceProfilesPanel, /function releasePreviewAfterError\(url: string\)[\s\S]*URL\.revokeObjectURL\(current\.url\)/)
+  assert.match(voiceProfilesPanel, /if \(controller\.signal\.aborted\) \{[\s\S]*URL\.revokeObjectURL\(url\)/)
+})
+
+test('角色 A 切到 B 再切回 A 也不會重顯已 revoke 的試音狀態', () => {
+  assert.match(voiceProfilesPanel, /useEffect\(\(\) => \{\s*setPreviewAudio\(null\)\s*setPreviewing\(null\)\s*return \(\) => \{[\s\S]*\}\s*\}, \[characterProfileId\]\)/)
+  assert.match(voiceProfilesPanel, /previewAudio\?\.characterProfileId === characterProfileId/)
+  assert.match(voiceProfilesPanel, /previewing\?\.characterProfileId === characterProfileId/)
+})
+
+test('刪除目前有試音或正在合成的 profile 會立即中止並釋放', () => {
+  assert.match(voiceProfilesPanel, /function releasePreviewForProfile\(profileId: string\)/)
+  assert.match(voiceProfilesPanel, /request\?\.characterProfileId === characterProfileId && request\.profileId === profileId/)
+  assert.match(voiceProfilesPanel, /request\.controller\.abort\(\)/)
+  assert.match(voiceProfilesPanel, /current\?\.characterProfileId !== characterProfileId \|\| current\.profileId !== profileId/)
+  assert.match(voiceProfilesPanel, /URL\.revokeObjectURL\(current\.url\)/)
+  assert.match(voiceProfilesPanel, /async function remove\(profile: VoiceProfile\) \{\s*releasePreviewForProfile\(profile\.id\)\s*setBusySlot\(profile\.id\)[\s\S]*method: 'DELETE'/)
+})
+
+test('切換角色時會清空舊 profiles、中止舊 GET，並拒絕晚到回應覆蓋新角色', () => {
+  assert.match(voiceProfilesPanel, /fetchJson<VoiceProfile\[]>\(basePath\(requestedCharacterProfileId\), \{ signal \}\)/)
+  assert.match(voiceProfilesPanel, /loadGenerationRef\.current !== requestedGeneration/)
+  assert.match(voiceProfilesPanel, /currentCharacterProfileIdRef\.current !== requestedCharacterProfileId/)
+  assert.match(voiceProfilesPanel, /setProfilesState\(\{ characterProfileId: requestedCharacterProfileId, items: list \}\)/)
+  assert.match(voiceProfilesPanel, /const profiles = profilesState\?\.characterProfileId === characterProfileId \? profilesState\.items : null/)
+  assert.match(voiceProfilesPanel, /loadGenerationRef\.current \+= 1\s*const controller = new AbortController\(\)\s*setProfilesState\(null\)\s*void load\(controller\.signal\)/)
+  assert.match(voiceProfilesPanel, /return \(\) => \{\s*loadGenerationRef\.current \+= 1\s*controller\.abort\(\)/)
+  assert.match(voiceProfilesPanel, /catch \(error\) \{\s*if \(signal\?\.aborted[\s\S]*currentCharacterProfileIdRef\.current !== requestedCharacterProfileId\) return\s*setMessage/)
 })
 
 test('系列配音控制台可以設定視角角色，讓第一人稱自述對白自動歸給主角', () => {
@@ -205,6 +269,25 @@ test('系列配音控制台可以設定視角角色，讓第一人稱自述對�
   assert.match(panel, /視角角色（第一人稱敘事者）/)
   assert.match(panel, /pointOfViewCharacterId/)
   assert.match(panel, /method: 'PUT'/)
+})
+
+test('系列可切換獨立旁白或視角角色內心敘事，並讓既有草稿與 staged batch 失效', () => {
+  assert.match(panel, /type NarrativeVoiceMode = 'IndependentNarrator' \| 'PointOfViewInnerMonologue'/)
+  assert.match(panel, /narrativeVoiceMode: NarrativeVoiceMode/)
+  assert.match(panel, /\/api\/series\/\$\{details\.id\}\/narrative-voice/)
+  assert.match(panel, /body: \{\s*mode,\s*pointOfViewCharacterId: details\.pointOfViewCharacterId,/)
+  assert.match(panel, /setDetails\(updated\)\s*setBatch\(null\)/)
+  assert.match(panel, /逐章說話者草稿需要重新建立，目前已啟用音訊不變/)
+  assert.match(panel, /正文敘事聲線/)
+  assert.match(panel, /視角角色內心獨白/)
+})
+
+test('視角角色內心敘事必須先指定 POV，啟用後不能從視角選擇器清空', () => {
+  assert.match(panel, /mode === 'PointOfViewInnerMonologue' && !details\.pointOfViewCharacterId/)
+  assert.match(panel, /請先選擇視角角色，才能啟用視角角色內心敘事/)
+  assert.match(panel, /!characterId && details\.narrativeVoiceMode === 'PointOfViewInnerMonologue'/)
+  assert.match(panel, /disabled=\{details\.narrativeVoiceMode === 'PointOfViewInnerMonologue'\} value=""/)
+  assert.match(panel, /<option disabled=\{!details\.pointOfViewCharacterId\} value="PointOfViewInnerMonologue"/)
 })
 
 test('角色管理頁面提供啟用狀態切換、摘要卡片、重設按鈕、試講與任務紀錄分頁', () => {

@@ -143,13 +143,21 @@ internal sealed class SeriesService(
         EnsureFormalNarrationAvailable(voice.Provider);
         EnsureSupportedSynthesisParameters(voice.Provider, request.Rate, request.Pitch, request.Volume);
         var ownerId = EnsureCurrentOwnerId();
-        await EnsureCharacterProfileOwnedAsync(ownerId, request.CharacterProfileId, cancellationToken);
         var series = await repository.GetForMutationAsync(seriesId, cancellationToken);
         if (series is null)
         {
             return null;
         }
 
+        await EnsureCharacterProfileLinkAllowedAsync(
+            ownerId,
+            request.CharacterProfileId,
+            currentCharacterProfileId: null,
+            cancellationToken);
+        EnsureCharacterProfileNotLinkedElsewhere(
+            series,
+            ignoredCharacterId: null,
+            request.CharacterProfileId);
         EnsureSingleSynthesisProvider(series.NarratorProvider, [voice.Provider]);
         series.AddCharacter(
             request.CanonicalName,
@@ -179,13 +187,19 @@ internal sealed class SeriesService(
         EnsureFormalNarrationAvailable(voice.Provider);
         EnsureSupportedSynthesisParameters(voice.Provider, request.Rate, request.Pitch, request.Volume);
         var ownerId = EnsureCurrentOwnerId();
-        await EnsureCharacterProfileOwnedAsync(ownerId, request.CharacterProfileId, cancellationToken);
         var series = await repository.GetForMutationAsync(seriesId, cancellationToken);
-        if (series is null || series.Characters.All(character => character.Id != characterId))
+        var character = series?.Characters.SingleOrDefault(candidate => candidate.Id == characterId);
+        if (series is null || character is null)
         {
             return null;
         }
 
+        await EnsureCharacterProfileLinkAllowedAsync(
+            ownerId,
+            request.CharacterProfileId,
+            character.CharacterProfileId,
+            cancellationToken);
+        EnsureCharacterProfileNotLinkedElsewhere(series, characterId, request.CharacterProfileId);
         EnsureSingleSynthesisProvider(series.NarratorProvider, [voice.Provider]);
         series.UpdateCharacter(
             characterId,
@@ -198,6 +212,49 @@ internal sealed class SeriesService(
             request.Volume,
             request.Notes,
             request.CharacterProfileId);
+        await InvalidatePendingRebuildsAsync(series, cancellationToken);
+        await SaveChangesAsync(cancellationToken);
+        return await ToDetailsAsync(series, cancellationToken);
+    }
+
+    public async Task<StorySeriesDetailsResponse?> SetCharacterProfileAsync(
+        Guid seriesId,
+        Guid characterId,
+        SetSeriesCharacterProfileRequest request,
+        CancellationToken cancellationToken)
+    {
+        EnsureId(seriesId, nameof(seriesId));
+        EnsureId(characterId, nameof(characterId));
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.CharacterProfileId == Guid.Empty)
+        {
+            throw new ArgumentException(
+                "角色庫識別碼在有值時不可為空白 Guid。",
+                nameof(request));
+        }
+
+        var ownerId = EnsureCurrentOwnerId();
+        var series = await repository.GetForMutationAsync(seriesId, cancellationToken);
+        var character = series?.Characters.SingleOrDefault(candidate => candidate.Id == characterId);
+        if (series is null || character is null)
+        {
+            return null;
+        }
+
+        EnsureCharacterProfileNotLinkedElsewhere(series, characterId, request.CharacterProfileId);
+        if (character.CharacterProfileId == request.CharacterProfileId)
+        {
+            // A no-op remains legal even when a previously linked profile has since been
+            // deactivated. This does not create a new inactive link or invalidate staged work.
+            return await ToDetailsAsync(series, cancellationToken);
+        }
+
+        await EnsureCharacterProfileLinkAllowedAsync(
+            ownerId,
+            request.CharacterProfileId,
+            character.CharacterProfileId,
+            cancellationToken);
+        series.SetCharacterProfile(characterId, request.CharacterProfileId);
         await InvalidatePendingRebuildsAsync(series, cancellationToken);
         await SaveChangesAsync(cancellationToken);
         return await ToDetailsAsync(series, cancellationToken);
@@ -771,22 +828,44 @@ internal sealed class SeriesService(
         return currentUser.UserId;
     }
 
-    private async Task EnsureCharacterProfileOwnedAsync(
+    private async Task EnsureCharacterProfileLinkAllowedAsync(
         Guid ownerId,
         Guid? characterProfileId,
+        Guid? currentCharacterProfileId,
         CancellationToken cancellationToken)
     {
-        if (characterProfileId is null)
+        if (characterProfileId is null || characterProfileId == currentCharacterProfileId)
         {
             return;
         }
 
-        var exists = await dbContext.CharacterProfiles.AnyAsync(
-            profile => profile.OwnerId == ownerId && profile.Id == characterProfileId,
-            cancellationToken);
-        if (!exists)
+        var profile = await dbContext.CharacterProfiles
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                profile => profile.OwnerId == ownerId && profile.Id == characterProfileId,
+                cancellationToken);
+        if (profile is null)
         {
             throw new InvalidOperationException("找不到指定的角色庫角色。");
+        }
+
+        if (!profile.IsActive)
+        {
+            throw new InvalidOperationException("無法連結已停用的角色庫角色。");
+        }
+    }
+
+    private static void EnsureCharacterProfileNotLinkedElsewhere(
+        StorySeries series,
+        Guid? ignoredCharacterId,
+        Guid? characterProfileId)
+    {
+        if (characterProfileId is Guid profileId
+            && series.Characters.Any(character =>
+                character.Id != ignoredCharacterId
+                && character.CharacterProfileId == profileId))
+        {
+            throw new InvalidOperationException("同一系列內的角色庫角色不可重複連結。");
         }
     }
 

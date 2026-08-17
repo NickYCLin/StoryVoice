@@ -144,6 +144,95 @@ public sealed class StorySeriesTests
     }
 
     [Fact]
+    public void Character_profile_link_changes_only_the_link_and_supports_no_op_and_unlink()
+    {
+        var series = CreateSeries(Guid.NewGuid(), "角色庫連結系列");
+        var character = series.AddCharacter(
+            "Alice",
+            SeriesCharacterRole.Supporting,
+            "edge",
+            "zh-TW-HsiaoChenNeural",
+            "-5%",
+            "+2Hz",
+            "-3%",
+            "原始角色提示");
+        var profileId = Guid.NewGuid();
+        var preservedFields = (
+            character.CanonicalName,
+            character.Role,
+            character.VoiceProvider,
+            character.Voice,
+            character.Rate,
+            character.Pitch,
+            character.Volume,
+            character.Notes,
+            character.CanonicalIdentityKeyId);
+
+        series.SetCharacterProfile(character.Id, profileId);
+
+        Assert.Equal(profileId, character.CharacterProfileId);
+        Assert.Equal(preservedFields, (
+            character.CanonicalName,
+            character.Role,
+            character.VoiceProvider,
+            character.Voice,
+            character.Rate,
+            character.Pitch,
+            character.Volume,
+            character.Notes,
+            character.CanonicalIdentityKeyId));
+
+        var noOpStamps = (series.ConcurrencyStamp, character.ConcurrencyStamp);
+        series.SetCharacterProfile(character.Id, profileId);
+        Assert.Equal(noOpStamps, (series.ConcurrencyStamp, character.ConcurrencyStamp));
+
+        series.SetCharacterProfile(character.Id, null);
+        Assert.Null(character.CharacterProfileId);
+        Assert.Equal(preservedFields, (
+            character.CanonicalName,
+            character.Role,
+            character.VoiceProvider,
+            character.Voice,
+            character.Rate,
+            character.Pitch,
+            character.Volume,
+            character.Notes,
+            character.CanonicalIdentityKeyId));
+    }
+
+    [Fact]
+    public void A_non_null_character_profile_can_only_be_linked_once_per_series()
+    {
+        var series = CreateSeries(Guid.NewGuid(), "角色庫唯一性系列");
+        var profileId = Guid.NewGuid();
+        var first = series.AddCharacter(
+            "Alice", SeriesCharacterRole.Main, "edge", "voice-a", "+0%", "+0Hz", "+0%", null, profileId);
+        var second = series.AddCharacter(
+            "Bob", SeriesCharacterRole.Supporting, "edge", "voice-b", "+0%", "+0Hz", "+0%", null);
+        var before = (series.ConcurrencyStamp, second.ConcurrencyStamp, second.CharacterProfileId);
+
+        Assert.Throws<InvalidOperationException>(() =>
+            series.SetCharacterProfile(second.Id, profileId));
+        Assert.Throws<InvalidOperationException>(() => series.AddCharacter(
+            "Carol", SeriesCharacterRole.Minor, "edge", "voice-c", "+0%", "+0Hz", "+0%", null, profileId));
+        Assert.Throws<InvalidOperationException>(() => series.UpdateCharacter(
+            second.Id,
+            second.CanonicalName,
+            second.Role,
+            second.VoiceProvider,
+            second.Voice,
+            second.Rate,
+            second.Pitch,
+            second.Volume,
+            second.Notes,
+            profileId));
+
+        Assert.Equal(profileId, first.CharacterProfileId);
+        Assert.Equal(before, (series.ConcurrencyStamp, second.ConcurrencyStamp, second.CharacterProfileId));
+        Assert.Equal(2, series.Characters.Count);
+    }
+
+    [Fact]
     public void Nfkc_compatible_fullwidth_and_halfwidth_identity_keys_collide_without_mutation()
     {
         var series = CreateSeries(Guid.NewGuid(), "系列");

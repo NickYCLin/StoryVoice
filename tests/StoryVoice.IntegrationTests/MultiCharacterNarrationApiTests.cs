@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using StoryVoice.Application.Books;
+using StoryVoice.Application.Characters;
 using StoryVoice.Application.Narrations;
 using StoryVoice.Application.Narrations.SpeechPlanning;
 using StoryVoice.Application.Series;
@@ -356,6 +357,65 @@ public sealed class MultiCharacterNarrationApiTests(ApiFactory factory) : IClass
         Assert.Null((await verifyDb.StorySeries.SingleAsync(
             candidate => candidate.Id == series.Id,
             cancellationToken)).ActiveCastRevisionId);
+    }
+
+    [Fact]
+    public async Task Character_profile_link_invalidates_pending_batch_without_changing_active_audio_pointers()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var owner = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        var setup = await CreateBuildingBatchAsync(owner, "character profile link invalidation", cancellationToken);
+
+        Guid? activeCastRevisionId;
+        Guid? activeNarrationJobId;
+        await using (var beforeScope = factory.Services.CreateAsyncScope())
+        {
+            var beforeDb = beforeScope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+            var persistedSeries = await beforeDb.StorySeries
+                .Include(candidate => candidate.Books)
+                .SingleAsync(candidate => candidate.Id == setup.Series.Id, cancellationToken);
+            activeCastRevisionId = persistedSeries.ActiveCastRevisionId;
+            activeNarrationJobId = Assert.Single(persistedSeries.Books).ActiveNarrationJobId;
+        }
+
+        using var profileResponse = await owner.PostWithCsrfAsync(
+            "/api/character-profiles",
+            new
+            {
+                canonicalName = "重建期間連結角色",
+                age = (string?)null,
+                gender = (string?)null,
+                birthday = (string?)null,
+                personality = (string?)null,
+                catchphrase = (string?)null,
+                background = (string?)null,
+                speakingStyle = (string?)null
+            },
+            cancellationToken);
+        var profile = await profileResponse.Content.ReadFromJsonAsync<CharacterProfileResponse>(
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.Created, profileResponse.StatusCode);
+        Assert.NotNull(profile);
+
+        using var linkResponse = await owner.PutWithCsrfAsync(
+            $"/api/series/{setup.Series.Id}/characters/{setup.Character.Id}/character-profile",
+            new { characterProfileId = profile.Id },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, linkResponse.StatusCode);
+        await AssertBatchAndJobStateAsync(
+            setup.Batch,
+            SeriesCastRebuildBatchStatus.Failed,
+            NarrationJobStatus.Cancelled,
+            cancellationRequested: true,
+            cancellationToken);
+
+        await using var verifyScope = factory.Services.CreateAsyncScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+        var verifiedSeries = await verifyDb.StorySeries
+            .Include(candidate => candidate.Books)
+            .SingleAsync(candidate => candidate.Id == setup.Series.Id, cancellationToken);
+        Assert.Equal(activeCastRevisionId, verifiedSeries.ActiveCastRevisionId);
+        Assert.Equal(activeNarrationJobId, Assert.Single(verifiedSeries.Books).ActiveNarrationJobId);
     }
 
     [Fact]

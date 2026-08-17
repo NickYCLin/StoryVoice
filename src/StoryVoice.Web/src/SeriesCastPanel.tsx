@@ -17,11 +17,13 @@ const BLUE_MAGPIE_VOICES = [
   { voice: 'hung_yi_lee', label: 'BlueMagpie 內建男聲' },
 ] as const
 type BlueMagpieVoice = typeof BLUE_MAGPIE_VOICES[number]['voice']
+type NarrativeVoiceMode = 'IndependentNarrator' | 'PointOfViewInnerMonologue'
 
 type CharacterProfileSummary = {
   id: string
   canonicalName: string
   hasAvatar: boolean
+  isActive: boolean
 }
 
 type VoiceOption = {
@@ -64,6 +66,18 @@ type SeriesCharacter = SeriesCharacterChoice & {
   aliases: Array<{ id: string; value: string }>
 }
 
+function findCharacterProfileLinkOwner(
+  characters: SeriesCharacter[],
+  currentCharacterId: string,
+  characterProfileId: string,
+) {
+  if (!characterProfileId) return null
+  return characters.find((character) => (
+    character.id !== currentCharacterId
+    && character.characterProfileId === characterProfileId
+  )) ?? null
+}
+
 type SeriesDetails = {
   id: string
   name: string
@@ -75,6 +89,7 @@ type SeriesDetails = {
   defaultSpeakerPauseMs: number
   activeCastRevisionId: string | null
   pointOfViewCharacterId: string | null
+  narrativeVoiceMode: NarrativeVoiceMode
   books: SeriesBook[]
   characters: SeriesCharacter[]
 }
@@ -132,6 +147,8 @@ export function SeriesCastPanel() {
   const [batch, setBatch] = useState<RebuildBatch | null>(null)
   const [activateDialogOpen, setActivateDialogOpen] = useState(false)
   const [expandedCharacterId, setExpandedCharacterId] = useState<string | null>(null)
+  const [characterProfileSelections, setCharacterProfileSelections] = useState<Record<string, string>>({})
+  const [savingCharacterProfileId, setSavingCharacterProfileId] = useState<string | null>(null)
 
   const loadSeries = useCallback(async () => {
     setState('loading')
@@ -175,6 +192,9 @@ export function SeriesCastPanel() {
       setVolumeLabel('')
       setBatch(null)
       setExpandedCharacterId(null)
+      setCharacterProfileSelections(Object.fromEntries(
+        detail.characters.map((character) => [character.id, character.characterProfileId ?? '']),
+      ))
     } catch (error) {
       setDetails(null)
       setMessage(error instanceof Error ? error.message : '無法讀取這個系列。')
@@ -193,12 +213,16 @@ export function SeriesCastPanel() {
     if (!details) {
       setConfiguredNarratorVoiceKey('')
       setConfiguredCharacterVoiceKeys({})
+      setCharacterProfileSelections({})
       return
     }
 
     setConfiguredNarratorVoiceKey(`${details.narratorProvider}\n${details.narratorVoice}`)
     setConfiguredCharacterVoiceKeys(Object.fromEntries(
       details.characters.map((character) => [character.id, `${character.voiceProvider}\n${character.voice}`]),
+    ))
+    setCharacterProfileSelections(Object.fromEntries(
+      details.characters.map((character) => [character.id, character.characterProfileId ?? '']),
     ))
   }, [details])
 
@@ -467,9 +491,16 @@ export function SeriesCastPanel() {
     const usingLibraryCharacter = details?.narratorProvider === CUSTOM_VOICE_PROVIDER
       && Boolean(selectedCharacterProfileId)
     const libraryCharacter = characterProfiles.find((profile) => profile.id === selectedCharacterProfileId)
+    const libraryCharacterAlreadyLinked = details?.characters.some(
+      (character) => character.characterProfileId === selectedCharacterProfileId,
+    ) ?? false
     const resolvedName = usingLibraryCharacter ? libraryCharacter?.canonicalName ?? '' : characterName.trim()
     if (!details || !resolvedName) return
     if (!usingLibraryCharacter && !characterVoiceKey) return
+    if (usingLibraryCharacter && (!libraryCharacter?.isActive || libraryCharacterAlreadyLinked)) {
+      setMessage('這個角色庫角色已停用或已被本系列使用，請重新選擇。')
+      return
+    }
 
     const customVoice = voiceOptions.find((option) => option.provider === CUSTOM_VOICE_PROVIDER)
     const selectedVoice = usingLibraryCharacter
@@ -506,8 +537,57 @@ export function SeriesCastPanel() {
     }
   }
 
+  async function saveCharacterProfileLink(event: FormEvent<HTMLFormElement>, character: SeriesCharacter) {
+    event.preventDefault()
+    if (!details || formState === 'loading' || savingCharacterProfileId !== null) return
+
+    const characterProfileId = characterProfileSelections[character.id] ?? ''
+    const selectedProfile = characterProfiles.find((profile) => profile.id === characterProfileId)
+    if (characterProfileId
+      && (!selectedProfile || (!selectedProfile.isActive && character.characterProfileId !== characterProfileId))) {
+      setMessage('選擇的角色庫角色已停用或不存在，請重新選擇。')
+      return
+    }
+    const linkedByAnotherCharacter = findCharacterProfileLinkOwner(
+      details.characters,
+      character.id,
+      characterProfileId,
+    )
+    if (linkedByAnotherCharacter) {
+      setMessage(`角色庫「${selectedProfile?.canonicalName ?? '未知角色'}」已連結到 ${linkedByAnotherCharacter.canonicalName}，同一系列不可重複使用。`)
+      return
+    }
+
+    setFormState('loading')
+    setSavingCharacterProfileId(character.id)
+    try {
+      const updated = await fetchJson<SeriesDetails>(`/api/series/${details.id}/characters/${character.id}/character-profile`, {
+        method: 'PUT',
+        csrfToken,
+        body: { characterProfileId: characterProfileId || null },
+      })
+      setDetails(updated)
+      setBatch(null)
+      if (!characterProfileId && expandedCharacterId === character.id) {
+        setExpandedCharacterId(null)
+      }
+      setMessage(selectedProfile
+        ? `已將 ${character.canonicalName} 連結到角色庫「${selectedProfile.canonicalName}」；目前固定聲線與已啟用音訊不變。`
+        : `已取消 ${character.canonicalName} 的角色庫連結；目前固定聲線與已啟用音訊不變。`)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '儲存角色庫連結失敗。')
+    } finally {
+      setSavingCharacterProfileId(null)
+      setFormState('idle')
+    }
+  }
+
   async function setPointOfViewCharacter(characterId: string) {
     if (!details) return
+    if (!characterId && details.narrativeVoiceMode === 'PointOfViewInnerMonologue') {
+      setMessage('視角角色內心敘事模式必須保留視角角色；請先切回獨立旁白再取消。')
+      return
+    }
     setFormState('loading')
     try {
       const updated = await fetchJson<SeriesDetails>(`/api/series/${details.id}/point-of-view-character`, {
@@ -516,9 +596,41 @@ export function SeriesCastPanel() {
         body: { characterId: characterId || null },
       })
       setDetails(updated)
-      setMessage(characterId ? '已設定視角角色；這個角色以「我」開頭的自述對白將自動歸給他。' : '已取消視角角色設定。')
+      setBatch(null)
+      setMessage(characterId
+        ? '已設定視角角色；逐章說話者草稿需要重新建立，目前已啟用音訊不變。'
+        : '已取消視角角色設定；逐章說話者草稿需要重新建立，目前已啟用音訊不變。')
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '設定視角角色失敗。')
+    } finally {
+      setFormState('idle')
+    }
+  }
+
+  async function configureNarrativeVoice(mode: NarrativeVoiceMode) {
+    if (!details || mode === details.narrativeVoiceMode) return
+    if (mode === 'PointOfViewInnerMonologue' && !details.pointOfViewCharacterId) {
+      setMessage('請先選擇視角角色，才能啟用視角角色內心敘事。')
+      return
+    }
+
+    setFormState('loading')
+    try {
+      const updated = await fetchJson<SeriesDetails>(`/api/series/${details.id}/narrative-voice`, {
+        method: 'PUT',
+        csrfToken,
+        body: {
+          mode,
+          pointOfViewCharacterId: details.pointOfViewCharacterId,
+        },
+      })
+      setDetails(updated)
+      setBatch(null)
+      setMessage(mode === 'PointOfViewInnerMonologue'
+        ? '已改用視角角色的聲線朗讀正文內心敘事；逐章說話者草稿需要重新建立，目前已啟用音訊不變。'
+        : '已改回獨立旁白朗讀正文；逐章說話者草稿需要重新建立，目前已啟用音訊不變。')
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '設定正文敘事聲線失敗。')
     } finally {
       setFormState('idle')
     }
@@ -675,6 +787,20 @@ export function SeriesCastPanel() {
                 </section>
 
                 <section className="mt-7 border-t border-stone-200 pt-5" aria-label="固定角色聲線"><h3 className="font-serif text-xl text-stone-900">固定角色聲線</h3><p className="mt-1 text-sm text-stone-500">角色與別名都限制在這個 owner 的系列；跨角色 alias 衝突會直接拒絕。角色也可以直接從<Link className="text-amber-700 underline" to="/characters">角色庫</Link>選入，跨系列共用同一組自訂聲線。</p>
+                  <p className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">每位既有角色都能在下方後補或更換角色庫連結。儲存時會完整保留名稱、定位、provider、voice、rate、pitch、volume 與 notes；也不會立刻替換已啟用音訊。系統允許跨系列共用角色庫角色，但同一系列中已被另一角色連結的選項會停用，避免誤用同一個聲線身份。</p>
+                  <label className="mt-4 block max-w-sm text-xs text-stone-500">
+                    正文敘事聲線
+                    <select
+                      className="auth-input mt-2 disabled:opacity-60"
+                      disabled={formState === 'loading'}
+                      onChange={(event) => void configureNarrativeVoice(event.target.value as NarrativeVoiceMode)}
+                      value={details.narrativeVoiceMode}
+                    >
+                      <option value="IndependentNarrator">獨立旁白</option>
+                      <option disabled={!details.pointOfViewCharacterId} value="PointOfViewInnerMonologue">視角角色內心獨白</option>
+                    </select>
+                  </label>
+                  <p className="mt-1 max-w-xl text-xs text-stone-400">「視角角色內心獨白」會使用視角角色聲線朗讀正文與內心想法；必須先選好視角角色。切換後需重新建立逐章說話者草稿，既有已啟用音訊不會立即變更。</p>
                   <label className="mt-4 block max-w-sm text-xs text-stone-500">
                     視角角色（第一人稱敘事者）
                     <select
@@ -683,14 +809,23 @@ export function SeriesCastPanel() {
                       onChange={(event) => void setPointOfViewCharacter(event.target.value)}
                       value={details.pointOfViewCharacterId ?? ''}
                     >
-                      <option value="">不設定（不影響「我」的對白判斷）</option>
+                      <option disabled={details.narrativeVoiceMode === 'PointOfViewInnerMonologue'} value="">{details.narrativeVoiceMode === 'PointOfViewInnerMonologue' ? '內心敘事模式必須保留視角角色' : '不設定（不影響「我」的對白判斷）'}</option>
                       {details.characters.map((character) => <option key={character.id} value={character.id}>{character.canonicalName}</option>)}
                     </select>
                   </label>
                   <p className="mt-1 max-w-sm text-xs text-stone-400">設定後，全書「我＋說／問／道」等第一人稱自述對白會自動歸給這個角色，適合第一人稱主角敘事的書。</p>
                   <div className="mt-3 space-y-2">
-                    {details.characters.map((character) => (
-                      <div className="rounded-xl border border-stone-200 bg-stone-50 p-3" key={character.id}>
+                    {details.characters.map((character) => {
+                      const selectedProfileId = characterProfileSelections[character.id]
+                        ?? character.characterProfileId
+                        ?? ''
+                      const selectedProfileOwner = findCharacterProfileLinkOwner(
+                        details.characters,
+                        character.id,
+                        selectedProfileId,
+                      )
+                      return (
+                        <div className="rounded-xl border border-stone-200 bg-stone-50 p-3" key={character.id}>
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <p className="text-sm text-stone-800">{character.canonicalName} · {character.role}</p>
                           <div className="flex items-center gap-3">
@@ -707,6 +842,42 @@ export function SeriesCastPanel() {
                           </div>
                         </div>
                         <p className="mt-1 text-xs text-stone-500">{voiceLabel(character.voiceProvider, character.voice, voiceOptions)} · 別名：{character.aliases.map((item) => item.value).join('、') || '—'}</p>
+                        <form className="mt-3 flex flex-col gap-2 border-t border-stone-200 pt-3 sm:flex-row sm:items-end" onSubmit={(event) => void saveCharacterProfileLink(event, character)}>
+                          <label className="min-w-0 flex-1 text-xs text-stone-500">
+                            角色庫連結
+                            <select
+                              aria-label={`${character.canonicalName} 的角色庫連結`}
+                              className="auth-input mt-2"
+                              disabled={formState === 'loading' || savingCharacterProfileId === character.id}
+                              onChange={(event) => setCharacterProfileSelections((current) => ({
+                                ...current,
+                                [character.id]: event.target.value,
+                              }))}
+                              value={selectedProfileId}
+                            >
+                              <option value="">不連結角色庫（保留目前固定聲線）</option>
+                              {characterProfiles.map((profile) => {
+                                const linkedBy = findCharacterProfileLinkOwner(details.characters, character.id, profile.id)
+                                const isCurrentProfile = character.characterProfileId === profile.id
+                                const unavailable = Boolean(linkedBy) || (!profile.isActive && !isCurrentProfile)
+                                const suffix = linkedBy
+                                  ? `（已連結：${linkedBy.canonicalName}）`
+                                  : !profile.isActive ? '（未啟用）' : ''
+                                return <option disabled={unavailable} key={profile.id} value={profile.id}>{profile.canonicalName}{suffix}</option>
+                              })}
+                            </select>
+                          </label>
+                          <button
+                            className="secondary-button px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-60"
+                            disabled={formState === 'loading'
+                              || savingCharacterProfileId !== null
+                              || Boolean(selectedProfileOwner)
+                              || selectedProfileId === (character.characterProfileId ?? '')}
+                            type="submit"
+                          >
+                            {savingCharacterProfileId === character.id ? '儲存中…' : '儲存單角連結'}
+                          </button>
+                        </form>
                         {expandedCharacterId === character.id && character.characterProfileId && (
                           <div className="mt-3">
                             <CharacterVoiceProfilesPanel
@@ -716,8 +887,9 @@ export function SeriesCastPanel() {
                             />
                           </div>
                         )}
-                      </div>
-                    ))}
+                        </div>
+                      )
+                    })}
                   </div>
                   <form className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3" onSubmit={addCharacter}>
                     {details.narratorProvider === CUSTOM_VOICE_PROVIDER ? (
@@ -729,7 +901,14 @@ export function SeriesCastPanel() {
                           value={selectedCharacterProfileId}
                         >
                           <option value="">不使用角色庫，改用 Edge fallback</option>
-                          {characterProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.canonicalName}</option>)}
+                          {characterProfiles.map((profile) => {
+                            const linkedBy = details.characters.find((character) => character.characterProfileId === profile.id)
+                            const unavailable = !profile.isActive || Boolean(linkedBy)
+                            const suffix = linkedBy
+                              ? `（已連結：${linkedBy.canonicalName}）`
+                              : !profile.isActive ? '（未啟用）' : ''
+                            return <option disabled={unavailable} key={profile.id} value={profile.id}>{profile.canonicalName}{suffix}</option>
+                          })}
                         </select>
                       </label>
                     ) : (
