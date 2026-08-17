@@ -214,8 +214,20 @@ export function CharacterVoiceProfilesPanel({ characterProfileId, characterName,
       const blob = await response.blob()
       const url = URL.createObjectURL(blob)
       const audio = new Audio(url)
-      audio.addEventListener('ended', () => URL.revokeObjectURL(url))
-      await audio.play()
+      let released = false
+      const releaseUrl = () => {
+        if (released) return
+        released = true
+        URL.revokeObjectURL(url)
+      }
+      audio.addEventListener('ended', releaseUrl, { once: true })
+      audio.addEventListener('error', releaseUrl, { once: true })
+      try {
+        await audio.play()
+      } catch (error) {
+        releaseUrl()
+        throw error
+      }
       setMessage('正在播放試講，聲音直接來自這組聲線的即時合成。')
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '試講失敗。')

@@ -4,22 +4,23 @@ public sealed record ThreeWaSynthesisRequest(
     string Text,
     string Mode,
     string? VoiceProfileTaskId,
-    string? VoicePromptText);
+    string? VoicePromptText,
+    int Seed = 0);
 
 public sealed record ThreeWaSynthesisTaskHandle(
     string TaskId,
     string StatusUrl,
     string ResultUrl,
-    string? ArtifactUrlTemplate,
-    string? AckUrlTemplate);
+    string? ArtifactUrlTemplate);
 
 public sealed record ThreeWaSynthesisArtifact(string Id, string? MimeType);
 
 /// <summary>
-/// The Worker-side half of talking to the 3wa Cluster API's <c>voice_generate</c> mode: submitting
+/// The Worker-side half of talking to the 3wa AIHub canonical
+/// <c>api.php?mode=voice_generate</c> endpoint: submitting
 /// one turn's text for synthesis against an already-<see cref="StoryVoice.Domain.Narrations.CharacterVoiceProfileStatus.Ready"/>
-/// voice, then following the submit response's own status/result/artifact URLs (treated as opaque
-/// — never reconstructed from a hardcoded path) until the rendered audio can be downloaded.
+/// voice, then following the submit response's same-origin status/result/artifact URLs until the
+/// rendered audio can be downloaded.
 /// </summary>
 public interface IThreeWaSynthesisClient
 {
@@ -34,6 +35,4 @@ public interface IThreeWaSynthesisClient
         string artifactId,
         Stream destination,
         CancellationToken cancellationToken);
-
-    Task AcknowledgeArtifactAsync(string? ackUrlTemplate, string artifactId, CancellationToken cancellationToken);
 }

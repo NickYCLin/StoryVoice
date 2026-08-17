@@ -1,4 +1,6 @@
+using System.Net.Http.Headers;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using StoryVoice.Application.Authentication;
 using StoryVoice.Application.Narrations;
 using StoryVoice.Domain.Narrations;
@@ -9,7 +11,8 @@ namespace StoryVoice.Infrastructure.Narrations;
 internal sealed class CharacterVoicePreviewService(
     StoryVoiceDbContext dbContext,
     ICurrentUser currentUser,
-    IThreeWaSynthesisClient synthesisClient) : ICharacterVoicePreviewService
+    IThreeWaSynthesisClient synthesisClient,
+    IOptions<ThreeWaAiHubOptions> options) : ICharacterVoicePreviewService
 {
     private const int MaximumPreviewTextLength = 200;
     private const int PollIntervalMs = 1_500;
@@ -80,23 +83,32 @@ internal sealed class CharacterVoicePreviewService(
         }
 
         var artifacts = await synthesisClient.GetResultArtifactsAsync(handle.ResultUrl, cancellationToken);
-        var artifact = artifacts.FirstOrDefault()
+        var selectedArtifact = artifacts
+            .Select(artifact => new
+            {
+                Artifact = artifact,
+                ContentType = NormalizeAudioContentType(artifact.MimeType),
+            })
+            .FirstOrDefault(candidate => candidate.ContentType is not null)
             ?? throw new InvalidOperationException("試講合成沒有回傳可用的音訊。");
         if (string.IsNullOrWhiteSpace(handle.ArtifactUrlTemplate))
         {
             throw new InvalidOperationException("試講合成沒有回傳可下載的音訊位置。");
         }
 
-        using var buffer = new MemoryStream();
-        await synthesisClient.DownloadArtifactAsync(handle.ArtifactUrlTemplate, artifact.Id, buffer, cancellationToken);
-        await synthesisClient.AcknowledgeArtifactAsync(handle.AckUrlTemplate, artifact.Id, cancellationToken);
+        using var buffer = new BoundedMemoryStream(options.Value.MaximumAudioResponseBytes);
+        await synthesisClient.DownloadArtifactAsync(
+            handle.ArtifactUrlTemplate,
+            selectedArtifact.Artifact.Id,
+            buffer,
+            cancellationToken);
 
         if (buffer.Length == 0)
         {
             throw new InvalidOperationException("試講合成沒有產生可用音訊。");
         }
 
-        return new VoiceProfilePreviewAudio(buffer.ToArray(), artifact.MimeType ?? "audio/mpeg");
+        return new VoiceProfilePreviewAudio(buffer.ToArray(), selectedArtifact.ContentType!);
     }
 
     private static bool IsTerminalStatus(string status) =>
@@ -104,6 +116,23 @@ internal sealed class CharacterVoicePreviewService(
 
     private static bool IsSuccessStatus(string status) =>
         status is "succeeded" or "success" or "completed";
+
+    private static string? NormalizeAudioContentType(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        if (!MediaTypeHeaderValue.TryParse(value, out var contentType)
+            || string.IsNullOrWhiteSpace(contentType.MediaType)
+            || !contentType.MediaType.StartsWith("audio/", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return contentType.ToString();
+    }
 
     private Guid EnsureCurrentOwnerId()
     {
@@ -113,5 +142,59 @@ internal sealed class CharacterVoicePreviewService(
         }
 
         return currentUser.UserId;
+    }
+
+    private sealed class BoundedMemoryStream(int maximumBytes) : MemoryStream
+    {
+        public override void SetLength(long value)
+        {
+            if (value > maximumBytes)
+            {
+                throw TooLarge();
+            }
+
+            base.SetLength(value);
+        }
+
+        public override void Write(byte[] buffer, int offset, int count)
+        {
+            EnsureFits(count);
+            base.Write(buffer, offset, count);
+        }
+
+        public override void Write(ReadOnlySpan<byte> buffer)
+        {
+            EnsureFits(buffer.Length);
+            base.Write(buffer);
+        }
+
+        public override Task WriteAsync(
+            byte[] buffer,
+            int offset,
+            int count,
+            CancellationToken cancellationToken)
+        {
+            EnsureFits(count);
+            return base.WriteAsync(buffer, offset, count, cancellationToken);
+        }
+
+        public override ValueTask WriteAsync(
+            ReadOnlyMemory<byte> buffer,
+            CancellationToken cancellationToken = default)
+        {
+            EnsureFits(buffer.Length);
+            return base.WriteAsync(buffer, cancellationToken);
+        }
+
+        private void EnsureFits(int bytesToWrite)
+        {
+            if (maximumBytes < 1 || Position > maximumBytes - bytesToWrite)
+            {
+                throw TooLarge();
+            }
+        }
+
+        private static InvalidOperationException TooLarge() =>
+            new("試講音訊超過允許大小。");
     }
 }

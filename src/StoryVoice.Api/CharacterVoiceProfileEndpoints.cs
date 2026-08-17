@@ -130,11 +130,19 @@ public static class CharacterVoiceProfileEndpoints
             Guid characterProfileId,
             Guid profileId,
             PreviewVoiceProfileRequest request,
+            HttpContext httpContext,
             ICharacterVoicePreviewService previewService,
             CancellationToken cancellationToken) =>
         {
             var preview = await previewService.PreviewAsync(characterProfileId, profileId, request, cancellationToken);
-            return preview is null ? Results.NotFound() : Results.File(preview.Content, preview.ContentType);
+            if (preview is null)
+            {
+                return Results.NotFound();
+            }
+
+            httpContext.Response.Headers.CacheControl = "no-store";
+            httpContext.Response.Headers.Append("X-Content-Type-Options", "nosniff");
+            return Results.File(preview.Content, preview.ContentType);
         })
         .AddEndpointFilter<AntiforgeryEndpointFilter>();
 

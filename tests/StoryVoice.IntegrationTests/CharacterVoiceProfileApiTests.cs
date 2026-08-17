@@ -1,7 +1,11 @@
 using System.Net;
 using System.Net.Http.Json;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using StoryVoice.Application.Characters;
 using StoryVoice.Application.Narrations;
+using StoryVoice.Infrastructure.Narrations;
 
 namespace StoryVoice.IntegrationTests;
 
@@ -152,6 +156,104 @@ public sealed class CharacterVoiceProfileApiTests(ApiFactory factory) : IClassFi
     }
 
     [Fact]
+    public async Task Ready_designed_profile_preview_is_owner_scoped_CSRF_protected_and_returns_exact_audio()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var fake = new FakeThreeWaSynthesisClient(
+            [0x52, 0x49, 0x46, 0x46, 0x57, 0x41, 0x56, 0x45],
+            "audio/wav");
+        using var previewFactory = CreatePreviewFactory(fake);
+        using var owner = await previewFactory.CreateAuthenticatedClientAsync(cancellationToken);
+        using var otherOwner = await previewFactory.CreateAuthenticatedClientAsync(cancellationToken);
+        using var anonymous = previewFactory.CreateClient();
+        var characterProfileId = await CreateCharacterProfileAsync(owner, cancellationToken);
+        var profile = await CreateDesignedVoiceProfileAsync(owner, characterProfileId, cancellationToken);
+        var previewPath = $"/api/character-profiles/{characterProfileId}/voice-profiles/{profile.Id}/preview";
+
+        using var anonymousResponse = await anonymous.PostAsJsonAsync(
+            previewPath,
+            new { text = "你好，台灣。" },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymousResponse.StatusCode);
+
+        using var missingCsrfResponse = await owner.PostAsJsonAsync(
+            previewPath,
+            new { text = "你好，台灣。" },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, missingCsrfResponse.StatusCode);
+
+        using var otherOwnerResponse = await otherOwner.PostWithCsrfAsync(
+            previewPath,
+            new { text = "你好，台灣。" },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.NotFound, otherOwnerResponse.StatusCode);
+        Assert.Equal(0, fake.SubmitCount);
+
+        using var response = await owner.PostWithCsrfAsync(
+            previewPath,
+            new { text = "  你好，台灣。  " },
+            cancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("audio/wav", response.Content.Headers.ContentType?.MediaType);
+        Assert.Equal(fake.Audio.Length, response.Content.Headers.ContentLength);
+        Assert.Equal("no-store", response.Headers.CacheControl?.ToString());
+        Assert.Equal("nosniff", Assert.Single(response.Headers.GetValues("X-Content-Type-Options")));
+        Assert.Equal(fake.Audio, await response.Content.ReadAsByteArrayAsync(cancellationToken));
+        Assert.Equal(1, fake.SubmitCount);
+        Assert.Equal(1, fake.StatusCount);
+        Assert.Equal(1, fake.ResultCount);
+        Assert.Equal(1, fake.DownloadCount);
+        Assert.NotNull(fake.Request);
+        Assert.Equal("你好，台灣。", fake.Request.Text);
+        Assert.Equal("design", fake.Request.Mode);
+        Assert.Null(fake.Request.VoiceProfileTaskId);
+        Assert.Equal("溫柔、略帶沙啞的台灣華語女聲", fake.Request.VoicePromptText);
+    }
+
+    [Theory]
+    [InlineData("text/plain")]
+    [InlineData(null)]
+    public async Task Preview_rejects_untyped_or_non_audio_artifacts_without_downloading_them(
+        string? contentType)
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var fake = new FakeThreeWaSynthesisClient([1, 2, 3], contentType);
+        using var previewFactory = CreatePreviewFactory(fake);
+        using var owner = await previewFactory.CreateAuthenticatedClientAsync(cancellationToken);
+        var characterProfileId = await CreateCharacterProfileAsync(owner, cancellationToken);
+        var profile = await CreateDesignedVoiceProfileAsync(owner, characterProfileId, cancellationToken);
+
+        using var response = await owner.PostWithCsrfAsync(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/{profile.Id}/preview",
+            new { text = "你好" },
+            cancellationToken);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(1, fake.ResultCount);
+        Assert.Equal(0, fake.DownloadCount);
+    }
+
+    [Fact]
+    public async Task Preview_rejects_audio_larger_than_the_configured_limit()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var fake = new FakeThreeWaSynthesisClient(new byte[(64 * 1024) + 1], "audio/wav");
+        using var previewFactory = CreatePreviewFactory(fake, maximumAudioResponseBytes: 64 * 1024);
+        using var owner = await previewFactory.CreateAuthenticatedClientAsync(cancellationToken);
+        var characterProfileId = await CreateCharacterProfileAsync(owner, cancellationToken);
+        var profile = await CreateDesignedVoiceProfileAsync(owner, characterProfileId, cancellationToken);
+
+        using var response = await owner.PostWithCsrfAsync(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/{profile.Id}/preview",
+            new { text = "你好" },
+            cancellationToken);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(1, fake.DownloadCount);
+    }
+
+    [Fact]
     public async Task Clone_upload_with_header_based_csrf_reaches_the_service_layer_instead_of_failing_form_binding()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -198,5 +300,89 @@ public sealed class CharacterVoiceProfileApiTests(ApiFactory factory) : IClassFi
         var created = await response.Content.ReadFromJsonAsync<CharacterProfileResponse>(cancellationToken);
         Assert.NotNull(created);
         return created.Id;
+    }
+
+    private static async Task<CharacterVoiceProfileResponse> CreateDesignedVoiceProfileAsync(
+        HttpClient client,
+        Guid characterProfileId,
+        CancellationToken cancellationToken)
+    {
+        using var response = await client.PostWithCsrfAsync(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/base/design",
+            new { voicePrompt = "溫柔、略帶沙啞的台灣華語女聲" },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var profile = await response.Content.ReadFromJsonAsync<CharacterVoiceProfileResponse>(cancellationToken);
+        Assert.NotNull(profile);
+        Assert.Equal("Design", profile.Mode);
+        Assert.Equal("Ready", profile.Status);
+        return profile;
+    }
+
+    private Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program> CreatePreviewFactory(
+        FakeThreeWaSynthesisClient fake,
+        int maximumAudioResponseBytes = 20 * 1024 * 1024) =>
+        factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting(
+                $"{ThreeWaAiHubOptions.SectionName}:MaximumAudioResponseBytes",
+                maximumAudioResponseBytes.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<IThreeWaSynthesisClient>();
+                services.AddSingleton(fake);
+                services.AddSingleton<IThreeWaSynthesisClient>(provider =>
+                    provider.GetRequiredService<FakeThreeWaSynthesisClient>());
+            });
+        });
+
+    private sealed class FakeThreeWaSynthesisClient(byte[] audio, string? contentType)
+        : IThreeWaSynthesisClient
+    {
+        public byte[] Audio { get; } = audio;
+        public ThreeWaSynthesisRequest? Request { get; private set; }
+        public int SubmitCount { get; private set; }
+        public int StatusCount { get; private set; }
+        public int ResultCount { get; private set; }
+        public int DownloadCount { get; private set; }
+
+        public Task<ThreeWaSynthesisTaskHandle> SubmitAsync(
+            ThreeWaSynthesisRequest request,
+            CancellationToken cancellationToken)
+        {
+            SubmitCount++;
+            Request = request;
+            return Task.FromResult(new ThreeWaSynthesisTaskHandle(
+                "731245",
+                "fake-status",
+                "fake-result",
+                "fake-artifacts/{artifact_id}"));
+        }
+
+        public Task<string> GetTaskStatusAsync(string statusUrl, CancellationToken cancellationToken)
+        {
+            StatusCount++;
+            return Task.FromResult("completed");
+        }
+
+        public Task<IReadOnlyList<ThreeWaSynthesisArtifact>> GetResultArtifactsAsync(
+            string resultUrl,
+            CancellationToken cancellationToken)
+        {
+            ResultCount++;
+            IReadOnlyList<ThreeWaSynthesisArtifact> result =
+                [new ThreeWaSynthesisArtifact("90210", contentType)];
+            return Task.FromResult(result);
+        }
+
+        public async Task DownloadArtifactAsync(
+            string artifactUrlTemplate,
+            string artifactId,
+            Stream destination,
+            CancellationToken cancellationToken)
+        {
+            DownloadCount++;
+            await destination.WriteAsync(Audio, cancellationToken);
+        }
     }
 }

@@ -42,7 +42,12 @@ public static class DependencyInjection
                 ?? options.RootPath);
         services.AddOptions<ThreeWaAiHubOptions>()
             .Bind(configuration.GetSection(ThreeWaAiHubOptions.SectionName))
-            .Validate(options => !string.IsNullOrWhiteSpace(options.BaseUrl), "3wa Cluster API base URL is required.")
+            .Validate(options => IsValidThreeWaBaseUrl(options.BaseUrl),
+                "3wa Cluster API base URL must be the official HTTPS API directory.")
+            .Validate(options => options.MaximumJsonResponseBytes is >= 1_024 and <= 1_048_576,
+                "3wa JSON response limit must be between 1 KiB and 1 MiB.")
+            .Validate(options => options.MaximumAudioResponseBytes is >= 64 * 1024 and <= 100 * 1024 * 1024,
+                "3wa audio response limit must be between 64 KiB and 100 MiB.")
             .ValidateOnStart();
         services.AddOptions<NarrationOptions>()
             .Bind(configuration.GetSection(NarrationOptions.SectionName))
@@ -224,12 +229,24 @@ public static class DependencyInjection
         services.AddHttpClient<IThreeWaVoiceProfileClient, ThreeWaVoiceProfileClient>((provider, client) =>
         {
             var hubOptions = provider.GetRequiredService<IOptions<ThreeWaAiHubOptions>>().Value;
-            client.BaseAddress = new Uri(hubOptions.BaseUrl);
+            client.BaseAddress = new Uri(hubOptions.BaseUrl, UriKind.Absolute);
+        })
+        .ConfigurePrimaryHttpMessageHandler(static () => new SocketsHttpHandler
+        {
+            UseProxy = false,
+            AllowAutoRedirect = false,
+            AutomaticDecompression = System.Net.DecompressionMethods.None,
         });
         services.AddHttpClient<IThreeWaSynthesisClient, ThreeWaSynthesisClient>((provider, client) =>
         {
             var hubOptions = provider.GetRequiredService<IOptions<ThreeWaAiHubOptions>>().Value;
-            client.BaseAddress = new Uri(hubOptions.BaseUrl);
+            client.BaseAddress = new Uri(hubOptions.BaseUrl, UriKind.Absolute);
+        })
+        .ConfigurePrimaryHttpMessageHandler(static () => new SocketsHttpHandler
+        {
+            UseProxy = false,
+            AllowAutoRedirect = false,
+            AutomaticDecompression = System.Net.DecompressionMethods.None,
         });
         return services;
     }
@@ -241,6 +258,18 @@ public static class DependencyInjection
             && string.Equals(uri.Host, "bluemagpie-gateway", StringComparison.OrdinalIgnoreCase)
             && uri.Port == 8081
             && uri.AbsolutePath == "/"
+            && string.IsNullOrEmpty(uri.UserInfo)
+            && string.IsNullOrEmpty(uri.Query)
+            && string.IsNullOrEmpty(uri.Fragment);
+    }
+
+    private static bool IsValidThreeWaBaseUrl(string value)
+    {
+        return Uri.TryCreate(value, UriKind.Absolute, out var uri)
+            && uri.Scheme == Uri.UriSchemeHttps
+            && string.Equals(uri.IdnHost, "3wa.tw", StringComparison.OrdinalIgnoreCase)
+            && uri.IsDefaultPort
+            && uri.AbsolutePath == "/3waAIHub/"
             && string.IsNullOrEmpty(uri.UserInfo)
             && string.IsNullOrEmpty(uri.Query)
             && string.IsNullOrEmpty(uri.Fragment);

@@ -176,7 +176,6 @@ public sealed class ThreeWaVoxCpm2NarrationProvider(
 
         await TranscodeAsync(rawPath, outputPartPath, cancellationToken);
         File.Delete(rawPath);
-        await client.AcknowledgeArtifactAsync(handle.AckUrlTemplate, artifact.Id, cancellationToken);
 
         if (!File.Exists(outputPartPath) || new FileInfo(outputPartPath).Length < 1)
         {

@@ -86,15 +86,16 @@
   欄位，但目前程式碼沒有解析、儲存它）。
 - **重設按鈕**：把基本資料表單復原成上次儲存的值，捨棄尚未儲存的編輯。
 
-實作串接的是 3wa Cluster API（`cluster_api.php?mode=voice_generate`）的 VoxCPM2
+實作串接的是 3wa Cluster API（`api.php?mode=voice_generate`）的 VoxCPM2
 引擎，分成兩條獨立的非同步流程：`profile_prepare/status/confirm`（Application 層，
 建立與確認聲線）、`synthesize` 的 submit/poll/result/artifact（Worker 層，實際產生
-朗讀音訊）。**這一段的 HTTP 欄位名稱是從官方文件摘要整理出來的，尚未拿真實
-token 對正式環境跑過一次端對端請求**——文件本身對 `synthesize` 的 `operation`
-欄位、以及 status/result 回應的確切 JSON 形狀描述得不夠精確，程式碼已經盡量寫得
-寬容（缺欄位不直接炸掉、`artifact_url_template`／`ack_url_template` 一律當 opaque
-URL 展開），但正式啟用前務必先用一個測試角色實際跑一次 Clone 模式（短 WAV）到
-`Ready`，再跑一次 Design 模式，確認回應形狀跟程式碼的假設一致。
+朗讀音訊）。2026-08-17 已使用 production token 對官方 canonical endpoint 完成
+Design 模式的 submit/poll/result/artifact 短句實測：任務由 `running` 進入 `success`，
+回傳的 `task_id` 與 artifact ID 實際為 JSON number，產物為可解析的
+`audio/x-wav`（PCM 16-bit、48 kHz、mono）。Client 現已同時支援 number/string ID，
+只會將 Bearer token 送往設定的同源 HTTPS API 目錄，並限制 JSON/音訊回應大小。
+新 canonical Clone 的 profile prepare/confirm 尚需以另一份授權短 WAV 完成實測；
+現存 legacy Clone task 的 ASR 轉錄失敗，不能視為可用聲線。
 
 已知限制（刻意排除的範圍，不是漏做）：
 - **旁白聲線無法克隆**：角色庫只服務 `SeriesCharacter`，系列旁白沒有對應的克隆／

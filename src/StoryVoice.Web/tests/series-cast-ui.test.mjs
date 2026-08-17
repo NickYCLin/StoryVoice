@@ -150,6 +150,15 @@ test('自訂聲線工作室固定使用 owner-scoped 角色庫 voice-profiles AP
   assert.doesNotMatch(voiceProfilesPanel, /fuzzy|模糊比對/i)
 })
 
+test('Design 聲線由 owner-scoped slot endpoint 建立並送出 CSRF 與 voicePrompt', () => {
+  assert.match(voiceProfilesPanel, /const slotMode = mode\[slotKey\] \?\? 'Design'/)
+  assert.match(voiceProfilesPanel, /`\$\{slotPath\(characterProfileId, sceneCode\)\}\/design`/)
+  assert.match(voiceProfilesPanel, /method: 'POST'/)
+  assert.match(voiceProfilesPanel, /csrfToken,/)
+  assert.match(voiceProfilesPanel, /body: \{ voicePrompt: text \}/)
+  assert.match(voiceProfilesPanel, /文字設計模式不需要等待處理/)
+})
+
 test('系列角色只有連結角色庫時才顯示自訂聲線，且加入角色時可以選角色庫既有角色', () => {
   assert.match(panel, /character\.characterProfileId &&/)
   assert.match(panel, /characterProfileId={character\.characterProfileId}/)
@@ -178,7 +187,17 @@ test('聲線卡片顯示字數與時長，並提供即時播放試講', () => {
   assert.match(voiceProfilesPanel, /formatDuration/)
   assert.match(voiceProfilesPanel, /\/preview/)
   assert.match(voiceProfilesPanel, /playPreview/)
+  assert.match(voiceProfilesPanel, /credentials: 'same-origin'/)
+  assert.match(voiceProfilesPanel, /'Content-Type': 'application\/json'/)
+  assert.match(voiceProfilesPanel, /'X-CSRF-TOKEN': csrfToken/)
+  assert.match(voiceProfilesPanel, /body: JSON\.stringify\(\{ text \}\)/)
+  assert.match(voiceProfilesPanel, /response\.blob\(\)/)
+  assert.match(voiceProfilesPanel, /URL\.createObjectURL\(blob\)/)
   assert.match(voiceProfilesPanel, /new Audio\(url\)/)
+  assert.match(voiceProfilesPanel, /addEventListener\('ended', releaseUrl, \{ once: true \}\)/)
+  assert.match(voiceProfilesPanel, /addEventListener\('error', releaseUrl, \{ once: true \}\)/)
+  assert.match(voiceProfilesPanel, /catch \(error\) \{[\s\S]*releaseUrl\(\)[\s\S]*throw error/)
+  assert.match(voiceProfilesPanel, /URL\.revokeObjectURL\(url\)/)
 })
 
 test('系列配音控制台可以設定視角角色，讓第一人稱自述對白自動歸給主角', () => {
