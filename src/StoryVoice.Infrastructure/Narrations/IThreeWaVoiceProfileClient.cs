@@ -23,7 +23,7 @@ public interface IThreeWaVoiceProfileClient
         string fileName,
         string profileName,
         string consentType,
-        string? promptText,
+        string expectedText,
         CancellationToken cancellationToken);
 
     Task<VoiceProfileStatusResult> GetStatusAsync(string taskId, CancellationToken cancellationToken);

@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using StoryVoice.Infrastructure.Persistence;
@@ -11,9 +12,11 @@ using StoryVoice.Infrastructure.Persistence;
 namespace StoryVoice.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(StoryVoiceDbContext))]
-    partial class StoryVoiceDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260818020438_AddDurableCharacterVoiceCloneOperations")]
+    partial class AddDurableCharacterVoiceCloneOperations
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -675,15 +678,7 @@ namespace StoryVoice.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid");
 
                     b.Property<Guid>("ConcurrencyStamp")
-                        .IsConcurrencyToken()
                         .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset?>("ConfirmationRequestedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("ConfirmationTranscriptIntent")
-                        .HasMaxLength(2000)
-                        .HasColumnType("character varying(2000)");
 
                     b.Property<string>("ConsentType")
                         .HasMaxLength(32)
@@ -801,35 +796,12 @@ namespace StoryVoice.Infrastructure.Persistence.Migrations
                         .HasMaxLength(2000)
                         .HasColumnType("character varying(2000)");
 
-                    b.Property<string>("AttestationVersion")
-                        .IsRequired()
-                        .HasMaxLength(80)
-                        .HasColumnType("character varying(80)");
-
                     b.Property<Guid>("CharacterProfileId")
                         .HasColumnType("uuid");
-
-                    b.Property<bool>("CommercialUseAllowed")
-                        .HasColumnType("boolean");
 
                     b.Property<Guid>("ConcurrencyStamp")
                         .IsConcurrencyToken()
                         .HasColumnType("uuid");
-
-                    b.Property<string>("ConsentReceiptSha256")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character(64)")
-                        .IsFixedLength();
-
-                    b.Property<string>("ConsentRecordSha256")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character(64)")
-                        .IsFixedLength();
-
-                    b.Property<DateOnly>("ConsentSignedDate")
-                        .HasColumnType("date");
 
                     b.Property<string>("ConsentType")
                         .IsRequired()
@@ -844,24 +816,10 @@ namespace StoryVoice.Infrastructure.Persistence.Migrations
                         .HasMaxLength(80)
                         .HasColumnType("character varying(80)");
 
-                    b.Property<string>("EvidenceVersion")
-                        .IsRequired()
-                        .HasMaxLength(80)
-                        .HasColumnType("character varying(80)");
-
                     b.Property<string>("ExpectedTranscript")
                         .IsRequired()
                         .HasMaxLength(2000)
                         .HasColumnType("character varying(2000)");
-
-                    b.Property<string>("ExpectedTranscriptSha256")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character(64)")
-                        .IsFixedLength();
-
-                    b.Property<bool>("FormalNarrationAllowed")
-                        .HasColumnType("boolean");
 
                     b.Property<string>("Kind")
                         .IsRequired()
@@ -879,20 +837,6 @@ namespace StoryVoice.Infrastructure.Persistence.Migrations
 
                     b.Property<Guid>("OwnerId")
                         .HasColumnType("uuid");
-
-                    b.Property<bool>("PrivateEvaluationAllowed")
-                        .HasColumnType("boolean");
-
-                    b.Property<bool>("PublicDistributionAllowed")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("RecorderName")
-                        .IsRequired()
-                        .HasMaxLength(120)
-                        .HasColumnType("character varying(120)");
-
-                    b.Property<DateOnly>("RecordingDate")
-                        .HasColumnType("date");
 
                     b.Property<double>("ReferenceAudioDurationSeconds")
                         .HasColumnType("double precision");
@@ -959,7 +903,7 @@ namespace StoryVoice.Infrastructure.Persistence.Migrations
                     b.HasIndex("OwnerId", "CharacterProfileId", "SlotKey")
                         .IsUnique()
                         .HasDatabaseName("UX_cvpo_active_slot")
-                        .HasFilter("\"State\" IN ('Staged', 'RemotePrepared', 'NeedsAttention')");
+                        .HasFilter("\"State\" <> 'Activated'");
 
                     b.HasIndex("OwnerId", "CharacterProfileId", "State")
                         .HasDatabaseName("IX_cvpo_owner_character_state");
@@ -968,23 +912,13 @@ namespace StoryVoice.Infrastructure.Persistence.Migrations
                         {
                             t.HasCheckConstraint("CK_cvpo_duration", "\"ReferenceAudioDurationSeconds\" >= 10 AND \"ReferenceAudioDurationSeconds\" <= 45");
 
-                            t.HasCheckConstraint("CK_cvpo_evidence_contract", "\"ConsentType\" IN ('self_recorded', 'explicit_permission', 'licensed_voice') AND \"EvidenceVersion\" = 'storyvoice-clone-consent-receipt/v2' AND \"AttestationVersion\" = 'storyvoice-clone-subject-consent/v1'");
-
-                            t.HasCheckConstraint("CK_cvpo_evidence_dates", "\"RecordingDate\" > DATE '-infinity' AND \"ConsentSignedDate\" > DATE '-infinity' AND \"ConsentSignedDate\" >= \"RecordingDate\"");
-
-                            t.HasCheckConstraint("CK_cvpo_evidence_hashes", "\"ReferenceAudioSha256\" ~ '^[0-9a-f]{64}$' AND \"ConsentRecordSha256\" ~ '^[0-9a-f]{64}$' AND \"ConsentReceiptSha256\" ~ '^[0-9a-f]{64}$' AND \"ExpectedTranscriptSha256\" ~ '^[0-9a-f]{64}$'");
-
-                            t.HasCheckConstraint("CK_cvpo_evidence_identity", "\"RightsConfirmedByUserId\" = \"OwnerId\" AND length(btrim(\"RecorderName\")) > 0");
-
                             t.HasCheckConstraint("CK_cvpo_kind_scene", "(\"Kind\" = 'Base' AND \"SceneCode\" IS NULL AND \"SlotKey\" = 'base') OR (\"Kind\" = 'Scene' AND \"SceneCode\" IS NOT NULL AND \"SlotKey\" = 'scene:' || \"SceneCode\")");
 
-                            t.HasCheckConstraint("CK_cvpo_private_evaluation", "\"PrivateEvaluationAllowed\" = TRUE");
-
-                            t.HasCheckConstraint("CK_cvpo_remote_state", "(\"State\" = 'Staged' AND \"RemoteTaskId\" IS NULL AND \"RemotePreparedAt\" IS NULL AND \"ActivatedAt\" IS NULL AND \"SafeErrorCode\" IS NULL) OR (\"State\" = 'RemotePrepared' AND \"RemoteTaskId\" IS NOT NULL AND \"RemotePreparedAt\" IS NOT NULL AND \"ActivatedAt\" IS NULL AND \"SafeErrorCode\" IS NULL) OR (\"State\" = 'Activated' AND \"RemoteTaskId\" IS NOT NULL AND \"RemotePreparedAt\" IS NOT NULL AND \"ActivatedAt\" IS NOT NULL AND \"SafeErrorCode\" IS NULL) OR (\"State\" = 'NeedsAttention' AND \"ActivatedAt\" IS NULL AND \"SafeErrorCode\" IS NOT NULL AND ((\"RemoteTaskId\" IS NULL AND \"RemotePreparedAt\" IS NULL) OR (\"RemoteTaskId\" IS NOT NULL AND \"RemotePreparedAt\" IS NOT NULL))) OR (\"State\" = 'Rejected' AND \"RemoteTaskId\" IS NULL AND \"RemotePreparedAt\" IS NULL AND \"ActivatedAt\" IS NULL AND \"SafeErrorCode\" IS NOT NULL)");
+                            t.HasCheckConstraint("CK_cvpo_remote_state", "(\"State\" = 'Staged' AND \"RemoteTaskId\" IS NULL) OR (\"State\" IN ('RemotePrepared', 'Activated') AND \"RemoteTaskId\" IS NOT NULL) OR \"State\" = 'NeedsAttention'");
 
                             t.HasCheckConstraint("CK_cvpo_replace_target", "(\"Type\" = 'Create' AND \"OldProfileId\" IS NULL AND \"OldProfileConcurrencyStamp\" IS NULL) OR (\"Type\" = 'Replace' AND \"OldProfileId\" IS NOT NULL AND \"OldProfileConcurrencyStamp\" IS NOT NULL)");
 
-                            t.HasCheckConstraint("CK_cvpo_state", "\"State\" IN ('Staged', 'RemotePrepared', 'Activated', 'NeedsAttention', 'Rejected')");
+                            t.HasCheckConstraint("CK_cvpo_state", "\"State\" IN ('Staged', 'RemotePrepared', 'Activated', 'NeedsAttention')");
 
                             t.HasCheckConstraint("CK_cvpo_type", "\"Type\" IN ('Create', 'Replace')");
                         });

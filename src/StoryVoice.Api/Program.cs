@@ -16,6 +16,7 @@ using StoryVoice.Application.Authentication;
 using StoryVoice.Application.BookImports;
 using StoryVoice.Application.Books;
 using StoryVoice.Application.Bookshelves;
+using StoryVoice.Application.Narrations;
 using StoryVoice.Infrastructure;
 using StoryVoice.Infrastructure.Health;
 using StoryVoice.Infrastructure.Identity;
@@ -39,7 +40,7 @@ builder.Services.AddScoped<IBookService, BookService>();
 builder.Services.AddScoped<IBookImportService, BookImportService>();
 builder.Services.AddScoped<IBooksComTwBookshelfService, BooksComTwBookshelfService>();
 builder.Services.Configure<FormOptions>(options =>
-    options.MultipartBodyLengthLimit = 10 * 1024 * 1024 + 64 * 1024);
+    options.MultipartBodyLengthLimit = CharacterVoiceProfileLimits.MaximumReferenceAudioBytes + 64 * 1024);
 builder.Services.AddStoryVoiceInfrastructure(builder.Configuration);
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUser, HttpCurrentUser>();

@@ -1,5 +1,11 @@
 namespace StoryVoice.Application.Narrations;
 
+public static class CharacterVoiceProfileLimits
+{
+    public const long MaximumReferenceAudioBytes = 10 * 1024 * 1024;
+    public const long MaximumConsentReceiptBytes = 32 * 1024;
+}
+
 public sealed record CreateDesignedVoiceProfileRequest(string VoicePrompt);
 
 public sealed record ConfirmVoiceProfileTranscriptRequest(string Transcript);
@@ -12,12 +18,32 @@ public sealed record CharacterVoiceProfileResponse(
     string Mode,
     string? ConsentType,
     string? VoicePromptText,
+    string? ExpectedTranscript,
+    string? AsrDraftTranscript,
+    string? ConfirmationTranscriptIntent,
     string? Transcript,
     bool TranscriptConfirmed,
     string Status,
     double? ReferenceAudioDurationSeconds,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
+
+public sealed record CharacterVoiceProfileOperationResponse(
+    Guid Id,
+    Guid NewProfileId,
+    Guid? OldProfileId,
+    string Type,
+    string State,
+    string Kind,
+    string? SceneCode,
+    bool HasRemoteTask,
+    string? AttentionCode,
+    string EvidenceStatus,
+    IReadOnlyList<string> UsageScopes,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt,
+    DateTimeOffset? RemotePreparedAt,
+    DateTimeOffset? ActivatedAt);
 
 public sealed record CharacterVoiceProfileAudio(string AbsolutePath, string ContentType);
 
@@ -33,13 +59,36 @@ public interface ICharacterVoiceProfileService
         Guid characterProfileId,
         CancellationToken cancellationToken);
 
+    Task<IReadOnlyList<CharacterVoiceProfileOperationResponse>?> ListCloneOperationsAsync(
+        Guid characterProfileId,
+        CancellationToken cancellationToken);
+
+    Task<CharacterVoiceProfileResponse?> ResumeCloneActivationAsync(
+        Guid characterProfileId,
+        Guid operationId,
+        CancellationToken cancellationToken);
+
     Task<CharacterVoiceProfileResponse?> CreateClonedAsync(
         Guid characterProfileId,
         string kind,
         string? sceneCode,
-        string consentType,
+        string expectedTranscript,
         Stream referenceAudio,
         string referenceAudioFileName,
+        Stream consentReceipt,
+        string consentReceiptFileName,
+        bool rightsAttested,
+        CancellationToken cancellationToken);
+
+    Task<CharacterVoiceProfileResponse?> ReplaceDesignedWithCloneAsync(
+        Guid characterProfileId,
+        Guid profileId,
+        string expectedTranscript,
+        Stream referenceAudio,
+        string referenceAudioFileName,
+        Stream consentReceipt,
+        string consentReceiptFileName,
+        bool rightsAttested,
         CancellationToken cancellationToken);
 
     Task<CharacterVoiceProfileResponse?> CreateDesignedAsync(

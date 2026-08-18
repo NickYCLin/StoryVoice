@@ -505,7 +505,7 @@ public sealed class MultiCharacterNarrationApiTests(ApiFactory factory) : IClass
     }
 
     [Fact]
-    public async Task A_3wa_series_can_stage_a_rebuild_mixing_an_edge_character_with_the_narrator()
+    public async Task A_configured_3wa_series_cannot_stage_while_trusted_formal_authorization_is_disabled()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         using var owner = await factory.CreateAuthenticatedClientAsync(cancellationToken);
@@ -553,9 +553,18 @@ public sealed class MultiCharacterNarrationApiTests(ApiFactory factory) : IClass
             new { rightsAttested = true },
             cancellationToken);
         var responseBody = await stageResponse.Content.ReadAsStringAsync(cancellationToken);
-        Assert.True(
-            stageResponse.StatusCode == HttpStatusCode.Created,
-            $"Unexpected response: {responseBody}");
+        Assert.Equal(HttpStatusCode.BadRequest, stageResponse.StatusCode);
+        Assert.Contains(
+            ThreeWaSynthesisCapabilities.CloneFormalNarrationUnavailableMessage,
+            responseBody,
+            StringComparison.Ordinal);
+
+        await using var verifyScope = factory.Services.CreateAsyncScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+        Assert.False(await verifyDb.SeriesCastRebuildBatches
+            .AnyAsync(batch => batch.SeriesId == series.Id, cancellationToken));
+        Assert.False(await verifyDb.NarrationJobs
+            .AnyAsync(job => job.SeriesId == series.Id, cancellationToken));
     }
 
     [Fact]
@@ -765,7 +774,159 @@ public sealed class MultiCharacterNarrationApiTests(ApiFactory factory) : IClass
             cancellationToken);
         var responseBody = await stageResponse.Content.ReadAsStringAsync(cancellationToken);
         Assert.Equal(HttpStatusCode.BadRequest, stageResponse.StatusCode);
-        Assert.Contains("voice_prompt", responseBody, StringComparison.Ordinal);
+        Assert.Contains(
+            ThreeWaSynthesisCapabilities.CloneFormalNarrationUnavailableMessage,
+            responseBody,
+            StringComparison.Ordinal);
+
+        await using var verifyScope = factory.Services.CreateAsyncScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+        Assert.False(await verifyDb.SeriesCastRebuildBatches
+            .AnyAsync(batch => batch.SeriesId == series.Id, cancellationToken));
+        Assert.False(await verifyDb.NarrationJobs
+            .AnyAsync(job => job.SeriesId == series.Id, cancellationToken));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Formal_3wa_series_is_code_pinned_off_even_with_self_declared_formal_evidence(
+        bool addSelfDeclaredFormalOperation)
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var owner = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        var book = await ImportTextAsync(owner, "clone consent admission", cancellationToken);
+        using var profileResponse = await owner.PostWithCsrfAsync(
+            "/api/character-profiles",
+            new
+            {
+                canonicalName = $"私人試音角色-{Guid.NewGuid():N}",
+                age = (string?)null,
+                gender = (string?)null,
+                birthday = (string?)null,
+                personality = (string?)null,
+                catchphrase = (string?)null,
+                background = (string?)null,
+                speakingStyle = (string?)null
+            },
+            cancellationToken);
+        var characterProfile = await profileResponse.Content
+            .ReadFromJsonAsync<CharacterProfileResponse>(cancellationToken);
+        Assert.Equal(HttpStatusCode.Created, profileResponse.StatusCode);
+        Assert.NotNull(characterProfile);
+
+        await using (var seedScope = factory.Services.CreateAsyncScope())
+        {
+            var db = seedScope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+            var ownerId = await db.CharacterProfiles
+                .Where(profile => profile.Id == characterProfile.Id)
+                .Select(profile => profile.OwnerId)
+                .SingleAsync(cancellationToken);
+            var now = DateTimeOffset.UtcNow;
+            const string transcript = "這是私人試音授權的錄音內容。";
+            var clone = CharacterVoiceProfile.CreateClone(
+                Guid.NewGuid(),
+                ownerId,
+                characterProfile.Id,
+                CharacterVoiceProfileKind.Base,
+                sceneCode: null,
+                CharacterVoiceConsentTypes.SelfRecorded,
+                "seeded/private-only.wav",
+                new string('a', 64),
+                10,
+                ownerId,
+                now);
+            clone.AttachDraftTranscript("private-task", transcript, now);
+            clone.ConfirmTranscript(transcript, now);
+            db.CharacterVoiceProfiles.Add(clone);
+
+            if (addSelfDeclaredFormalOperation)
+            {
+                var today = DateOnly.FromDateTime(DateTime.UtcNow);
+                var evidence = CharacterVoiceConsentEvidence.Create(
+                    "private-test-recorder",
+                    today.AddDays(-1),
+                    today,
+                    CharacterVoiceConsentTypes.SelfRecorded,
+                    [
+                        CharacterVoiceConsentScopes.PrivateEvaluation,
+                        CharacterVoiceConsentScopes.FormalNarration,
+                    ],
+                    new string('b', 64),
+                    new string('c', 64),
+                    CharacterVoiceTranscriptCanonicalizer.ComputeSha256Hex(transcript),
+                    CharacterVoiceConsentEvidence.CurrentEvidenceVersion,
+                    CharacterVoiceConsentEvidence.CurrentAttestationVersion,
+                    today);
+                var operation = CharacterVoiceProfileOperation.StageCreate(
+                    Guid.NewGuid(),
+                    ownerId,
+                    characterProfile.Id,
+                    clone.Id,
+                    CharacterVoiceProfileKind.Base,
+                    sceneCode: null,
+                    evidence,
+                    transcript,
+                    "seeded/private-only.wav",
+                    new string('a', 64),
+                    10,
+                    ownerId,
+                    "seeded-private-key",
+                    now);
+                operation.MarkRemotePrepared("private-task", transcript, now);
+                operation.MarkActivated(now);
+                db.CharacterVoiceProfileOperations.Add(operation);
+            }
+
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        using var seriesResponse = await owner.PostWithCsrfAsync(
+            "/api/series",
+            new
+            {
+                name = $"Clone consent admission {Guid.NewGuid():N}",
+                narratorProvider = "3wa-voxcpm2",
+                narratorVoice = ThreeWaSynthesisCapabilities.NarratorFallbackVoice,
+                narratorRate = "+0%",
+                narratorPitch = "+0Hz",
+                narratorVolume = "+0%",
+                defaultSpeakerPauseMs = 350
+            },
+            cancellationToken);
+        var series = await seriesResponse.Content.ReadFromJsonAsync<StorySeriesDetailsResponse>(cancellationToken);
+        Assert.Equal(HttpStatusCode.Created, seriesResponse.StatusCode);
+        Assert.NotNull(series);
+        await AddBookAsync(owner, series.Id, book.Id, cancellationToken);
+
+        using var characterResponse = await owner.PostWithCsrfAsync(
+            $"/api/series/{series.Id}/characters",
+            new
+            {
+                canonicalName = "私人試音角色",
+                role = "Main",
+                voiceProvider = "3wa-voxcpm2",
+                voice = ThreeWaSynthesisCapabilities.NarratorFallbackVoice,
+                rate = "+0%",
+                pitch = "+0Hz",
+                volume = "+0%",
+                notes = (string?)null,
+                characterProfileId = characterProfile.Id
+            },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, characterResponse.StatusCode);
+        await ConfirmOnlyChapterPlanAsync(owner, series.Id, book, cancellationToken);
+
+        using var stageResponse = await owner.PostWithCsrfAsync(
+            $"/api/series/{series.Id}/narration-rebuilds",
+            new { rightsAttested = true },
+            cancellationToken);
+        var responseBody = await stageResponse.Content.ReadAsStringAsync(cancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, stageResponse.StatusCode);
+        Assert.Contains(
+            ThreeWaSynthesisCapabilities.CloneFormalNarrationUnavailableMessage,
+            responseBody,
+            StringComparison.Ordinal);
 
         await using var verifyScope = factory.Services.CreateAsyncScope();
         var verifyDb = verifyScope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();

@@ -107,6 +107,35 @@ public sealed class CharacterVoiceProfileTests
     }
 
     [Fact]
+    public void AttachExpectedTranscript_keeps_expected_ASR_draft_and_review_text_separate()
+    {
+        var profile = CreateBaseClone();
+
+        profile.AttachExpectedTranscript("  這是錄音中的正確內容。  ", Now.AddSeconds(1));
+
+        Assert.Equal(CharacterVoiceProfileStatus.Pending, profile.Status);
+        Assert.Equal("這是錄音中的正確內容。", profile.ExpectedTranscript);
+        Assert.Null(profile.AsrDraftTranscript);
+        Assert.Null(profile.Transcript);
+        profile.AttachDraftTranscript("task-123", "供應商辨識草稿。", Now.AddMinutes(1));
+        Assert.Equal("這是錄音中的正確內容。", profile.ExpectedTranscript);
+        Assert.Equal("供應商辨識草稿。", profile.AsrDraftTranscript);
+        Assert.Equal("供應商辨識草稿。", profile.Transcript);
+    }
+
+    [Fact]
+    public void AttachExpectedTranscript_rejects_blank_or_late_values()
+    {
+        var profile = CreateBaseClone();
+
+        Assert.Throws<ArgumentException>(() => profile.AttachExpectedTranscript("   ", Now));
+        profile.AttachExpectedTranscript("正確內容。", Now);
+        profile.AttachPendingTask("task-123", Now.AddMinutes(1));
+        Assert.Throws<InvalidOperationException>(() =>
+            profile.AttachExpectedTranscript("另一份內容。", Now.AddMinutes(2)));
+    }
+
+    [Fact]
     public void ConfirmTranscript_locks_the_transcript_and_marks_ready()
     {
         var profile = CreateBaseClone();
@@ -116,7 +145,40 @@ public sealed class CharacterVoiceProfileTests
 
         Assert.Equal(CharacterVoiceProfileStatus.Ready, profile.Status);
         Assert.Equal("修正後的正確文字。", profile.Transcript);
+        Assert.Equal("草稿文字。", profile.AsrDraftTranscript);
+        Assert.Equal("修正後的正確文字。", profile.ConfirmationTranscriptIntent);
+        Assert.NotNull(profile.ConfirmationRequestedAt);
         Assert.NotNull(profile.TranscriptConfirmedAt);
+    }
+
+    [Fact]
+    public void Staged_confirmation_intent_is_idempotent_but_cannot_be_replaced()
+    {
+        var profile = CreateBaseClone();
+        profile.AttachDraftTranscript("task-123", "草稿文字。", Now.AddMinutes(1));
+        profile.StageTranscriptConfirmation("最終文字。", Now.AddMinutes(2));
+        var concurrencyStamp = profile.ConcurrencyStamp;
+
+        profile.StageTranscriptConfirmation("  最終文字。  ", Now.AddMinutes(3));
+
+        Assert.Equal(concurrencyStamp, profile.ConcurrencyStamp);
+        Assert.Throws<InvalidOperationException>(() =>
+            profile.StageTranscriptConfirmation("不同文字。", Now.AddMinutes(4)));
+        Assert.Equal(CharacterVoiceProfileStatus.AwaitingTranscriptConfirmation, profile.Status);
+        Assert.Equal("最終文字。", profile.ConfirmationTranscriptIntent);
+        Assert.Equal("草稿文字。", profile.Transcript);
+    }
+
+    [Fact]
+    public void Legacy_route_task_id_longer_than_the_new_canonical_limit_remains_readable()
+    {
+        var profile = CreateBaseClone();
+        var legacyTaskId = $"route_{new string('a', 34)}";
+        Assert.Equal(40, legacyTaskId.Length);
+
+        profile.AttachPendingTask(legacyTaskId, Now.AddMinutes(1));
+
+        Assert.Equal(legacyTaskId, profile.VoiceProfileTaskId);
     }
 
     [Fact]

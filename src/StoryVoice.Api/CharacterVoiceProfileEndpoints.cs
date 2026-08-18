@@ -5,8 +5,6 @@ namespace StoryVoice.Api;
 
 public static class CharacterVoiceProfileEndpoints
 {
-    private const long MaximumReferenceAudioBytes = 20 * 1024 * 1024;
-
     public static IEndpointRouteBuilder MapCharacterVoiceProfileEndpoints(this IEndpointRouteBuilder endpoints)
     {
         var group = endpoints
@@ -23,14 +21,49 @@ public static class CharacterVoiceProfileEndpoints
             return profiles is null ? Results.NotFound() : Results.Ok(profiles);
         });
 
+        group.MapGet("/clone-operations", async (
+            Guid characterProfileId,
+            ICharacterVoiceProfileService service,
+            CancellationToken cancellationToken) =>
+        {
+            var operations = await service.ListCloneOperationsAsync(characterProfileId, cancellationToken);
+            return operations is null ? Results.NotFound() : Results.Ok(operations);
+        });
+
+        group.MapPost("/clone-operations/{operationId:guid}/resume-activation", async (
+            Guid characterProfileId,
+            Guid operationId,
+            ICharacterVoiceProfileService service,
+            CancellationToken cancellationToken) =>
+        {
+            var profile = await service.ResumeCloneActivationAsync(
+                characterProfileId,
+                operationId,
+                cancellationToken);
+            return profile is null ? Results.NotFound() : Results.Ok(profile);
+        })
+        .AddEndpointFilter<AntiforgeryEndpointFilter>();
+
         group.MapPost("/base", (
             Guid characterProfileId,
             IFormFile referenceAudio,
-            [FromForm] string consentType,
+            IFormFile consentReceipt,
+            [FromForm] bool rightsAttested,
+            [FromForm] string expectedTranscript,
             HttpContext httpContext,
             ICharacterVoiceProfileService service,
             CancellationToken cancellationToken) =>
-            CreateClonedAsync(characterProfileId, "Base", null, consentType, referenceAudio, httpContext, service, cancellationToken))
+            CreateClonedAsync(
+                characterProfileId,
+                "Base",
+                null,
+                expectedTranscript,
+                referenceAudio,
+                consentReceipt,
+                rightsAttested,
+                httpContext,
+                service,
+                cancellationToken))
         .DisableAntiforgery()
         .AddEndpointFilter<AntiforgeryEndpointFilter>();
 
@@ -49,11 +82,23 @@ public static class CharacterVoiceProfileEndpoints
             Guid characterProfileId,
             string sceneCode,
             IFormFile referenceAudio,
-            [FromForm] string consentType,
+            IFormFile consentReceipt,
+            [FromForm] bool rightsAttested,
+            [FromForm] string expectedTranscript,
             HttpContext httpContext,
             ICharacterVoiceProfileService service,
             CancellationToken cancellationToken) =>
-            CreateClonedAsync(characterProfileId, "Scene", sceneCode, consentType, referenceAudio, httpContext, service, cancellationToken))
+            CreateClonedAsync(
+                characterProfileId,
+                "Scene",
+                sceneCode,
+                expectedTranscript,
+                referenceAudio,
+                consentReceipt,
+                rightsAttested,
+                httpContext,
+                service,
+                cancellationToken))
         .DisableAntiforgery()
         .AddEndpointFilter<AntiforgeryEndpointFilter>();
 
@@ -103,6 +148,44 @@ public static class CharacterVoiceProfileEndpoints
         })
         .AddEndpointFilter<AntiforgeryEndpointFilter>();
 
+        group.MapPost("/{profileId:guid}/replace-with-clone", async (
+            Guid characterProfileId,
+            Guid profileId,
+            IFormFile referenceAudio,
+            IFormFile consentReceipt,
+            [FromForm] bool rightsAttested,
+            [FromForm] string expectedTranscript,
+            HttpContext httpContext,
+            ICharacterVoiceProfileService service,
+            CancellationToken cancellationToken) =>
+        {
+            var sizeFailure = ValidateCloneUpload(referenceAudio, consentReceipt);
+            if (sizeFailure is not null)
+            {
+                return sizeFailure;
+            }
+
+            await using var content = referenceAudio.OpenReadStream();
+            await using var receiptContent = consentReceipt.OpenReadStream();
+            var profile = await service.ReplaceDesignedWithCloneAsync(
+                characterProfileId,
+                profileId,
+                expectedTranscript,
+                content,
+                Path.GetFileName(referenceAudio.FileName),
+                receiptContent,
+                Path.GetFileName(consentReceipt.FileName),
+                rightsAttested,
+                cancellationToken);
+            return profile is null
+                ? Results.NotFound()
+                : Results.Created(
+                    $"{httpContext.Request.PathBase}/api/character-profiles/{characterProfileId}/voice-profiles",
+                    profile);
+        })
+        .DisableAntiforgery()
+        .AddEndpointFilter<AntiforgeryEndpointFilter>();
+
         group.MapDelete("/{profileId:guid}", async (
             Guid characterProfileId,
             Guid profileId,
@@ -117,10 +200,14 @@ public static class CharacterVoiceProfileEndpoints
         group.MapGet("/{profileId:guid}/reference-audio", async (
             Guid characterProfileId,
             Guid profileId,
+            HttpContext httpContext,
             ICharacterVoiceProfileService service,
             CancellationToken cancellationToken) =>
         {
             var audio = await service.GetReferenceAudioAsync(characterProfileId, profileId, cancellationToken);
+            httpContext.Response.Headers.CacheControl = "private, no-store";
+            httpContext.Response.Headers.Pragma = "no-cache";
+            httpContext.Response.Headers.Append("X-Content-Type-Options", "nosniff");
             return audio is null
                 ? Results.NotFound()
                 : Results.File(audio.AbsolutePath, audio.ContentType, enableRangeProcessing: true);
@@ -153,36 +240,68 @@ public static class CharacterVoiceProfileEndpoints
         Guid characterProfileId,
         string kind,
         string? sceneCode,
-        string consentType,
+        string expectedTranscript,
         IFormFile referenceAudio,
+        IFormFile consentReceipt,
+        bool rightsAttested,
         HttpContext httpContext,
         ICharacterVoiceProfileService service,
         CancellationToken cancellationToken)
+    {
+        var sizeFailure = ValidateCloneUpload(referenceAudio, consentReceipt);
+        if (sizeFailure is not null)
+        {
+            return sizeFailure;
+        }
+
+        await using var content = referenceAudio.OpenReadStream();
+        await using var receiptContent = consentReceipt.OpenReadStream();
+        var profile = await service.CreateClonedAsync(
+            characterProfileId,
+            kind,
+            sceneCode,
+            expectedTranscript,
+            content,
+            Path.GetFileName(referenceAudio.FileName),
+            receiptContent,
+            Path.GetFileName(consentReceipt.FileName),
+            rightsAttested,
+            cancellationToken);
+        return profile is null
+            ? Results.NotFound()
+            : Results.Created($"{httpContext.Request.PathBase}/api/character-profiles/{characterProfileId}/voice-profiles", profile);
+    }
+
+    private static IResult? ValidateCloneUpload(
+        IFormFile referenceAudio,
+        IFormFile consentReceipt)
     {
         if (referenceAudio.Length == 0)
         {
             throw new ArgumentException("參考音檔不可為空白。", nameof(referenceAudio));
         }
 
-        if (referenceAudio.Length > MaximumReferenceAudioBytes)
+        if (referenceAudio.Length > CharacterVoiceProfileLimits.MaximumReferenceAudioBytes)
         {
             return Results.Problem(
                 statusCode: StatusCodes.Status413PayloadTooLarge,
                 title: "Reference audio is too large",
-                detail: "參考音檔不可超過 20 MiB。");
+                detail: "參考音檔不可超過 10 MiB。");
         }
 
-        await using var content = referenceAudio.OpenReadStream();
-        var profile = await service.CreateClonedAsync(
-            characterProfileId,
-            kind,
-            sceneCode,
-            consentType,
-            content,
-            Path.GetFileName(referenceAudio.FileName),
-            cancellationToken);
-        return profile is null
-            ? Results.NotFound()
-            : Results.Created($"{httpContext.Request.PathBase}/api/character-profiles/{characterProfileId}/voice-profiles", profile);
+        if (consentReceipt.Length == 0)
+        {
+            throw new ArgumentException("授權 receipt 不可為空白。", nameof(consentReceipt));
+        }
+
+        if (consentReceipt.Length > CharacterVoiceProfileLimits.MaximumConsentReceiptBytes)
+        {
+            return Results.Problem(
+                statusCode: StatusCodes.Status413PayloadTooLarge,
+                title: "Consent receipt is too large",
+                detail: "授權 receipt 不可超過 32 KiB。");
+        }
+
+        return null;
     }
 }

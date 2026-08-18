@@ -7,6 +7,12 @@ public sealed class ThreeWaAiHubOptions
     public string BaseUrl { get; set; } = "https://3wa.tw/3waAIHub/";
     public string ApiToken { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Optional non-secret identifier for the configured token version. When omitted StoryVoice
+    /// stores a short SHA-256 fingerprint, never the token itself, in durable clone operations.
+    /// </summary>
+    public string CredentialKeyId { get; set; } = string.Empty;
+
     /// <summary>Maximum accepted JSON body for submit, status, and result responses.</summary>
     public int MaximumJsonResponseBytes { get; set; } = 64 * 1024;
 
@@ -23,12 +29,22 @@ public sealed class ThreeWaAiHubOptions
 public static class ThreeWaSynthesisCapabilities
 {
     public static bool SupportsVoiceDesign => false;
+    /// <summary>
+    /// A receipt uploaded by an owner is an auditable self-attestation, not a trusted issuer
+    /// signature. Keep full-book synthesis code-pinned off until StoryVoice has an independent
+    /// approval/signature workflow. Private, owner-scoped preview remains available.
+    /// </summary>
+    public static bool SupportsTrustedCloneFormalNarration => false;
     public const string DesignVoiceUnavailableCode = "3wa_design_voice_unsupported";
     public const string DesignVoiceUnavailableMessage =
         "3wa 目前不會把 voice_prompt 傳給 VoxCPM2，文字設計聲線無法產生可區分的角色聲音；請改用已授權且已完成的克隆聲線。";
     public const string CloneVoiceUnavailableCode = "3wa_clone_voice_unavailable";
     public const string CloneVoiceUnavailableMessage =
         "3wa 角色正式配音必須連結一組已完成的克隆基礎聲線。";
+    public const string CloneFormalNarrationUnavailableCode =
+        "3wa_clone_formal_authorization_unverified";
+    public const string CloneFormalNarrationUnavailableMessage =
+        "3wa 克隆目前只開放私人試音；上傳的授權 receipt 是使用者聲明，尚未經 StoryVoice 的可信簽章或人工核准，因此不能用於正式有聲書。";
     public const string NarratorFallbackVoice = "zh-TW-YunJheNeural";
     public const string LegacyNarratorVoiceUnavailableCode = "3wa_legacy_narrator_voice_unavailable";
     public const string LegacyNarratorVoiceUnavailableMessage =

@@ -33,6 +33,9 @@ public sealed class StoryVoiceDbContext(DbContextOptions<StoryVoiceDbContext> op
 
     public DbSet<CharacterVoiceProfile> CharacterVoiceProfiles => Set<CharacterVoiceProfile>();
 
+    public DbSet<CharacterVoiceProfileOperation> CharacterVoiceProfileOperations =>
+        Set<CharacterVoiceProfileOperation>();
+
     public DbSet<CharacterProfile> CharacterProfiles => Set<CharacterProfile>();
 
     public DbSet<SeriesCastRebuildBatch> SeriesCastRebuildBatches => Set<SeriesCastRebuildBatch>();

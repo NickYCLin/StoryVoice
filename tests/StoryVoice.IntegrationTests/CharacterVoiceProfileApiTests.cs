@@ -1,8 +1,12 @@
+using System.Buffers.Binary;
 using System.Net;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
+using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using StoryVoice.Application.Characters;
@@ -221,11 +225,7 @@ public sealed class CharacterVoiceProfileApiTests(ApiFactory factory) : IClassFi
         using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
         var characterProfileId = await CreateCharacterProfileAsync(client, cancellationToken);
 
-        using var content = new MultipartFormDataContent();
-        var file = new ByteArrayContent(new byte[] { 0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x41, 0x56, 0x45 });
-        file.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("audio/wav");
-        content.Add(file, "referenceAudio", "sample.wav");
-        content.Add(new StringContent("explicit_permission"), "consentType");
+        using var content = CreateCloneContent();
 
         using var response = await client.PostMultipartWithCsrfAsync(
             $"/api/character-profiles/{characterProfileId}/voice-profiles/base",
@@ -235,6 +235,773 @@ public sealed class CharacterVoiceProfileApiTests(ApiFactory factory) : IClassFi
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Contains("ThreeWaAiHub__ApiToken", body);
+
+        var operations = await client.GetFromJsonAsync<CharacterVoiceProfileOperationResponse[]>(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/clone-operations",
+            cancellationToken);
+        var rejected = Assert.Single(Assert.IsType<CharacterVoiceProfileOperationResponse[]>(operations));
+        Assert.Equal("Rejected", rejected.State);
+        Assert.Equal("remote_prepare_not_sent", rejected.AttentionCode);
+        Assert.False(rejected.HasRemoteTask);
+        Assert.Equal("attested", rejected.EvidenceStatus);
+        Assert.Equal(
+            [
+                CharacterVoiceConsentScopes.PrivateEvaluation,
+                CharacterVoiceConsentScopes.FormalNarration,
+            ],
+            rejected.UsageScopes);
+    }
+
+    [Fact]
+    public async Task Base_design_is_replaced_only_after_prepare_succeeds_and_expected_text_reaches_the_provider()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var fake = new FakeThreeWaVoiceProfileClient
+        {
+            PrepareResult = new VoiceProfilePrepareResult("clone-task-1", "供應商辨識草稿。"),
+        };
+        using var profileFactory = CreateVoiceProfileFactory(fake);
+        using var owner = await profileFactory.CreateAuthenticatedClientAsync(cancellationToken);
+        var characterProfileId = await CreateCharacterProfileAsync(owner, cancellationToken);
+        var designProfileId = await SeedDesignedVoiceProfileAsync(
+            profileFactory,
+            characterProfileId,
+            cancellationToken);
+        using var content = CreateCloneContent(expectedTranscript: "這是錄音中的實際內容。");
+
+        using var response = await owner.PostMultipartWithCsrfAsync(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/{designProfileId}/replace-with-clone",
+            content,
+            cancellationToken);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var created = await response.Content.ReadFromJsonAsync<CharacterVoiceProfileResponse>(cancellationToken);
+        Assert.NotNull(created);
+        Assert.Equal("Clone", created.Mode);
+        Assert.Equal("AwaitingTranscriptConfirmation", created.Status);
+        Assert.Equal("這是錄音中的實際內容。", created.ExpectedTranscript);
+        Assert.Equal("供應商辨識草稿。", created.AsrDraftTranscript);
+        Assert.Equal("供應商辨識草稿。", created.Transcript);
+        Assert.NotEqual(designProfileId, created.Id);
+        Assert.Equal(1, fake.PrepareCount);
+        Assert.Equal("這是錄音中的實際內容。", fake.ExpectedText);
+        Assert.Equal("explicit_permission", fake.ConsentType);
+        Assert.False(fake.PrepareCancellationCanBeCanceled);
+        Assert.Equal(0, fake.DeleteCount);
+
+        var operation = await LoadOnlyOperationAsync(
+            profileFactory,
+            characterProfileId,
+            cancellationToken);
+        Assert.Equal(CharacterVoiceProfileOperationState.Activated, operation.State);
+        Assert.Equal(created.Id, operation.NewProfileId);
+        Assert.Equal(designProfileId, operation.OldProfileId);
+        Assert.Equal("clone-task-1", operation.RemoteTaskId);
+        Assert.Equal("integration-test-key", operation.CredentialKeyId);
+        Assert.Equal("這是錄音中的實際內容。", operation.ExpectedTranscript);
+        Assert.Equal("供應商辨識草稿。", operation.AsrDraftTranscript);
+
+        var profiles = await owner.GetFromJsonAsync<CharacterVoiceProfileResponse[]>(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles",
+            cancellationToken);
+        var onlyProfile = Assert.Single(Assert.IsType<CharacterVoiceProfileResponse[]>(profiles));
+        Assert.Equal(created.Id, onlyProfile.Id);
+        Assert.Equal("Clone", onlyProfile.Mode);
+        Assert.DoesNotContain(profiles, profile => profile.Id == designProfileId);
+
+        using var referenceAudio = await owner.GetAsync(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/{created.Id}/reference-audio",
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, referenceAudio.StatusCode);
+    }
+
+    [Fact]
+    public async Task Staged_replacement_blocks_design_and_character_delete_while_prepare_is_in_flight()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var prepareStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releasePrepare = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var fake = new FakeThreeWaVoiceProfileClient
+        {
+            PrepareResult = new VoiceProfilePrepareResult("race-safe-task", "供應商辨識草稿。"),
+            PrepareStarted = prepareStarted,
+            ReleasePrepare = releasePrepare,
+        };
+        using var profileFactory = CreateVoiceProfileFactory(fake);
+        using var owner = await profileFactory.CreateAuthenticatedClientAsync(cancellationToken);
+        var characterProfileId = await CreateCharacterProfileAsync(owner, cancellationToken);
+        var designProfileId = await SeedDesignedVoiceProfileAsync(
+            profileFactory,
+            characterProfileId,
+            cancellationToken);
+        using var content = CreateCloneContent();
+        var replaceTask = owner.PostMultipartWithCsrfAsync(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/{designProfileId}/replace-with-clone",
+            content,
+            cancellationToken);
+
+        try
+        {
+            await prepareStarted.Task.WaitAsync(cancellationToken);
+
+            using var designDelete = await owner.DeleteWithCsrfAsync(
+                $"/api/character-profiles/{characterProfileId}/voice-profiles/{designProfileId}",
+                cancellationToken);
+            Assert.Equal(HttpStatusCode.BadRequest, designDelete.StatusCode);
+
+            using var characterDelete = await owner.DeleteWithCsrfAsync(
+                $"/api/character-profiles/{characterProfileId}",
+                cancellationToken);
+            Assert.Equal(HttpStatusCode.BadRequest, characterDelete.StatusCode);
+        }
+        finally
+        {
+            releasePrepare.TrySetResult(true);
+        }
+
+        using var replaceResponse = await replaceTask;
+        Assert.Equal(HttpStatusCode.Created, replaceResponse.StatusCode);
+        Assert.Equal(1, fake.PrepareCount);
+    }
+
+    [Fact]
+    public async Task Replace_prepare_failure_preserves_the_design_slot_operation_and_WAV_for_reconciliation()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var fake = new FakeThreeWaVoiceProfileClient
+        {
+            PrepareException = new ThreeWaAiHubException("離線模擬 prepare 失敗。"),
+        };
+        using var profileFactory = CreateVoiceProfileFactory(fake);
+        using var owner = await profileFactory.CreateAuthenticatedClientAsync(cancellationToken);
+        var characterProfileId = await CreateCharacterProfileAsync(owner, cancellationToken);
+        var designProfileId = await SeedDesignedVoiceProfileAsync(
+            profileFactory,
+            characterProfileId,
+            cancellationToken);
+        var voiceRoot = Path.Combine(factory.StorageRoot, "character-voices");
+        var wavCountBefore = Directory.Exists(voiceRoot)
+            ? Directory.EnumerateFiles(voiceRoot, "*.wav", SearchOption.AllDirectories).Count()
+            : 0;
+        using var content = CreateCloneContent();
+
+        using var response = await owner.PostMultipartWithCsrfAsync(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/{designProfileId}/replace-with-clone",
+            content,
+            cancellationToken);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(1, fake.PrepareCount);
+        Assert.Equal(0, fake.DeleteCount);
+        var profiles = await owner.GetFromJsonAsync<CharacterVoiceProfileResponse[]>(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles",
+            cancellationToken);
+        var preserved = Assert.Single(Assert.IsType<CharacterVoiceProfileResponse[]>(profiles));
+        Assert.Equal(designProfileId, preserved.Id);
+        Assert.Equal("Design", preserved.Mode);
+        var wavCountAfter = Directory.Exists(voiceRoot)
+            ? Directory.EnumerateFiles(voiceRoot, "*.wav", SearchOption.AllDirectories).Count()
+            : 0;
+        Assert.Equal(wavCountBefore + 1, wavCountAfter);
+        var operation = await LoadOnlyOperationAsync(
+            profileFactory,
+            characterProfileId,
+            cancellationToken);
+        Assert.Equal(CharacterVoiceProfileOperationState.NeedsAttention, operation.State);
+        Assert.Equal("remote_prepare_uncertain", operation.SafeErrorCode);
+        Assert.Null(operation.RemoteTaskId);
+
+        using var retryContent = CreateCloneContent();
+        using var retryResponse = await owner.PostMultipartWithCsrfAsync(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/{designProfileId}/replace-with-clone",
+            retryContent,
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, retryResponse.StatusCode);
+        Assert.Equal(1, fake.PrepareCount);
+        Assert.Equal(wavCountAfter, Directory.EnumerateFiles(voiceRoot, "*.wav", SearchOption.AllDirectories).Count());
+
+        using var characterDelete = await owner.DeleteWithCsrfAsync(
+            $"/api/character-profiles/{characterProfileId}",
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, characterDelete.StatusCode);
+    }
+
+    [Fact]
+    public async Task Replace_commit_failure_preserves_the_design_slot_task_operation_and_WAV()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var fake = new FakeThreeWaVoiceProfileClient
+        {
+            PrepareResult = new VoiceProfilePrepareResult("db-fail-task", "辨識草稿。"),
+        };
+        using var profileFactory = CreateVoiceProfileFactory(fake, failReplacementSave: true);
+        using var owner = await profileFactory.CreateAuthenticatedClientAsync(cancellationToken);
+        var characterProfileId = await CreateCharacterProfileAsync(owner, cancellationToken);
+        var designProfileId = await SeedDesignedVoiceProfileAsync(
+            profileFactory,
+            characterProfileId,
+            cancellationToken);
+        var voiceRoot = Path.Combine(factory.StorageRoot, "character-voices");
+        var wavCountBefore = Directory.Exists(voiceRoot)
+            ? Directory.EnumerateFiles(voiceRoot, "*.wav", SearchOption.AllDirectories).Count()
+            : 0;
+        using var content = CreateCloneContent();
+
+        using var response = await owner.PostMultipartWithCsrfAsync(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/{designProfileId}/replace-with-clone",
+            content,
+            cancellationToken);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(1, fake.PrepareCount);
+        Assert.Equal(0, fake.DeleteCount);
+        var profiles = await owner.GetFromJsonAsync<CharacterVoiceProfileResponse[]>(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles",
+            cancellationToken);
+        var preserved = Assert.Single(Assert.IsType<CharacterVoiceProfileResponse[]>(profiles));
+        Assert.Equal(designProfileId, preserved.Id);
+        Assert.Equal("Design", preserved.Mode);
+        var wavCountAfter = Directory.Exists(voiceRoot)
+            ? Directory.EnumerateFiles(voiceRoot, "*.wav", SearchOption.AllDirectories).Count()
+            : 0;
+        Assert.Equal(wavCountBefore + 1, wavCountAfter);
+        var operation = await LoadOnlyOperationAsync(
+            profileFactory,
+            characterProfileId,
+            cancellationToken);
+        Assert.Equal(CharacterVoiceProfileOperationState.NeedsAttention, operation.State);
+        Assert.Equal("local_activation_uncertain", operation.SafeErrorCode);
+        Assert.Equal("db-fail-task", operation.RemoteTaskId);
+
+        using var operationListResponse = await owner.GetAsync(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/clone-operations",
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, operationListResponse.StatusCode);
+        var operationListBody = await operationListResponse.Content.ReadAsStringAsync(cancellationToken);
+        Assert.DoesNotContain("db-fail-task", operationListBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("api-test-recorder", operationListBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("recorderName", operationListBody, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("consentRecordSha256", operationListBody, StringComparison.OrdinalIgnoreCase);
+        var listedOperations = await operationListResponse.Content
+            .ReadFromJsonAsync<CharacterVoiceProfileOperationResponse[]>(cancellationToken);
+        var listed = Assert.Single(Assert.IsType<CharacterVoiceProfileOperationResponse[]>(listedOperations));
+        Assert.Equal("local_activation_uncertain", listed.AttentionCode);
+        Assert.True(listed.HasRemoteTask);
+
+        using var resumeResponse = await owner.PostWithCsrfAsync(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/clone-operations/{operation.Id}/resume-activation",
+            new { },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, resumeResponse.StatusCode);
+        Assert.Equal(1, fake.PrepareCount);
+        var resumed = await resumeResponse.Content.ReadFromJsonAsync<CharacterVoiceProfileResponse>(cancellationToken);
+        Assert.NotNull(resumed);
+        Assert.Equal("Clone", resumed.Mode);
+        var resumedOperation = await LoadOnlyOperationAsync(
+            profileFactory,
+            characterProfileId,
+            cancellationToken);
+        Assert.Equal(CharacterVoiceProfileOperationState.Activated, resumedOperation.State);
+        Assert.Null(resumedOperation.SafeErrorCode);
+    }
+
+    [Fact]
+    public async Task Replace_is_owner_and_base_design_scoped_before_any_provider_call()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var fake = new FakeThreeWaVoiceProfileClient();
+        using var profileFactory = CreateVoiceProfileFactory(fake);
+        using var owner = await profileFactory.CreateAuthenticatedClientAsync(cancellationToken);
+        using var otherOwner = await profileFactory.CreateAuthenticatedClientAsync(cancellationToken);
+        var characterProfileId = await CreateCharacterProfileAsync(owner, cancellationToken);
+        var designProfileId = await SeedDesignedVoiceProfileAsync(
+            profileFactory,
+            characterProfileId,
+            cancellationToken);
+
+        using (var otherOwnerContent = CreateCloneContent())
+        using (var otherOwnerResponse = await otherOwner.PostMultipartWithCsrfAsync(
+                   $"/api/character-profiles/{characterProfileId}/voice-profiles/{designProfileId}/replace-with-clone",
+                   otherOwnerContent,
+                   cancellationToken))
+        {
+            Assert.Equal(HttpStatusCode.NotFound, otherOwnerResponse.StatusCode);
+        }
+
+        var sceneProfileId = await SeedDesignedVoiceProfileAsync(
+            profileFactory,
+            characterProfileId,
+            cancellationToken,
+            CharacterVoiceProfileKind.Scene,
+            CharacterVoiceSceneCodes.Angry);
+        using (var sceneContent = CreateCloneContent())
+        using (var sceneResponse = await owner.PostMultipartWithCsrfAsync(
+                   $"/api/character-profiles/{characterProfileId}/voice-profiles/{sceneProfileId}/replace-with-clone",
+                   sceneContent,
+                   cancellationToken))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, sceneResponse.StatusCode);
+        }
+
+        Assert.Equal(0, fake.PrepareCount);
+    }
+
+    [Fact]
+    public async Task Clone_upload_over_10_MiB_returns_413_before_any_provider_call()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var fake = new FakeThreeWaVoiceProfileClient();
+        using var profileFactory = CreateVoiceProfileFactory(fake);
+        using var owner = await profileFactory.CreateAuthenticatedClientAsync(cancellationToken);
+        var characterProfileId = await CreateCharacterProfileAsync(owner, cancellationToken);
+        using var content = CreateCloneContent(
+            new byte[checked((int)CharacterVoiceProfileLimits.MaximumReferenceAudioBytes + 1)]);
+
+        using var response = await owner.PostMultipartWithCsrfAsync(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/base",
+            content,
+            cancellationToken);
+
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
+        Assert.Contains("10 MiB", await response.Content.ReadAsStringAsync(cancellationToken), StringComparison.Ordinal);
+        Assert.Equal(0, fake.PrepareCount);
+    }
+
+    [Fact]
+    public async Task Clone_upload_requires_explicit_rights_attestation_before_any_provider_call()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var fake = new FakeThreeWaVoiceProfileClient();
+        using var profileFactory = CreateVoiceProfileFactory(fake);
+        using var owner = await profileFactory.CreateAuthenticatedClientAsync(cancellationToken);
+        var characterProfileId = await CreateCharacterProfileAsync(owner, cancellationToken);
+        using var content = CreateCloneContent(rightsAttested: false);
+
+        using var response = await owner.PostMultipartWithCsrfAsync(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/base",
+            content,
+            cancellationToken);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(0, fake.PrepareCount);
+        await using var scope = profileFactory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+        Assert.False(await db.CharacterVoiceProfileOperations.AnyAsync(
+            operation => operation.CharacterProfileId == characterProfileId,
+            cancellationToken));
+    }
+
+    [Fact]
+    public async Task Clone_upload_over_32_KiB_receipt_returns_413_before_any_provider_call()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var fake = new FakeThreeWaVoiceProfileClient();
+        using var profileFactory = CreateVoiceProfileFactory(fake);
+        using var owner = await profileFactory.CreateAuthenticatedClientAsync(cancellationToken);
+        var characterProfileId = await CreateCharacterProfileAsync(owner, cancellationToken);
+        using var content = new MultipartFormDataContent();
+        var audio = new ByteArrayContent(CreatePcmWav());
+        audio.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("audio/wav");
+        content.Add(audio, "referenceAudio", "sample.wav");
+        var receipt = new ByteArrayContent(
+            new byte[checked((int)CharacterVoiceProfileLimits.MaximumConsentReceiptBytes + 1)]);
+        receipt.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
+        content.Add(receipt, "consentReceipt", "oversize.json");
+        content.Add(new StringContent("true"), "rightsAttested");
+        content.Add(new StringContent("這是錄音中的實際內容。"), "expectedTranscript");
+
+        using var response = await owner.PostMultipartWithCsrfAsync(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/base",
+            content,
+            cancellationToken);
+
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
+        Assert.Equal(0, fake.PrepareCount);
+    }
+
+    [Fact]
+    public async Task Clone_upload_with_blank_expected_transcript_fails_without_a_provider_call_or_local_profile()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var fake = new FakeThreeWaVoiceProfileClient();
+        using var profileFactory = CreateVoiceProfileFactory(fake);
+        using var owner = await profileFactory.CreateAuthenticatedClientAsync(cancellationToken);
+        var characterProfileId = await CreateCharacterProfileAsync(owner, cancellationToken);
+        using var content = CreateCloneContent(expectedTranscript: "   ");
+
+        using var response = await owner.PostMultipartWithCsrfAsync(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/base",
+            content,
+            cancellationToken);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(0, fake.PrepareCount);
+        var profiles = await owner.GetFromJsonAsync<CharacterVoiceProfileResponse[]>(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles",
+            cancellationToken);
+        Assert.Empty(Assert.IsType<CharacterVoiceProfileResponse[]>(profiles));
+    }
+
+    [Theory]
+    [InlineData(9, 48_000)]
+    [InlineData(10, 44_100)]
+    public async Task Clone_upload_rejects_invalid_duration_or_PCM_format_before_any_provider_call(
+        int durationSeconds,
+        int sampleRate)
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var fake = new FakeThreeWaVoiceProfileClient();
+        using var profileFactory = CreateVoiceProfileFactory(fake);
+        using var owner = await profileFactory.CreateAuthenticatedClientAsync(cancellationToken);
+        var characterProfileId = await CreateCharacterProfileAsync(owner, cancellationToken);
+        var voiceRoot = Path.Combine(factory.StorageRoot, "character-voices");
+        var wavCountBefore = Directory.Exists(voiceRoot)
+            ? Directory.EnumerateFiles(voiceRoot, "*.wav", SearchOption.AllDirectories).Count()
+            : 0;
+        using var content = CreateCloneContent(CreatePcmWav(durationSeconds, sampleRate));
+
+        using var response = await owner.PostMultipartWithCsrfAsync(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/base",
+            content,
+            cancellationToken);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(0, fake.PrepareCount);
+        var wavCountAfter = Directory.Exists(voiceRoot)
+            ? Directory.EnumerateFiles(voiceRoot, "*.wav", SearchOption.AllDirectories).Count()
+            : 0;
+        Assert.Equal(wavCountBefore, wavCountAfter);
+        await using var scope = profileFactory.Services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+        Assert.False(await dbContext.CharacterVoiceProfileOperations.AnyAsync(
+            operation => operation.CharacterProfileId == characterProfileId,
+            cancellationToken));
+    }
+
+    [Fact]
+    public async Task Explicit_provider_auth_rejection_is_visible_and_does_not_permanently_block_the_slot()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var fake = new FakeThreeWaVoiceProfileClient
+        {
+            PrepareException = new ThreeWaAiHubException(
+                "3wa Cluster API request failed with HTTP 401.",
+                ThreeWaAiHubFailureKind.RemoteAuthenticationRejected),
+        };
+        using var profileFactory = CreateVoiceProfileFactory(fake);
+        using var owner = await profileFactory.CreateAuthenticatedClientAsync(cancellationToken);
+        using var otherOwner = await profileFactory.CreateAuthenticatedClientAsync(cancellationToken);
+        var characterProfileId = await CreateCharacterProfileAsync(owner, cancellationToken);
+        using var rejectedContent = CreateCloneContent();
+
+        using var rejectedResponse = await owner.PostMultipartWithCsrfAsync(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/base",
+            rejectedContent,
+            cancellationToken);
+
+        Assert.Equal(HttpStatusCode.BadRequest, rejectedResponse.StatusCode);
+        var operations = await owner.GetFromJsonAsync<CharacterVoiceProfileOperationResponse[]>(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/clone-operations",
+            cancellationToken);
+        var rejected = Assert.Single(Assert.IsType<CharacterVoiceProfileOperationResponse[]>(operations));
+        Assert.Equal("Rejected", rejected.State);
+        Assert.Equal("remote_prepare_auth_rejected", rejected.AttentionCode);
+        using var otherOwnerResponse = await otherOwner.GetAsync(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/clone-operations",
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.NotFound, otherOwnerResponse.StatusCode);
+
+        fake.PrepareException = null;
+        fake.PrepareResult = new VoiceProfilePrepareResult("retry-task", "重試後草稿。");
+        using var retryContent = CreateCloneContent();
+        using var retryResponse = await owner.PostMultipartWithCsrfAsync(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/base",
+            retryContent,
+            cancellationToken);
+
+        Assert.Equal(HttpStatusCode.Created, retryResponse.StatusCode);
+        Assert.Equal(2, fake.PrepareCount);
+        var afterRetry = await owner.GetFromJsonAsync<CharacterVoiceProfileOperationResponse[]>(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/clone-operations",
+            cancellationToken);
+        Assert.Contains(afterRetry!, operation => operation.State == "Rejected");
+        Assert.Contains(afterRetry!, operation => operation.State == "Activated");
+    }
+
+    [Theory]
+    [InlineData(true, "remote_task_id_contract_mismatch")]
+    [InlineData(false, "remote_draft_contract_mismatch")]
+    public async Task Prepare_contract_violation_retains_remote_evidence_and_never_compensates(
+        bool noncanonicalTaskId,
+        string expectedSafeErrorCode)
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var taskId = noncanonicalTaskId ? $"route_{new string('a', 34)}" : "draft-task";
+        var fake = new FakeThreeWaVoiceProfileClient
+        {
+            PrepareResult = new VoiceProfilePrepareResult(
+                taskId,
+                noncanonicalTaskId ? "合法長度的草稿。" : new string('稿', 2_001)),
+            DeleteException = new ThreeWaAiHubException("compensation-delete-failed"),
+        };
+        using var profileFactory = CreateVoiceProfileFactory(fake);
+        using var owner = await profileFactory.CreateAuthenticatedClientAsync(cancellationToken);
+        var characterProfileId = await CreateCharacterProfileAsync(owner, cancellationToken);
+        var voiceRoot = Path.Combine(factory.StorageRoot, "character-voices");
+        var wavCountBefore = Directory.Exists(voiceRoot)
+            ? Directory.EnumerateFiles(voiceRoot, "*.wav", SearchOption.AllDirectories).Count()
+            : 0;
+        using var content = CreateCloneContent();
+
+        using var response = await owner.PostMultipartWithCsrfAsync(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/base",
+            content,
+            cancellationToken);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(1, fake.PrepareCount);
+        Assert.Equal(0, fake.DeleteCount);
+        Assert.DoesNotContain(
+            "compensation-delete-failed",
+            await response.Content.ReadAsStringAsync(cancellationToken),
+            StringComparison.Ordinal);
+        var profiles = await owner.GetFromJsonAsync<CharacterVoiceProfileResponse[]>(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles",
+            cancellationToken);
+        Assert.Empty(Assert.IsType<CharacterVoiceProfileResponse[]>(profiles));
+        var wavCountAfter = Directory.Exists(voiceRoot)
+            ? Directory.EnumerateFiles(voiceRoot, "*.wav", SearchOption.AllDirectories).Count()
+            : 0;
+        Assert.Equal(wavCountBefore + 1, wavCountAfter);
+        var operation = await LoadOnlyOperationAsync(
+            profileFactory,
+            characterProfileId,
+            cancellationToken);
+        Assert.Equal(CharacterVoiceProfileOperationState.NeedsAttention, operation.State);
+        Assert.Equal(expectedSafeErrorCode, operation.SafeErrorCode);
+        Assert.Equal(taskId, operation.RemoteTaskId);
+    }
+
+    [Fact]
+    public async Task Confirmation_intent_reconciles_remote_success_after_the_local_ready_save_fails()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var fake = new FakeThreeWaVoiceProfileClient
+        {
+            PrepareResult = new VoiceProfilePrepareResult("confirm-task", "供應商 ASR 草稿。"),
+        };
+        using var profileFactory = CreateVoiceProfileFactory(fake, failFirstReadySave: true);
+        using var owner = await profileFactory.CreateAuthenticatedClientAsync(cancellationToken);
+        var characterProfileId = await CreateCharacterProfileAsync(owner, cancellationToken);
+        using var createContent = CreateCloneContent();
+        using var createResponse = await owner.PostMultipartWithCsrfAsync(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/base",
+            createContent,
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
+        var created = await createResponse.Content.ReadFromJsonAsync<CharacterVoiceProfileResponse>(cancellationToken);
+        Assert.NotNull(created);
+
+        using var confirmResponse = await owner.PostWithCsrfAsync(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/{created.Id}/confirm-transcript",
+            new { transcript = "人工校正後的最終文字。" },
+            cancellationToken);
+
+        Assert.Equal(HttpStatusCode.BadRequest, confirmResponse.StatusCode);
+        Assert.Equal(1, fake.ConfirmCount);
+        await using (var scope = profileFactory.Services.CreateAsyncScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+            var pending = await dbContext.CharacterVoiceProfiles
+                .AsNoTracking()
+                .SingleAsync(profile => profile.Id == created.Id, cancellationToken);
+            Assert.Equal(CharacterVoiceProfileStatus.AwaitingTranscriptConfirmation, pending.Status);
+            Assert.Equal("人工校正後的最終文字。", pending.ConfirmationTranscriptIntent);
+            Assert.Equal("供應商 ASR 草稿。", pending.AsrDraftTranscript);
+            Assert.Equal("供應商 ASR 草稿。", pending.Transcript);
+        }
+
+        fake.StatusResult = new VoiceProfileStatusResult(
+            "ready",
+            TranscriptConfirmed: true,
+            DraftTranscript: "與人工確認意圖不同的文字。",
+            TranscriptionFailed: false);
+        using var mismatchedRefresh = await owner.PostWithCsrfAsync(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/{created.Id}/refresh-status",
+            new { },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, mismatchedRefresh.StatusCode);
+        Assert.Contains(
+            "confirmation_intent_mismatch",
+            await mismatchedRefresh.Content.ReadAsStringAsync(cancellationToken),
+            StringComparison.Ordinal);
+
+        fake.StatusResult = new VoiceProfileStatusResult(
+            "ready",
+            TranscriptConfirmed: true,
+            DraftTranscript: null,
+            TranscriptionFailed: false);
+        using var refreshResponse = await owner.PostWithCsrfAsync(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/{created.Id}/refresh-status",
+            new { },
+            cancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, refreshResponse.StatusCode);
+        var reconciled = await refreshResponse.Content
+            .ReadFromJsonAsync<CharacterVoiceProfileResponse>(cancellationToken);
+        Assert.NotNull(reconciled);
+        Assert.Equal("Ready", reconciled.Status);
+        Assert.True(reconciled.TranscriptConfirmed);
+        Assert.Equal("人工校正後的最終文字。", reconciled.ConfirmationTranscriptIntent);
+        Assert.Equal("人工校正後的最終文字。", reconciled.Transcript);
+        Assert.Equal("供應商 ASR 草稿。", reconciled.AsrDraftTranscript);
+        Assert.Equal(1, fake.ConfirmCount);
+        Assert.Equal(2, fake.StatusCount);
+    }
+
+    [Fact]
+    public async Task Remote_confirmed_status_never_invents_a_missing_human_confirmation_intent()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var fake = new FakeThreeWaVoiceProfileClient
+        {
+            PrepareResult = new VoiceProfilePrepareResult("no-intent-task", "僅是供應商 ASR 草稿。"),
+            StatusResult = new VoiceProfileStatusResult(
+                "ready",
+                TranscriptConfirmed: true,
+                DraftTranscript: "供應商宣稱已確認的文字。",
+                TranscriptionFailed: false),
+        };
+        using var profileFactory = CreateVoiceProfileFactory(fake);
+        using var owner = await profileFactory.CreateAuthenticatedClientAsync(cancellationToken);
+        var characterProfileId = await CreateCharacterProfileAsync(owner, cancellationToken);
+        using var createContent = CreateCloneContent();
+        using var createResponse = await owner.PostMultipartWithCsrfAsync(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/base",
+            createContent,
+            cancellationToken);
+        var created = await createResponse.Content.ReadFromJsonAsync<CharacterVoiceProfileResponse>(cancellationToken);
+        Assert.NotNull(created);
+
+        using var refreshResponse = await owner.PostWithCsrfAsync(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/{created.Id}/refresh-status",
+            new { },
+            cancellationToken);
+
+        Assert.Equal(HttpStatusCode.BadRequest, refreshResponse.StatusCode);
+        Assert.Contains(
+            "confirmation_intent_missing",
+            await refreshResponse.Content.ReadAsStringAsync(cancellationToken),
+            StringComparison.Ordinal);
+        await using var scope = profileFactory.Services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+        var persisted = await dbContext.CharacterVoiceProfiles
+            .AsNoTracking()
+            .SingleAsync(profile => profile.Id == created.Id, cancellationToken);
+        Assert.Equal(CharacterVoiceProfileStatus.AwaitingTranscriptConfirmation, persisted.Status);
+        Assert.Null(persisted.ConfirmationTranscriptIntent);
+        Assert.Equal("僅是供應商 ASR 草稿。", persisted.AsrDraftTranscript);
+        Assert.Equal("僅是供應商 ASR 草稿。", persisted.Transcript);
+    }
+
+    [Fact]
+    public async Task Clone_delete_is_fail_closed_without_any_remote_call_and_preserves_local_evidence()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var fake = new FakeThreeWaVoiceProfileClient
+        {
+            PrepareResult = new VoiceProfilePrepareResult("clone-task-del", "逐字稿草稿。"),
+        };
+        using var profileFactory = CreateVoiceProfileFactory(fake);
+        using var owner = await profileFactory.CreateAuthenticatedClientAsync(cancellationToken);
+        var characterProfileId = await CreateCharacterProfileAsync(owner, cancellationToken);
+        using var createContent = CreateCloneContent();
+        using var createResponse = await owner.PostMultipartWithCsrfAsync(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/base",
+            createContent,
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
+        var created = await createResponse.Content.ReadFromJsonAsync<CharacterVoiceProfileResponse>(cancellationToken);
+        Assert.NotNull(created);
+
+        using var failedDelete = await owner.DeleteWithCsrfAsync(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/{created.Id}",
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, failedDelete.StatusCode);
+        Assert.Equal(0, fake.DeleteCount);
+        var preserved = await owner.GetFromJsonAsync<CharacterVoiceProfileResponse[]>(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles",
+            cancellationToken);
+        Assert.Contains(Assert.IsType<CharacterVoiceProfileResponse[]>(preserved), profile => profile.Id == created.Id);
+        using var preservedAudio = await owner.GetAsync(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/{created.Id}/reference-audio",
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, preservedAudio.StatusCode);
+        Assert.Contains("private", preservedAudio.Headers.CacheControl!.ToString(), StringComparison.Ordinal);
+        Assert.True(preservedAudio.Headers.CacheControl.NoStore);
+        Assert.Contains("nosniff", preservedAudio.Headers.GetValues("X-Content-Type-Options"));
+
+        using var rebuild = await owner.PostWithCsrfAsync(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/{created.Id}/rebuild",
+            new { },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, rebuild.StatusCode);
+        Assert.Equal(1, fake.PrepareCount);
+
+        using var characterDelete = await owner.DeleteWithCsrfAsync(
+            $"/api/character-profiles/{characterProfileId}",
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, characterDelete.StatusCode);
+
+        var operation = await LoadOnlyOperationAsync(
+            profileFactory,
+            characterProfileId,
+            cancellationToken);
+        Assert.Equal(CharacterVoiceProfileOperationState.Activated, operation.State);
+        Assert.Equal(created.Id, operation.NewProfileId);
+    }
+
+    [Fact]
+    public async Task Design_delete_never_calls_the_remote_profile_delete_operation()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var fake = new FakeThreeWaVoiceProfileClient();
+        using var profileFactory = CreateVoiceProfileFactory(fake);
+        using var owner = await profileFactory.CreateAuthenticatedClientAsync(cancellationToken);
+        var characterProfileId = await CreateCharacterProfileAsync(owner, cancellationToken);
+        var profileId = await SeedDesignedVoiceProfileAsync(profileFactory, characterProfileId, cancellationToken);
+
+        using var response = await owner.DeleteWithCsrfAsync(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/{profileId}",
+            cancellationToken);
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Equal(0, fake.DeleteCount);
+    }
+
+    [Fact]
+    public async Task Clone_without_a_remote_task_id_is_also_fail_closed_and_preserved()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var fake = new FakeThreeWaVoiceProfileClient();
+        using var profileFactory = CreateVoiceProfileFactory(fake);
+        using var owner = await profileFactory.CreateAuthenticatedClientAsync(cancellationToken);
+        var characterProfileId = await CreateCharacterProfileAsync(owner, cancellationToken);
+        var profileId = await SeedPendingCloneWithoutTaskAsync(
+            profileFactory,
+            characterProfileId,
+            cancellationToken);
+
+        using var response = await owner.DeleteWithCsrfAsync(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/{profileId}",
+            cancellationToken);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(0, fake.DeleteCount);
+        var profiles = await owner.GetFromJsonAsync<CharacterVoiceProfileResponse[]>(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles",
+            cancellationToken);
+        Assert.Contains(Assert.IsType<CharacterVoiceProfileResponse[]>(profiles), profile => profile.Id == profileId);
     }
 
     private static async Task<Guid> CreateCharacterProfileAsync(
@@ -266,7 +1033,9 @@ public sealed class CharacterVoiceProfileApiTests(ApiFactory factory) : IClassFi
     private static async Task<Guid> SeedDesignedVoiceProfileAsync(
         WebApplicationFactory<Program> appFactory,
         Guid characterProfileId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        CharacterVoiceProfileKind kind = CharacterVoiceProfileKind.Base,
+        string? sceneCode = null)
     {
         await using var scope = appFactory.Services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
@@ -278,13 +1047,102 @@ public sealed class CharacterVoiceProfileApiTests(ApiFactory factory) : IClassFi
             Guid.NewGuid(),
             ownerId,
             characterProfileId,
-            CharacterVoiceProfileKind.Base,
-            null,
+            kind,
+            sceneCode,
             "溫柔、略帶沙啞的台灣華語女聲",
             DateTimeOffset.UtcNow);
         dbContext.CharacterVoiceProfiles.Add(profile);
         await dbContext.SaveChangesAsync(cancellationToken);
         return profile.Id;
+    }
+
+    private static MultipartFormDataContent CreateCloneContent(
+        byte[]? audio = null,
+        string expectedTranscript = "這是錄音中的實際內容。",
+        IReadOnlyList<string>? usageScopes = null,
+        bool rightsAttested = true)
+    {
+        var audioBytes = audio ?? CreatePcmWav();
+        var content = new MultipartFormDataContent();
+        var file = new ByteArrayContent(audioBytes);
+        file.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("audio/wav");
+        content.Add(file, "referenceAudio", "sample.wav");
+        var receipt = new ByteArrayContent(CreateConsentReceipt(
+            audioBytes,
+            expectedTranscript,
+            usageScopes ??
+            [
+                CharacterVoiceConsentScopes.PrivateEvaluation,
+                CharacterVoiceConsentScopes.FormalNarration,
+            ]));
+        receipt.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
+        content.Add(receipt, "consentReceipt", "sample-consent.json");
+        content.Add(new StringContent(rightsAttested ? "true" : "false"), "rightsAttested");
+        content.Add(new StringContent(expectedTranscript), "expectedTranscript");
+        return content;
+    }
+
+    private static byte[] CreateConsentReceipt(
+        byte[] audio,
+        string expectedTranscript,
+        IReadOnlyList<string> usageScopes)
+    {
+        var date = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-1)).ToString("yyyy-MM-dd");
+        var transcriptHash = string.IsNullOrWhiteSpace(expectedTranscript)
+            ? new string('d', 64)
+            : CharacterVoiceTranscriptCanonicalizer.ComputeSha256Hex(expectedTranscript);
+        return JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            schema = CharacterVoiceConsentEvidence.CurrentEvidenceVersion,
+            recorderName = "api-test-recorder",
+            recordingDate = date,
+            consentSignedDate = date,
+            consentType = CharacterVoiceConsentTypes.ExplicitPermission,
+            usageScopes,
+            recordingSha256 = Convert.ToHexString(SHA256.HashData(audio)).ToLowerInvariant(),
+            expectedTranscriptCanonicalSha256 = transcriptHash,
+            consentSha256 = new string('e', 64),
+            subjectAttestationVersion = CharacterVoiceConsentEvidence.CurrentAttestationVersion,
+            generatedAtUtc = DateTimeOffset.UtcNow.AddMinutes(-1).ToString("O"),
+        });
+    }
+
+    private static byte[] CreatePcmWav(int durationSeconds = 10, int sampleRate = 48_000)
+    {
+        const ushort channels = 1;
+        const ushort bitsPerSample = 16;
+        const ushort blockAlign = channels * (bitsPerSample / 8);
+        var byteRate = checked(sampleRate * blockAlign);
+        var dataLength = checked(byteRate * durationSeconds);
+        var wav = new byte[checked(44 + dataLength)];
+        "RIFF"u8.CopyTo(wav.AsSpan(0, 4));
+        BinaryPrimitives.WriteUInt32LittleEndian(wav.AsSpan(4, 4), checked((uint)(wav.Length - 8)));
+        "WAVE"u8.CopyTo(wav.AsSpan(8, 4));
+        "fmt "u8.CopyTo(wav.AsSpan(12, 4));
+        BinaryPrimitives.WriteUInt32LittleEndian(wav.AsSpan(16, 4), 16);
+        BinaryPrimitives.WriteUInt16LittleEndian(wav.AsSpan(20, 2), 1);
+        BinaryPrimitives.WriteUInt16LittleEndian(wav.AsSpan(22, 2), channels);
+        BinaryPrimitives.WriteUInt32LittleEndian(wav.AsSpan(24, 4), checked((uint)sampleRate));
+        BinaryPrimitives.WriteUInt32LittleEndian(wav.AsSpan(28, 4), checked((uint)byteRate));
+        BinaryPrimitives.WriteUInt16LittleEndian(wav.AsSpan(32, 2), blockAlign);
+        BinaryPrimitives.WriteUInt16LittleEndian(wav.AsSpan(34, 2), bitsPerSample);
+        "data"u8.CopyTo(wav.AsSpan(36, 4));
+        BinaryPrimitives.WriteUInt32LittleEndian(wav.AsSpan(40, 4), checked((uint)dataLength));
+        return wav;
+    }
+
+    private static async Task<CharacterVoiceProfileOperation> LoadOnlyOperationAsync(
+        WebApplicationFactory<Program> appFactory,
+        Guid characterProfileId,
+        CancellationToken cancellationToken)
+    {
+        await using var scope = appFactory.Services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+        return await dbContext.CharacterVoiceProfileOperations
+            .AsNoTracking()
+            .SingleAsync(
+                operation => operation.CharacterProfileId == characterProfileId,
+                cancellationToken);
     }
 
     private static async Task<Guid> SeedReadyCloneVoiceProfileAsync(
@@ -313,6 +1171,77 @@ public sealed class CharacterVoiceProfileApiTests(ApiFactory factory) : IClassFi
             now);
         profile.AttachDraftTranscript("seeded-profile-task", "你好，台灣。", now);
         profile.ConfirmTranscript("你好，台灣。", now);
+        var operation = CharacterVoiceProfileOperation.StageCreate(
+            Guid.NewGuid(),
+            ownerId,
+            characterProfileId,
+            profile.Id,
+            CharacterVoiceProfileKind.Base,
+            sceneCode: null,
+            CreateConsentEvidence("你好，台灣。", includeFormalNarration: true),
+            "你好，台灣。",
+            "seeded/reference.wav",
+            new string('a', 64),
+            10,
+            ownerId,
+            "seeded-key",
+            now);
+        operation.MarkRemotePrepared("seeded-profile-task", "你好，台灣。", now);
+        operation.MarkActivated(now);
+        dbContext.CharacterVoiceProfiles.Add(profile);
+        dbContext.CharacterVoiceProfileOperations.Add(operation);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return profile.Id;
+    }
+
+    private static CharacterVoiceConsentEvidence CreateConsentEvidence(
+        string transcript,
+        bool includeFormalNarration)
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var scopes = new List<string> { CharacterVoiceConsentScopes.PrivateEvaluation };
+        if (includeFormalNarration)
+        {
+            scopes.Add(CharacterVoiceConsentScopes.FormalNarration);
+        }
+
+        return CharacterVoiceConsentEvidence.Create(
+            "api-test-recorder",
+            today.AddDays(-1),
+            today,
+            CharacterVoiceConsentTypes.ExplicitPermission,
+            scopes,
+            new string('e', 64),
+            new string('f', 64),
+            CharacterVoiceTranscriptCanonicalizer.ComputeSha256Hex(transcript),
+            CharacterVoiceConsentEvidence.CurrentEvidenceVersion,
+            CharacterVoiceConsentEvidence.CurrentAttestationVersion,
+            today);
+    }
+
+    private static async Task<Guid> SeedPendingCloneWithoutTaskAsync(
+        WebApplicationFactory<Program> appFactory,
+        Guid characterProfileId,
+        CancellationToken cancellationToken)
+    {
+        await using var scope = appFactory.Services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+        var ownerId = await dbContext.CharacterProfiles
+            .Where(profile => profile.Id == characterProfileId)
+            .Select(profile => profile.OwnerId)
+            .SingleAsync(cancellationToken);
+        var profile = CharacterVoiceProfile.CreateClone(
+            Guid.NewGuid(),
+            ownerId,
+            characterProfileId,
+            CharacterVoiceProfileKind.Base,
+            null,
+            CharacterVoiceConsentTypes.SelfRecorded,
+            "seeded/no-task.wav",
+            new string('b', 64),
+            5,
+            ownerId,
+            DateTimeOffset.UtcNow);
         dbContext.CharacterVoiceProfiles.Add(profile);
         await dbContext.SaveChangesAsync(cancellationToken);
         return profile.Id;
@@ -334,6 +1263,157 @@ public sealed class CharacterVoiceProfileApiTests(ApiFactory factory) : IClassFi
                     provider.GetRequiredService<FakeThreeWaSynthesisClient>());
             });
         });
+
+    private Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program> CreateVoiceProfileFactory(
+        FakeThreeWaVoiceProfileClient fake,
+        bool failReplacementSave = false,
+        bool failFirstReadySave = false) =>
+        factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting(
+                $"{ThreeWaAiHubOptions.SectionName}:CredentialKeyId",
+                "integration-test-key");
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<IThreeWaVoiceProfileClient>();
+                services.AddSingleton(fake);
+                services.AddSingleton<IThreeWaVoiceProfileClient>(provider =>
+                    provider.GetRequiredService<FakeThreeWaVoiceProfileClient>());
+                if (failReplacementSave)
+                {
+                    services.AddSingleton<ReplacementSaveFailureInterceptor>();
+                    services.AddDbContext<StoryVoiceDbContext>((provider, options) =>
+                        options.AddInterceptors(
+                            provider.GetRequiredService<ReplacementSaveFailureInterceptor>()));
+                }
+
+                if (failFirstReadySave)
+                {
+                    services.AddSingleton<ReadySaveFailureInterceptor>();
+                    services.AddDbContext<StoryVoiceDbContext>((provider, options) =>
+                        options.AddInterceptors(
+                            provider.GetRequiredService<ReadySaveFailureInterceptor>()));
+                }
+            });
+        });
+
+    private sealed class ReplacementSaveFailureInterceptor : SaveChangesInterceptor
+    {
+        private int failuresRemaining = 1;
+
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            var entries = eventData.Context?.ChangeTracker.Entries<CharacterVoiceProfile>().ToArray() ?? [];
+            if (entries.Any(entry => entry.State == EntityState.Deleted
+                    && entry.Entity.Mode == CharacterVoiceProfileMode.Design)
+                && Interlocked.Exchange(ref failuresRemaining, 0) == 1)
+            {
+                throw new InvalidOperationException("離線模擬 replacement commit 失敗。");
+            }
+
+            return base.SavingChangesAsync(eventData, result, cancellationToken);
+        }
+    }
+
+    private sealed class ReadySaveFailureInterceptor : SaveChangesInterceptor
+    {
+        private int failuresRemaining = 1;
+
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            var shouldFail = eventData.Context?.ChangeTracker.Entries<CharacterVoiceProfile>()
+                .Any(entry => entry.State == EntityState.Modified
+                    && entry.Entity.Mode == CharacterVoiceProfileMode.Clone
+                    && entry.Entity.Status == CharacterVoiceProfileStatus.Ready
+                    && entry.Entity.ConfirmationTranscriptIntent is not null) == true;
+            if (shouldFail && Interlocked.Exchange(ref failuresRemaining, 0) == 1)
+            {
+                throw new InvalidOperationException("離線模擬 remote confirm 後本地 Ready commit 失敗。");
+            }
+
+            return base.SavingChangesAsync(eventData, result, cancellationToken);
+        }
+    }
+
+    private sealed class FakeThreeWaVoiceProfileClient : IThreeWaVoiceProfileClient
+    {
+        public VoiceProfilePrepareResult PrepareResult { get; set; } =
+            new("fake-profile-task", DraftTranscript: null);
+        public Exception? PrepareException { get; set; }
+        public Exception? DeleteException { get; set; }
+        public int PrepareCount { get; private set; }
+        public int DeleteCount { get; private set; }
+        public int StatusCount { get; private set; }
+        public int ConfirmCount { get; private set; }
+        public string? ExpectedText { get; private set; }
+        public string? ConsentType { get; private set; }
+        public string? ConfirmedTranscript { get; private set; }
+        public bool PrepareCancellationCanBeCanceled { get; private set; }
+        public TaskCompletionSource<bool>? PrepareStarted { get; init; }
+        public TaskCompletionSource<bool>? ReleasePrepare { get; init; }
+        public List<string> DeletedTaskIds { get; } = [];
+        public VoiceProfileStatusResult StatusResult { get; set; } =
+            new("running", false, null, false);
+
+        public async Task<VoiceProfilePrepareResult> PrepareAsync(
+            Stream referenceWav,
+            string fileName,
+            string profileName,
+            string consentType,
+            string expectedText,
+            CancellationToken cancellationToken)
+        {
+            PrepareCount++;
+            ExpectedText = expectedText;
+            ConsentType = consentType;
+            PrepareCancellationCanBeCanceled = cancellationToken.CanBeCanceled;
+            PrepareStarted?.TrySetResult(true);
+            if (ReleasePrepare is not null)
+            {
+                await ReleasePrepare.Task.WaitAsync(cancellationToken);
+            }
+
+            if (PrepareException is not null)
+            {
+                throw PrepareException;
+            }
+
+            return PrepareResult;
+        }
+
+        public Task<VoiceProfileStatusResult> GetStatusAsync(
+            string taskId,
+            CancellationToken cancellationToken)
+        {
+            StatusCount++;
+            return Task.FromResult(StatusResult);
+        }
+
+        public Task ConfirmAsync(
+            string taskId,
+            string transcript,
+            CancellationToken cancellationToken)
+        {
+            ConfirmCount++;
+            ConfirmedTranscript = transcript;
+            return Task.CompletedTask;
+        }
+
+        public Task DeleteProfileAsync(string taskId, CancellationToken cancellationToken)
+        {
+            DeleteCount++;
+            DeletedTaskIds.Add(taskId);
+            return DeleteException is null
+                ? Task.CompletedTask
+                : Task.FromException(DeleteException);
+        }
+    }
 
     private sealed class FakeThreeWaSynthesisClient(byte[] audio, string? contentType)
         : IThreeWaSynthesisClient

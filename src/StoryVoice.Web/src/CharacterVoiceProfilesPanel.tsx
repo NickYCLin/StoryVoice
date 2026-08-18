@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
 
 import { apiUrl, fetchJson, responseProblem } from './api'
 
@@ -41,6 +41,21 @@ type LoadedProfiles = {
   items: VoiceProfile[]
 }
 
+type ConsentReceiptSummary = {
+  fileIdentity: string
+  schema: string
+  recorderName: string
+  recordingDate: string
+  consentSignedDate: string
+  consentType: string
+  usageScopes: string[]
+}
+
+type ConsentReceiptState = {
+  summary: ConsentReceiptSummary | null
+  error: string | null
+}
+
 const SLOTS: Slot[] = [
   { sceneCode: null, label: '基礎聲線', description: '沒有更精確情境時的預設聲音，也是日常對話狀態使用的聲音' },
   { sceneCode: 'nervous', label: '緊張', description: '感到緊張或不安時' },
@@ -50,6 +65,32 @@ const SLOTS: Slot[] = [
 ]
 
 const DEFAULT_PREVIEW_TEXT = '你好，這是我的聲音示範。'
+const MAX_REFERENCE_AUDIO_BYTES = 10 * 1024 * 1024
+const MAX_CONSENT_RECEIPT_BYTES = 32 * 1024
+const CONSENT_RECEIPT_SCHEMA = 'storyvoice-clone-consent-receipt/v2'
+const SUBJECT_ATTESTATION_VERSION = 'storyvoice-clone-subject-consent/v1'
+const PRIVATE_EVALUATION_SCOPE = 'storyvoice_private_evaluation'
+const FORMAL_NARRATION_SCOPE = 'storyvoice_formal_narration'
+const CONSENT_TYPES = new Set(['self_recorded', 'explicit_permission', 'licensed_voice'])
+const CONSENT_SCOPES = new Set([
+  PRIVATE_EVALUATION_SCOPE,
+  FORMAL_NARRATION_SCOPE,
+  'public_distribution',
+  'commercial_use',
+])
+const RECEIPT_PROPERTIES = new Set([
+  'schema',
+  'recorderName',
+  'recordingDate',
+  'consentSignedDate',
+  'consentType',
+  'usageScopes',
+  'recordingSha256',
+  'expectedTranscriptCanonicalSha256',
+  'consentSha256',
+  'subjectAttestationVersion',
+  'generatedAtUtc',
+])
 // Code-pinned to the verified provider contract; this must not be an environment toggle.
 const DESIGN_VOICE_AVAILABLE = false
 
@@ -92,11 +133,71 @@ function previewSlotLabel(profile: VoiceProfile) {
   return SLOTS.find((slot) => slot.sceneCode === profile.sceneCode)?.label ?? '情境聲線'
 }
 
-const CONSENT_OPTIONS: Array<{ value: string; label: string }> = [
-  { value: 'self_recorded', label: '本人親自錄製' },
-  { value: 'explicit_permission', label: '已取得聲音所有人明確同意' },
-  { value: 'licensed_voice', label: '已取得合法授權的聲音' },
-]
+const CONSENT_TYPE_LABEL: Record<string, string> = {
+  self_recorded: '本人親自錄製',
+  explicit_permission: '已取得聲音所有人明確同意',
+  licensed_voice: '已取得合法授權的聲音',
+}
+
+const CONSENT_SCOPE_LABEL: Record<string, string> = {
+  [PRIVATE_EVALUATION_SCOPE]: 'StoryVoice 私人評估／試音',
+  [FORMAL_NARRATION_SCOPE]: 'StoryVoice 正式有聲書製作',
+  public_distribution: '公開散布',
+  commercial_use: '商業使用',
+}
+
+function receiptFileIdentity(file: File) {
+  return `${file.name}:${file.size}:${file.lastModified}`
+}
+
+async function parseConsentReceipt(file: File): Promise<ConsentReceiptSummary> {
+  if (file.size === 0) throw new Error('授權 receipt 不可為空白。')
+  if (file.size > MAX_CONSENT_RECEIPT_BYTES) throw new Error('授權 receipt 不可超過 32 KiB。')
+  if (!file.name.toLowerCase().endsWith('.json')) throw new Error('授權 receipt 必須是 JSON 檔案。')
+
+  let receipt: unknown
+  try {
+    receipt = JSON.parse(await file.text())
+  } catch {
+    throw new Error('授權 receipt 不是有效的 JSON。')
+  }
+
+  if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt)) {
+    throw new Error('授權 receipt 根節點必須是 JSON object。')
+  }
+
+  const data = receipt as Record<string, unknown>
+  const keys = Object.keys(data)
+  if (keys.length !== RECEIPT_PROPERTIES.size || keys.some((key) => !RECEIPT_PROPERTIES.has(key))) {
+    throw new Error('授權 receipt 的必要欄位或版本不完整。')
+  }
+  if (data.schema !== CONSENT_RECEIPT_SCHEMA
+    || data.subjectAttestationVersion !== SUBJECT_ATTESTATION_VERSION) {
+    throw new Error('授權 receipt 版本不受支援。')
+  }
+  if (typeof data.recorderName !== 'string' || !data.recorderName.trim()
+    || typeof data.recordingDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(data.recordingDate)
+    || typeof data.consentSignedDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(data.consentSignedDate)
+    || typeof data.consentType !== 'string' || !CONSENT_TYPES.has(data.consentType)) {
+    throw new Error('授權 receipt 的錄音者、日期或同意類型無效。')
+  }
+  if (!Array.isArray(data.usageScopes)
+    || data.usageScopes.some((scope) => typeof scope !== 'string' || !CONSENT_SCOPES.has(scope))
+    || new Set(data.usageScopes).size !== data.usageScopes.length
+    || !data.usageScopes.includes(PRIVATE_EVALUATION_SCOPE)) {
+    throw new Error('授權 receipt 必須明確包含有效且不重複的私人評估 scope。')
+  }
+
+  return {
+    fileIdentity: receiptFileIdentity(file),
+    schema: data.schema,
+    recorderName: data.recorderName,
+    recordingDate: data.recordingDate,
+    consentSignedDate: data.consentSignedDate,
+    consentType: data.consentType,
+    usageScopes: data.usageScopes as string[],
+  }
+}
 
 const STATUS_LABEL: Record<VoiceProfile['status'], string> = {
   Pending: '處理中',
@@ -134,7 +235,7 @@ export function CharacterVoiceProfilesPanel({ characterProfileId, characterName,
   const [openSlot, setOpenSlot] = useState<string | null>(null)
   const [mode, setMode] = useState<Record<string, 'Design' | 'Clone'>>({})
   const [promptText, setPromptText] = useState<Record<string, string>>({})
-  const [consentType, setConsentType] = useState<Record<string, string>>({})
+  const [consentReceipts, setConsentReceipts] = useState<Record<string, ConsentReceiptState>>({})
   const [transcriptDraft, setTranscriptDraft] = useState<Record<string, string>>({})
   const [previewing, setPreviewing] = useState<PreviewRequestState | null>(null)
   const [previewAudio, setPreviewAudio] = useState<PreviewAudio | null>(null)
@@ -169,6 +270,7 @@ export function CharacterVoiceProfilesPanel({ characterProfileId, characterName,
     loadGenerationRef.current += 1
     const controller = new AbortController()
     setProfilesState(null)
+    setConsentReceipts({})
     void load(controller.signal)
     return () => {
       loadGenerationRef.current += 1
@@ -192,6 +294,90 @@ export function CharacterVoiceProfilesPanel({ characterProfileId, characterName,
 
   function profileFor(sceneCode: string | null) {
     return profiles?.find((profile) => (sceneCode === null ? profile.kind === 'Base' : profile.sceneCode === sceneCode)) ?? null
+  }
+
+  async function readConsentReceipt(event: ChangeEvent<HTMLInputElement>, receiptKey: string) {
+    const input = event.currentTarget
+    const file = input.files?.[0]
+    if (!file) {
+      setConsentReceipts((current) => ({
+        ...current,
+        [receiptKey]: { summary: null, error: '請選擇授權 receipt JSON。' },
+      }))
+      return
+    }
+
+    const identity = receiptFileIdentity(file)
+    try {
+      const summary = await parseConsentReceipt(file)
+      if (input.files?.[0] && receiptFileIdentity(input.files[0]) === identity) {
+        setConsentReceipts((current) => ({ ...current, [receiptKey]: { summary, error: null } }))
+      }
+    } catch (error) {
+      if (input.files?.[0] && receiptFileIdentity(input.files[0]) === identity) {
+        setConsentReceipts((current) => ({
+          ...current,
+          [receiptKey]: {
+            summary: null,
+            error: error instanceof Error ? error.message : '無法讀取授權 receipt。',
+          },
+        }))
+      }
+    }
+  }
+
+  function clearConsentReceipt(receiptKey: string) {
+    setConsentReceipts((current) => {
+      const next = { ...current }
+      delete next[receiptKey]
+      return next
+    })
+  }
+
+  function validateCloneForm(form: HTMLFormElement, receiptKey: string) {
+    const formData = new FormData(form)
+    const file = formData.get('referenceAudio')
+    if (!(file instanceof File) || file.size === 0) {
+      setMessage('請先選擇 WAV 參考錄音。')
+      return null
+    }
+    if (file.size > MAX_REFERENCE_AUDIO_BYTES) {
+      setMessage('參考音檔不可超過 10 MiB。')
+      return null
+    }
+
+    const expectedTranscript = formData.get('expectedTranscript')
+    if (typeof expectedTranscript !== 'string' || !expectedTranscript.trim()) {
+      setMessage('請輸入與參考錄音逐字一致的文字稿。')
+      return null
+    }
+    const canonicalTranscript = expectedTranscript.normalize('NFKC').trim()
+    if (/\p{Cc}|\p{Cf}/u.test(canonicalTranscript)) {
+      setMessage('逐字稿不可包含內嵌換行、控制或格式字元。')
+      return null
+    }
+
+    const receipt = formData.get('consentReceipt')
+    const receiptState = consentReceipts[receiptKey]
+    if (!(receipt instanceof File) || receipt.size === 0) {
+      setMessage('請選擇授權 receipt JSON。')
+      return null
+    }
+    if (receipt.size > MAX_CONSENT_RECEIPT_BYTES) {
+      setMessage('授權 receipt 不可超過 32 KiB。')
+      return null
+    }
+    if (!receiptState?.summary
+      || receiptState.summary.fileIdentity !== receiptFileIdentity(receipt)) {
+      setMessage(receiptState?.error ?? '請等待授權 receipt 驗證完成。')
+      return null
+    }
+    if (formData.get('rightsAttested') !== 'true') {
+      setMessage('請明確勾選已核對錄音者本人授權與 receipt 內容。')
+      return null
+    }
+
+    return formData
   }
 
   async function createDesigned(slotKey: string, sceneCode: string | null) {
@@ -223,17 +409,9 @@ export function CharacterVoiceProfilesPanel({ characterProfileId, characterName,
   async function createCloned(event: FormEvent<HTMLFormElement>, slotKey: string, sceneCode: string | null) {
     event.preventDefault()
     const form = event.currentTarget
-    const formData = new FormData(form)
-    const file = formData.get('referenceAudio')
-    if (!(file instanceof File) || file.size === 0) {
-      setMessage('請先選擇 WAV 參考錄音。')
-      return
-    }
-    if (file.size > 20 * 1024 * 1024) {
-      setMessage('參考音檔不可超過 20 MiB。')
-      return
-    }
-    formData.set('consentType', consentType[slotKey] ?? CONSENT_OPTIONS[0].value)
+    const receiptKey = `create:${slotKey}`
+    const formData = validateCloneForm(form, receiptKey)
+    if (!formData) return
 
     setBusySlot(slotKey)
     try {
@@ -245,11 +423,42 @@ export function CharacterVoiceProfilesPanel({ characterProfileId, characterName,
       })
       if (!response.ok) throw new Error(await responseProblem(response, '建立聲線失敗'))
       form.reset()
+      clearConsentReceipt(receiptKey)
       setOpenSlot(null)
       await load()
       setMessage('參考錄音已上傳，正在等待語音辨識草稿；完成後請回來確認文字稿。')
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '建立聲線失敗。')
+    } finally {
+      setBusySlot(null)
+    }
+  }
+
+  async function replaceDesignedWithClone(
+    event: FormEvent<HTMLFormElement>,
+    profile: VoiceProfile,
+  ) {
+    event.preventDefault()
+    const form = event.currentTarget
+    const receiptKey = `replace:${profile.id}`
+    const formData = validateCloneForm(form, receiptKey)
+    if (!formData) return
+
+    setBusySlot(profile.id)
+    try {
+      const response = await fetch(apiUrl(`${basePath(characterProfileId)}/${profile.id}/replace-with-clone`), {
+        method: 'POST',
+        body: formData,
+        credentials: 'same-origin',
+        headers: { 'X-CSRF-TOKEN': csrfToken },
+      })
+      if (!response.ok) throw new Error(await responseProblem(response, '取代聲線失敗'))
+      form.reset()
+      clearConsentReceipt(receiptKey)
+      await load()
+      setMessage('錄音已送出處理；原文字設計聲線只會在新任務建立成功後才被安全取代。')
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '取代聲線失敗。')
     } finally {
       setBusySlot(null)
     }
@@ -383,6 +592,60 @@ export function CharacterVoiceProfilesPanel({ characterProfileId, characterName,
     }
   }
 
+  function consentReceiptFields(receiptKey: string) {
+    const state = consentReceipts[receiptKey]
+    const summary = state?.summary
+    const privateOnly = summary
+      && !summary.usageScopes.includes(FORMAL_NARRATION_SCOPE)
+
+    return (
+      <>
+        <label className="block space-y-1 text-xs text-stone-600">
+          <span>授權 receipt v2（JSON，最多 32 KiB）</span>
+          <input
+            accept="application/json,.json"
+            className="auth-input w-full text-xs"
+            name="consentReceipt"
+            onChange={(event) => void readConsentReceipt(event, receiptKey)}
+            required
+            type="file"
+          />
+        </label>
+        {state?.error && (
+          <p className="rounded-lg border border-rose-200 bg-rose-50 px-2 py-1 text-xs leading-5 text-rose-700">
+            {state.error}
+          </p>
+        )}
+        {summary && (
+          <div className="space-y-1 rounded-lg border border-stone-200 bg-stone-50 p-2 text-xs leading-5 text-stone-700">
+            <p className="font-medium text-stone-800">Receipt 唯讀摘要</p>
+            <p>錄音者：{summary.recorderName}</p>
+            <p>錄音日：{summary.recordingDate} · 簽署日：{summary.consentSignedDate}</p>
+            <p>同意類型：{CONSENT_TYPE_LABEL[summary.consentType]}</p>
+            <p>允許範圍：{summary.usageScopes.map((scope) => CONSENT_SCOPE_LABEL[scope]).join('、')}</p>
+            {privateOnly && (
+              <p className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1 font-medium text-amber-800">
+                這份 receipt 只允許私人評估／試音；不會因此開啟正式有聲書製作。
+              </p>
+            )}
+            {!privateOnly && (
+              <p className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1 font-medium text-amber-800">
+                Receipt 內的正式／公開 scope 目前只作為稽核聲明保存；尚未經 StoryVoice
+                可信簽章或人工核准，仍只能私人試音，不會開啟正式有聲書。
+              </p>
+            )}
+          </div>
+        )}
+        <label className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs leading-5 text-amber-900">
+          <input className="mt-1" name="rightsAttested" required type="checkbox" value="true" />
+          <span>
+            我已逐項核對錄音者本人授權、錄音檔與 receipt；提交只依 receipt 既有 scope，不會擴張授權。
+          </span>
+        </label>
+      </>
+    )
+  }
+
   return (
     <div className="rounded-xl border border-stone-200 bg-white p-4">
       <p className="text-sm text-stone-500">
@@ -474,15 +737,14 @@ export function CharacterVoiceProfilesPanel({ characterProfileId, characterName,
                       {slotMode === 'Clone' && (
                         <form className="space-y-2" onSubmit={(event) => void createCloned(event, slotKey, slot.sceneCode)}>
                           <input accept="audio/wav" className="auth-input w-full text-xs" name="referenceAudio" required type="file" />
-                          <select
-                            className="auth-input w-full"
-                            onChange={(event) => setConsentType((current) => ({ ...current, [slotKey]: event.target.value }))}
-                            value={consentType[slotKey] ?? CONSENT_OPTIONS[0].value}
-                          >
-                            {CONSENT_OPTIONS.map((option) => (
-                              <option key={option.value} value={option.value}>{option.label}</option>
-                            ))}
-                          </select>
+                          <textarea
+                            className="auth-input min-h-16 w-full"
+                            maxLength={2000}
+                            name="expectedTranscript"
+                            placeholder="逐字輸入錄音中實際說出的內容，不要加入角色名或舞台指示"
+                            required
+                          />
+                          {consentReceiptFields(`create:${slotKey}`)}
                           <div className="flex gap-2">
                             <button
                               className="secondary-button flex-1 px-3 py-2 text-xs disabled:cursor-wait disabled:opacity-60"
@@ -491,7 +753,14 @@ export function CharacterVoiceProfilesPanel({ characterProfileId, characterName,
                             >
                               上傳並建立
                             </button>
-                            <button className="px-3 py-2 text-xs text-stone-500" onClick={() => setOpenSlot(null)} type="button">
+                            <button
+                              className="px-3 py-2 text-xs text-stone-500"
+                              onClick={() => {
+                                clearConsentReceipt(`create:${slotKey}`)
+                                setOpenSlot(null)
+                              }}
+                              type="button"
+                            >
                               取消
                             </button>
                           </div>
@@ -581,6 +850,33 @@ export function CharacterVoiceProfilesPanel({ characterProfileId, characterName,
                     >
                       用保存的錄音重建
                     </button>
+                  )}
+
+                  {designUnavailable && profile.kind === 'Base' && (
+                    <form
+                      className="space-y-2 rounded-lg border border-amber-200 bg-white p-2"
+                      onSubmit={(event) => void replaceDesignedWithClone(event, profile)}
+                    >
+                      <p className="leading-5 text-amber-800">
+                        上傳後會先建立 3wa 任務；成功時才以交易取代這筆文字設計聲線。
+                      </p>
+                      <input accept="audio/wav" className="auth-input w-full text-xs" name="referenceAudio" required type="file" />
+                      <textarea
+                        className="auth-input min-h-16 w-full"
+                        maxLength={2000}
+                        name="expectedTranscript"
+                        placeholder="逐字輸入錄音中實際說出的內容"
+                        required
+                      />
+                      {consentReceiptFields(`replace:${profile.id}`)}
+                      <button
+                        className="secondary-button w-full px-3 py-2 text-xs disabled:cursor-wait disabled:opacity-60"
+                        disabled={isBusy}
+                        type="submit"
+                      >
+                        以授權錄音安全取代
+                      </button>
+                    </form>
                   )}
 
                   <button

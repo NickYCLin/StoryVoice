@@ -49,6 +49,29 @@ public sealed class StoryPipelineWorkerModeTests
     }
 
     [Fact]
+    public void Worker_rejects_untrusted_3wa_formal_narration_before_loading_plans_or_voice_profiles()
+    {
+        var source = File.ReadAllText(GetWorkerSourcePath());
+        var gate = source.IndexOf(
+            "ThreeWaSynthesisCapabilities.SupportsTrustedCloneFormalNarration",
+            StringComparison.Ordinal);
+        var loadPlans = source.IndexOf("LoadChapterPlanSourcesAsync(", StringComparison.Ordinal);
+        var loadProfiles = source.IndexOf("LoadCharacterVoiceProfilesAsync(", StringComparison.Ordinal);
+
+        Assert.False(ThreeWaSynthesisCapabilities.SupportsTrustedCloneFormalNarration);
+        Assert.True(gate >= 0);
+        Assert.True(loadPlans > gate);
+        Assert.True(loadProfiles > gate);
+        Assert.Contains(
+            nameof(ThreeWaSynthesisCapabilities.CloneFormalNarrationUnavailableCode),
+            source,
+            StringComparison.Ordinal);
+        Assert.Equal(
+            "3wa_clone_formal_authorization_unverified",
+            ThreeWaSynthesisCapabilities.CloneFormalNarrationUnavailableCode);
+    }
+
+    [Fact]
     public void Worker_copies_narrator_and_every_character_provider_contract_into_the_dispatch_request()
     {
         var ownerId = Guid.NewGuid();

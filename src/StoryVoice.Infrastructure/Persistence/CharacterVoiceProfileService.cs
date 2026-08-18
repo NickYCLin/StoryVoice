@@ -1,4 +1,8 @@
+using System.Data;
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using StoryVoice.Application.Authentication;
 using StoryVoice.Application.Narrations;
 using StoryVoice.Domain.Characters;
@@ -20,7 +24,8 @@ internal sealed class CharacterVoiceProfileService(
     StoryVoiceDbContext dbContext,
     ICurrentUser currentUser,
     LocalCharacterVoiceAudioStorage audioStorage,
-    IThreeWaVoiceProfileClient threeWaClient) : ICharacterVoiceProfileService
+    IThreeWaVoiceProfileClient threeWaClient,
+    IOptions<ThreeWaAiHubOptions> threeWaOptions) : ICharacterVoiceProfileService
 {
     public async Task<IReadOnlyList<CharacterVoiceProfileResponse>?> ListAsync(
         Guid characterProfileId,
@@ -41,13 +46,93 @@ internal sealed class CharacterVoiceProfileService(
         return profiles.Select(ToResponse).ToArray();
     }
 
+    public async Task<IReadOnlyList<CharacterVoiceProfileOperationResponse>?> ListCloneOperationsAsync(
+        Guid characterProfileId,
+        CancellationToken cancellationToken)
+    {
+        var ownerId = EnsureCurrentOwnerId();
+        if (await LoadCharacterProfileAsync(ownerId, characterProfileId, cancellationToken) is null)
+        {
+            return null;
+        }
+
+        var operations = await dbContext.CharacterVoiceProfileOperations
+            .AsNoTracking()
+            .Where(operation => operation.OwnerId == ownerId
+                && operation.CharacterProfileId == characterProfileId)
+            .OrderByDescending(operation => operation.CreatedAt)
+            .ToListAsync(cancellationToken);
+        return operations.Select(ToOperationResponse).ToArray();
+    }
+
+    public async Task<CharacterVoiceProfileResponse?> ResumeCloneActivationAsync(
+        Guid characterProfileId,
+        Guid operationId,
+        CancellationToken cancellationToken)
+    {
+        var ownerId = EnsureCurrentOwnerId();
+        if (await LoadCharacterProfileAsync(ownerId, characterProfileId, cancellationToken) is null)
+        {
+            return null;
+        }
+
+        var operation = await dbContext.CharacterVoiceProfileOperations.SingleOrDefaultAsync(
+            candidate => candidate.OwnerId == ownerId
+                && candidate.CharacterProfileId == characterProfileId
+                && candidate.Id == operationId,
+            cancellationToken);
+        if (operation is null)
+        {
+            return null;
+        }
+
+        if (operation.State == CharacterVoiceProfileOperationState.Activated)
+        {
+            var activatedProfile = await LoadOperationProfileAsync(operation, cancellationToken);
+            return activatedProfile is null
+                ? throw new InvalidOperationException("activated_profile_missing")
+                : ToResponse(activatedProfile);
+        }
+
+        if (operation.State == CharacterVoiceProfileOperationState.NeedsAttention
+            && operation.SafeErrorCode == "local_activation_uncertain")
+        {
+            var resolvedProfile = await LoadOperationProfileAsync(operation, cancellationToken);
+            if (resolvedProfile is not null)
+            {
+                operation.MarkActivationResolved(DateTimeOffset.UtcNow);
+                await dbContext.SaveChangesAsync(CancellationToken.None);
+                return ToResponse(resolvedProfile);
+            }
+
+            operation.ResumeActivation(DateTimeOffset.UtcNow);
+            await dbContext.SaveChangesAsync(CancellationToken.None);
+        }
+        else if (operation.State != CharacterVoiceProfileOperationState.RemotePrepared)
+        {
+            throw new InvalidOperationException(GetOperationAttentionCode(operation));
+        }
+
+        if (operation.RemoteTaskId is null
+            || operation.RemoteTaskId.Length > CharacterVoiceProfileOperation.MaximumCanonicalRemoteTaskIdLength)
+        {
+            throw new InvalidOperationException("remote_task_id_contract_mismatch");
+        }
+
+        // This route is activation-only. It never opens the WAV and never calls profile_prepare.
+        return await ActivatePreparedOperationAsync(ownerId, operation.Id);
+    }
+
     public async Task<CharacterVoiceProfileResponse?> CreateClonedAsync(
         Guid characterProfileId,
         string kind,
         string? sceneCode,
-        string consentType,
+        string expectedTranscript,
         Stream referenceAudio,
         string referenceAudioFileName,
+        Stream consentReceipt,
+        string consentReceiptFileName,
+        bool rightsAttested,
         CancellationToken cancellationToken)
     {
         var ownerId = EnsureCurrentOwnerId();
@@ -59,56 +144,69 @@ internal sealed class CharacterVoiceProfileService(
         }
 
         await EnsureNoDuplicateAsync(ownerId, characterProfileId, parsedKind, sceneCode, cancellationToken);
+        await EnsureNoActiveOperationAsync(
+            ownerId,
+            characterProfileId,
+            parsedKind,
+            sceneCode,
+            cancellationToken);
+        var operation = await StageOperationAsync(
+            ownerId,
+            characterProfileId,
+            oldProfile: null,
+            parsedKind,
+            sceneCode,
+            expectedTranscript,
+            referenceAudio,
+            referenceAudioFileName,
+            consentReceipt,
+            consentReceiptFileName,
+            rightsAttested,
+            cancellationToken);
+        return await PrepareAndActivateAsync(ownerId, character, operation);
+    }
 
-        var stored = await audioStorage.SaveAsync(referenceAudio, referenceAudioFileName, cancellationToken);
-        try
+    public async Task<CharacterVoiceProfileResponse?> ReplaceDesignedWithCloneAsync(
+        Guid characterProfileId,
+        Guid profileId,
+        string expectedTranscript,
+        Stream referenceAudio,
+        string referenceAudioFileName,
+        Stream consentReceipt,
+        string consentReceiptFileName,
+        bool rightsAttested,
+        CancellationToken cancellationToken)
+    {
+        var ownerId = EnsureCurrentOwnerId();
+        var existing = await LoadProfileAsync(ownerId, characterProfileId, profileId, cancellationToken);
+        if (existing is null)
         {
-            var now = DateTimeOffset.UtcNow;
-            var durationSeconds = await AudioDurationProbe.TryProbeSecondsAsync(
-                audioStorage.ResolveFullPath(stored.RelativePath),
-                cancellationToken);
-            var profile = CharacterVoiceProfile.CreateClone(
-                Guid.NewGuid(),
-                ownerId,
-                characterProfileId,
-                parsedKind,
-                sceneCode,
-                consentType,
-                stored.RelativePath,
-                stored.Sha256Hex,
-                durationSeconds,
-                ownerId,
-                now);
-
-            await using (var uploadStream = File.OpenRead(audioStorage.ResolveFullPath(stored.RelativePath)))
-            {
-                var prepared = await threeWaClient.PrepareAsync(
-                    uploadStream,
-                    referenceAudioFileName,
-                    BuildProfileName(character.CanonicalName, parsedKind, sceneCode),
-                    consentType,
-                    promptText: null,
-                    cancellationToken);
-
-                if (!string.IsNullOrWhiteSpace(prepared.DraftTranscript))
-                {
-                    profile.AttachDraftTranscript(prepared.TaskId, prepared.DraftTranscript, now);
-                }
-                else
-                {
-                    profile.AttachPendingTask(prepared.TaskId, now);
-                }
-            }
-
-            dbContext.CharacterVoiceProfiles.Add(profile);
-            await dbContext.SaveChangesAsync(cancellationToken);
-            return ToResponse(profile);
+            return null;
         }
-        catch
-        {
-            await audioStorage.DeleteAsync(stored.RelativePath, cancellationToken);
-            throw;
-        }
+
+        EnsureReplaceableBaseDesign(existing);
+        var character = await LoadCharacterProfileAsync(ownerId, characterProfileId, cancellationToken)
+            ?? throw new InvalidOperationException("找不到這個聲線所屬的角色。");
+        await EnsureNoActiveOperationAsync(
+            ownerId,
+            characterProfileId,
+            CharacterVoiceProfileKind.Base,
+            sceneCode: null,
+            cancellationToken);
+        var operation = await StageOperationAsync(
+            ownerId,
+            characterProfileId,
+            existing,
+            CharacterVoiceProfileKind.Base,
+            sceneCode: null,
+            expectedTranscript,
+            referenceAudio,
+            referenceAudioFileName,
+            consentReceipt,
+            consentReceiptFileName,
+            rightsAttested,
+            cancellationToken);
+        return await PrepareAndActivateAsync(ownerId, character, operation);
     }
 
     public async Task<CharacterVoiceProfileResponse?> CreateDesignedAsync(
@@ -174,7 +272,44 @@ internal sealed class CharacterVoiceProfileService(
         {
             profile.MarkFailed(now);
         }
-        else if (!status.TranscriptConfirmed && !string.IsNullOrWhiteSpace(status.DraftTranscript))
+        else if (status.TranscriptConfirmed)
+        {
+            var confirmationIntent = profile.ConfirmationTranscriptIntent;
+            if (confirmationIntent is null)
+            {
+                // Provider state is never allowed to invent the human confirmation intent. This
+                // includes legacy rows: an operator must explicitly confirm a final transcript.
+                throw new InvalidOperationException("confirmation_intent_missing");
+            }
+
+            if (!string.IsNullOrWhiteSpace(status.DraftTranscript))
+            {
+                string normalizedProviderTranscript;
+                try
+                {
+                    normalizedProviderTranscript = StoryVoice.Domain.Series.SeriesValueValidator.NormalizePrintable(
+                        status.DraftTranscript,
+                        2_000,
+                        nameof(status.DraftTranscript));
+                }
+                catch (ArgumentException)
+                {
+                    throw new InvalidOperationException("confirmation_intent_mismatch");
+                }
+
+                if (!string.Equals(
+                        confirmationIntent,
+                        normalizedProviderTranscript,
+                        StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException("confirmation_intent_mismatch");
+                }
+            }
+
+            profile.CompleteTranscriptConfirmation(now);
+        }
+        else if (profile.ConfirmationTranscriptIntent is null
+            && !string.IsNullOrWhiteSpace(status.DraftTranscript))
         {
             profile.AttachDraftTranscript(profile.VoiceProfileTaskId!, status.DraftTranscript, now);
         }
@@ -197,10 +332,59 @@ internal sealed class CharacterVoiceProfileService(
             return null;
         }
 
-        await threeWaClient.ConfirmAsync(profile.VoiceProfileTaskId!, request.Transcript, cancellationToken);
-        profile.ConfirmTranscript(request.Transcript, DateTimeOffset.UtcNow);
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return ToResponse(profile);
+        // Persist the exact intended final transcript before mutating the provider. A remote
+        // success followed by a local failure can then be reconciled by refresh-status without
+        // guessing from the mutable ASR draft.
+        profile.StageTranscriptConfirmation(request.Transcript, DateTimeOffset.UtcNow);
+        var intendedTranscript = profile.ConfirmationTranscriptIntent!;
+        try
+        {
+            await dbContext.SaveChangesAsync(CancellationToken.None);
+        }
+        catch
+        {
+            dbContext.ChangeTracker.Clear();
+            profile = await LoadProfileAsync(
+                ownerId,
+                characterProfileId,
+                profileId,
+                CancellationToken.None);
+            if (profile?.Status != CharacterVoiceProfileStatus.AwaitingTranscriptConfirmation
+                || profile.ConfirmationTranscriptIntent != intendedTranscript)
+            {
+                throw new InvalidOperationException(
+                    "逐字稿確認意圖的本地提交結果不明；未能證明持久化前不會呼叫 3wa。");
+            }
+        }
+
+        await threeWaClient.ConfirmAsync(
+            profile.VoiceProfileTaskId!,
+            intendedTranscript,
+            CancellationToken.None);
+        profile.CompleteTranscriptConfirmation(DateTimeOffset.UtcNow);
+        try
+        {
+            await dbContext.SaveChangesAsync(CancellationToken.None);
+            return ToResponse(profile);
+        }
+        catch
+        {
+            dbContext.ChangeTracker.Clear();
+            var persisted = await LoadProfileAsync(
+                ownerId,
+                characterProfileId,
+                profileId,
+                CancellationToken.None);
+            if (persisted?.Status == CharacterVoiceProfileStatus.Ready
+                && persisted.Transcript == intendedTranscript
+                && persisted.ConfirmationTranscriptIntent == intendedTranscript)
+            {
+                return ToResponse(persisted);
+            }
+
+            throw new InvalidOperationException(
+                "3wa 已接受逐字稿確認，但本地完成提交尚未能證明；確認意圖已保留，可用狀態重新對帳。");
+        }
     }
 
     public async Task<CharacterVoiceProfileResponse?> RebuildAsync(
@@ -215,35 +399,62 @@ internal sealed class CharacterVoiceProfileService(
             return null;
         }
 
-        var character = await LoadCharacterProfileAsync(ownerId, characterProfileId, cancellationToken)
-            ?? throw new InvalidOperationException("找不到這個聲線所屬的角色。");
-
-        await using var uploadStream = File.OpenRead(audioStorage.ResolveFullPath(profile.ReferenceAudioRelativePath!));
-        var prepared = await threeWaClient.PrepareAsync(
-            uploadStream,
-            Path.GetFileName(profile.ReferenceAudioRelativePath!),
-            BuildProfileName(character.CanonicalName, profile.Kind, profile.SceneCode),
-            profile.ConsentType!,
-            promptText: profile.Transcript,
-            cancellationToken);
-
-        await threeWaClient.ConfirmAsync(prepared.TaskId, profile.Transcript!, cancellationToken);
-        profile.ReattachRebuiltTask(prepared.TaskId, DateTimeOffset.UtcNow);
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return ToResponse(profile);
+        throw new InvalidOperationException(
+            "克隆聲線重建目前已安全停用；在舊、新遠端 task 都能由 durable operation 追蹤前不會呼叫 3wa。");
     }
 
     public async Task<bool> DeleteAsync(Guid characterProfileId, Guid profileId, CancellationToken cancellationToken)
     {
         var ownerId = EnsureCurrentOwnerId();
+        await using var mutationLease = await CharacterVoiceMutationCoordinator.AcquireAsync(
+            ownerId,
+            characterProfileId,
+            cancellationToken);
+        await using var transaction = dbContext.Database.IsRelational()
+            ? await dbContext.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken)
+            : null;
+        var character = await LockCharacterForVoiceMutationAsync(
+            ownerId,
+            characterProfileId,
+            cancellationToken);
+        if (character is null)
+        {
+            return false;
+        }
+
         var profile = await LoadProfileAsync(ownerId, characterProfileId, profileId, cancellationToken);
         if (profile is null)
         {
             return false;
         }
 
+        if (profile.Mode == CharacterVoiceProfileMode.Clone)
+        {
+            throw new InvalidOperationException(
+                "克隆聲線刪除目前已安全停用；在遠端刪除可持久化確認前會保留授權、task 與 WAV 稽核資料。");
+        }
+
+        var hasActiveReplacement = await dbContext.CharacterVoiceProfileOperations.AnyAsync(
+            operation => operation.OwnerId == ownerId
+                && operation.CharacterProfileId == characterProfileId
+                && operation.OldProfileId == profileId
+                && (operation.State == CharacterVoiceProfileOperationState.Staged
+                    || operation.State == CharacterVoiceProfileOperationState.RemotePrepared
+                    || operation.State == CharacterVoiceProfileOperationState.NeedsAttention),
+            cancellationToken);
+        if (hasActiveReplacement)
+        {
+            throw new InvalidOperationException(
+                "這組文字設計聲線已有待處理的 Clone replacement；完成或人工處理前禁止刪除。");
+        }
+
         dbContext.CharacterVoiceProfiles.Remove(profile);
         await dbContext.SaveChangesAsync(cancellationToken);
+        if (transaction is not null)
+        {
+            await transaction.CommitAsync(cancellationToken);
+        }
+
         if (profile.ReferenceAudioRelativePath is not null)
         {
             await audioStorage.DeleteAsync(profile.ReferenceAudioRelativePath, cancellationToken);
@@ -277,6 +488,27 @@ internal sealed class CharacterVoiceProfileService(
             character => character.OwnerId == ownerId && character.Id == characterProfileId,
             cancellationToken);
 
+    private async Task<CharacterProfile?> LockCharacterForVoiceMutationAsync(
+        Guid ownerId,
+        Guid characterProfileId,
+        CancellationToken cancellationToken)
+    {
+        if (!dbContext.Database.IsRelational())
+        {
+            return await LoadCharacterProfileAsync(ownerId, characterProfileId, cancellationToken);
+        }
+
+        return await dbContext.CharacterProfiles
+            .FromSqlInterpolated(
+                $"""
+                SELECT *
+                FROM character_profiles
+                WHERE "OwnerId" = {ownerId} AND "Id" = {characterProfileId}
+                FOR UPDATE
+                """)
+            .SingleOrDefaultAsync(cancellationToken);
+    }
+
     private async Task<CharacterVoiceProfile?> LoadProfileAsync(
         Guid ownerId,
         Guid characterProfileId,
@@ -287,6 +519,23 @@ internal sealed class CharacterVoiceProfileService(
                 && profile.CharacterProfileId == characterProfileId
                 && profile.Id == profileId,
             cancellationToken);
+
+    private async Task<CharacterVoiceProfile?> LoadOperationProfileAsync(
+        CharacterVoiceProfileOperation operation,
+        CancellationToken cancellationToken)
+    {
+        var profile = await dbContext.CharacterVoiceProfiles.SingleOrDefaultAsync(
+            candidate => candidate.OwnerId == operation.OwnerId
+                && candidate.CharacterProfileId == operation.CharacterProfileId
+                && candidate.Id == operation.NewProfileId,
+            cancellationToken);
+        return profile is not null
+            && profile.Mode == CharacterVoiceProfileMode.Clone
+            && profile.VoiceProfileTaskId == operation.RemoteTaskId
+            && profile.ReferenceAudioRelativePath == operation.ReferenceAudioRelativePath
+                ? profile
+                : null;
+    }
 
     private async Task EnsureNoDuplicateAsync(
         Guid ownerId,
@@ -311,10 +560,622 @@ internal sealed class CharacterVoiceProfileService(
         }
     }
 
-    private static string BuildProfileName(string characterName, CharacterVoiceProfileKind kind, string? sceneCode) =>
-        kind == CharacterVoiceProfileKind.Base
-            ? $"{characterName}-base"
-            : $"{characterName}-{sceneCode}";
+    private async Task<CharacterVoiceProfileOperation> StageOperationAsync(
+        Guid ownerId,
+        Guid characterProfileId,
+        CharacterVoiceProfile? oldProfile,
+        CharacterVoiceProfileKind kind,
+        string? sceneCode,
+        string expectedTranscript,
+        Stream referenceAudio,
+        string referenceAudioFileName,
+        Stream consentReceipt,
+        string consentReceiptFileName,
+        bool rightsAttested,
+        CancellationToken cancellationToken)
+    {
+        var canonicalExpectedTranscript = CharacterVoiceTranscriptCanonicalizer.Normalize(
+            expectedTranscript);
+        var stored = await audioStorage.SaveAsync(referenceAudio, referenceAudioFileName, cancellationToken);
+        CharacterVoiceProfileOperation? operation = null;
+        var preserveStoredAudio = false;
+        try
+        {
+            var validated = await ReferenceWavValidator.ValidateAsync(
+                audioStorage.ResolveFullPath(stored.RelativePath),
+                cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            var now = DateTimeOffset.UtcNow;
+            var consentEvidence = await CloneConsentReceiptValidator.ValidateAsync(
+                consentReceipt,
+                consentReceiptFileName,
+                rightsAttested,
+                stored.Sha256Hex,
+                canonicalExpectedTranscript,
+                now,
+                cancellationToken);
+
+            await using var mutationLease = await CharacterVoiceMutationCoordinator.AcquireAsync(
+                ownerId,
+                characterProfileId,
+                cancellationToken);
+            await using var transaction = dbContext.Database.IsRelational()
+                ? await dbContext.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken)
+                : null;
+            var lockedCharacter = await LockCharacterForVoiceMutationAsync(
+                ownerId,
+                characterProfileId,
+                cancellationToken);
+            if (lockedCharacter is null)
+            {
+                throw new InvalidOperationException("角色已被刪除；Clone operation 未送出至 3wa。");
+            }
+
+            if (oldProfile is null)
+            {
+                await EnsureNoDuplicateAsync(
+                    ownerId,
+                    characterProfileId,
+                    kind,
+                    sceneCode,
+                    cancellationToken);
+            }
+            else
+            {
+                var currentOldProfile = await LoadProfileAsync(
+                    ownerId,
+                    characterProfileId,
+                    oldProfile.Id,
+                    cancellationToken);
+                if (currentOldProfile is null
+                    || currentOldProfile.ConcurrencyStamp != oldProfile.ConcurrencyStamp)
+                {
+                    throw new InvalidOperationException(
+                        "要取代的文字設計聲線已經變更；Clone operation 未送出至 3wa。");
+                }
+
+                EnsureReplaceableBaseDesign(currentOldProfile);
+                oldProfile = currentOldProfile;
+            }
+
+            await EnsureNoActiveOperationAsync(
+                ownerId,
+                characterProfileId,
+                kind,
+                sceneCode,
+                cancellationToken);
+            operation = oldProfile is null
+                ? CharacterVoiceProfileOperation.StageCreate(
+                    Guid.NewGuid(),
+                    ownerId,
+                    characterProfileId,
+                    Guid.NewGuid(),
+                    kind,
+                    sceneCode,
+                    consentEvidence,
+                    canonicalExpectedTranscript,
+                    stored.RelativePath,
+                    stored.Sha256Hex,
+                    validated.DurationSeconds,
+                    ownerId,
+                    BuildCredentialKeyId(),
+                    now)
+                : CharacterVoiceProfileOperation.StageReplacement(
+                    Guid.NewGuid(),
+                    ownerId,
+                    characterProfileId,
+                    oldProfile.Id,
+                    oldProfile.ConcurrencyStamp,
+                    Guid.NewGuid(),
+                    consentEvidence,
+                    canonicalExpectedTranscript,
+                    stored.RelativePath,
+                    stored.Sha256Hex,
+                    validated.DurationSeconds,
+                    ownerId,
+                    BuildCredentialKeyId(),
+                    now);
+
+            dbContext.CharacterVoiceProfileOperations.Add(operation);
+            try
+            {
+                // From this durable stage onward no work is tied to RequestAborted.
+                await dbContext.SaveChangesAsync(CancellationToken.None);
+                if (transaction is not null)
+                {
+                    await transaction.CommitAsync(CancellationToken.None);
+                }
+
+                preserveStoredAudio = true;
+                return operation;
+            }
+            catch
+            {
+                if (transaction is not null)
+                {
+                    try
+                    {
+                        await transaction.DisposeAsync();
+                    }
+                    catch
+                    {
+                        // A failed transaction cleanup leaves the commit outcome unknown. Keep the
+                        // evidence file and continue trying the deterministic operation id.
+                        preserveStoredAudio = true;
+                    }
+                }
+
+                dbContext.ChangeTracker.Clear();
+                try
+                {
+                    var persisted = await dbContext.CharacterVoiceProfileOperations
+                        .SingleOrDefaultAsync(
+                            candidate => candidate.OwnerId == ownerId && candidate.Id == operation.Id,
+                            CancellationToken.None);
+                    if (persisted is not null)
+                    {
+                        preserveStoredAudio = true;
+                        return persisted;
+                    }
+                }
+                catch
+                {
+                    // The stage commit outcome cannot be proven while storage is unavailable.
+                    // Preserve the WAV rather than deleting potential durable evidence.
+                    preserveStoredAudio = true;
+                }
+
+                throw;
+            }
+        }
+        catch
+        {
+            if (!preserveStoredAudio)
+            {
+                await audioStorage.DeleteAsync(stored.RelativePath, CancellationToken.None);
+            }
+
+            throw;
+        }
+    }
+
+    private async Task<CharacterVoiceProfileResponse> PrepareAndActivateAsync(
+        Guid ownerId,
+        CharacterProfile character,
+        CharacterVoiceProfileOperation stagedOperation)
+    {
+        VoiceProfilePrepareResult providerProfile;
+        try
+        {
+            await using var uploadStream = File.OpenRead(
+                audioStorage.ResolveFullPath(stagedOperation.ReferenceAudioRelativePath));
+            providerProfile = await threeWaClient.PrepareAsync(
+                uploadStream,
+                $"{stagedOperation.NewProfileId:N}.wav",
+                BuildProfileName(character.CanonicalName, stagedOperation.Kind, stagedOperation.SceneCode),
+                stagedOperation.ConsentType,
+                stagedOperation.ExpectedTranscript,
+                CancellationToken.None);
+        }
+        catch (ThreeWaAiHubException exception) when (
+            exception.FailureKind is ThreeWaAiHubFailureKind.PreSend
+                or ThreeWaAiHubFailureKind.RemoteAuthenticationRejected)
+        {
+            await MarkRejectedAsync(
+                ownerId,
+                stagedOperation.Id,
+                exception.FailureKind == ThreeWaAiHubFailureKind.PreSend
+                    ? "remote_prepare_not_sent"
+                    : "remote_prepare_auth_rejected");
+            throw;
+        }
+        catch
+        {
+            await MarkNeedsAttentionAsync(
+                ownerId,
+                stagedOperation.Id,
+                "remote_prepare_uncertain");
+            throw;
+        }
+
+        var normalizedDraft = NormalizeProviderDraftForStorage(providerProfile.DraftTranscript);
+        CharacterVoiceProfileOperation operation;
+        try
+        {
+            operation = await PersistRemotePreparedAsync(
+                ownerId,
+                stagedOperation.Id,
+                providerProfile.TaskId,
+                normalizedDraft.Value);
+        }
+        catch
+        {
+            await MarkNeedsAttentionAsync(
+                ownerId,
+                stagedOperation.Id,
+                "remote_task_persistence_uncertain");
+            throw;
+        }
+
+        if (normalizedDraft.IsInvalid)
+        {
+            await MarkNeedsAttentionAsync(
+                ownerId,
+                operation.Id,
+                "remote_draft_contract_mismatch");
+            throw new InvalidOperationException(
+                "3wa 回傳的辨識草稿不符合儲存合約；已先保留 operation、task 與 WAV 等待人工處理。");
+        }
+
+        if (providerProfile.TaskId.Length
+            > CharacterVoiceProfileOperation.MaximumCanonicalRemoteTaskIdLength)
+        {
+            await MarkNeedsAttentionAsync(
+                ownerId,
+                operation.Id,
+                "remote_task_id_contract_mismatch");
+            throw new InvalidOperationException(
+                "3wa 回傳的 clone task handle 不符合目前 canonical 合約；已保留 operation、task 與 WAV 等待人工處理。");
+        }
+
+        return await ActivatePreparedOperationAsync(ownerId, operation.Id);
+    }
+
+    private async Task<CharacterVoiceProfileOperation> PersistRemotePreparedAsync(
+        Guid ownerId,
+        Guid operationId,
+        string remoteTaskId,
+        string? asrDraftTranscript)
+    {
+        CharacterVoiceProfileOperation? operation = null;
+        try
+        {
+            operation = await dbContext.CharacterVoiceProfileOperations.SingleOrDefaultAsync(
+                candidate => candidate.OwnerId == ownerId && candidate.Id == operationId,
+                CancellationToken.None)
+                ?? throw new InvalidOperationException("找不到已暫存的克隆 operation。");
+            operation.MarkRemotePrepared(
+                remoteTaskId,
+                asrDraftTranscript,
+                DateTimeOffset.UtcNow);
+            await dbContext.SaveChangesAsync(CancellationToken.None);
+            return operation;
+        }
+        catch
+        {
+            dbContext.ChangeTracker.Clear();
+            var persisted = await dbContext.CharacterVoiceProfileOperations.SingleOrDefaultAsync(
+                candidate => candidate.OwnerId == ownerId && candidate.Id == operationId,
+                CancellationToken.None);
+            if (persisted is not null
+                && persisted.RemoteTaskId == remoteTaskId
+                && persisted.State == CharacterVoiceProfileOperationState.RemotePrepared)
+            {
+                return persisted;
+            }
+
+            if (persisted is not null && persisted.State == CharacterVoiceProfileOperationState.Staged)
+            {
+                persisted.MarkRemotePrepared(
+                    remoteTaskId,
+                    asrDraftTranscript,
+                    DateTimeOffset.UtcNow);
+                await dbContext.SaveChangesAsync(CancellationToken.None);
+                return persisted;
+            }
+
+            throw new InvalidOperationException(
+                "3wa clone task 已建立，但 task handle 無法持久化；WAV 與 operation 已保留，禁止自動清除。");
+        }
+    }
+
+    private async Task<CharacterVoiceProfileResponse> ActivatePreparedOperationAsync(
+        Guid ownerId,
+        Guid operationId)
+    {
+        try
+        {
+            dbContext.ChangeTracker.Clear();
+            var operation = await dbContext.CharacterVoiceProfileOperations.SingleOrDefaultAsync(
+                candidate => candidate.OwnerId == ownerId && candidate.Id == operationId,
+                CancellationToken.None)
+                ?? throw new InvalidOperationException("找不到已準備完成的克隆 operation。");
+            if (operation.State != CharacterVoiceProfileOperationState.RemotePrepared
+                || operation.RemoteTaskId is null)
+            {
+                throw new InvalidOperationException("克隆 operation 尚未持久化遠端 task，禁止啟用。");
+            }
+
+            var profile = BuildCloneProfile(operation);
+            if (operation.Type == CharacterVoiceProfileOperationType.Replace
+                && dbContext.Database.IsRelational())
+            {
+                await using var transaction = await dbContext.Database.BeginTransactionAsync(
+                    IsolationLevel.Serializable,
+                    CancellationToken.None);
+                await ReplaceWithinTransactionAsync(operation, profile);
+                await transaction.CommitAsync(CancellationToken.None);
+            }
+            else if (operation.Type == CharacterVoiceProfileOperationType.Replace)
+            {
+                var current = await LoadReplacementTargetAsync(operation);
+                dbContext.CharacterVoiceProfiles.Remove(current);
+                dbContext.CharacterVoiceProfiles.Add(profile);
+                operation.MarkActivated(DateTimeOffset.UtcNow);
+                await dbContext.SaveChangesAsync(CancellationToken.None);
+            }
+            else
+            {
+                dbContext.CharacterVoiceProfiles.Add(profile);
+                operation.MarkActivated(DateTimeOffset.UtcNow);
+                await dbContext.SaveChangesAsync(CancellationToken.None);
+            }
+
+            return ToResponse(profile);
+        }
+        catch
+        {
+            var resolved = await ResolveActivationOutcomeAsync(ownerId, operationId);
+            if (resolved is not null)
+            {
+                return resolved;
+            }
+
+            await MarkNeedsAttentionAsync(ownerId, operationId, "local_activation_uncertain");
+            throw;
+        }
+    }
+
+    private async Task ReplaceWithinTransactionAsync(
+        CharacterVoiceProfileOperation operation,
+        CharacterVoiceProfile replacement)
+    {
+        var current = await LoadReplacementTargetAsync(operation);
+
+        dbContext.CharacterVoiceProfiles.Remove(current);
+        await dbContext.SaveChangesAsync(CancellationToken.None);
+
+        // PostgreSQL's filtered base-slot unique index is immediate (not deferrable). Persist the
+        // delete first, then the insert, while the caller's transaction still makes both atomic.
+        dbContext.CharacterVoiceProfiles.Add(replacement);
+        operation.MarkActivated(DateTimeOffset.UtcNow);
+        await dbContext.SaveChangesAsync(CancellationToken.None);
+    }
+
+    private async Task<CharacterVoiceProfile> LoadReplacementTargetAsync(
+        CharacterVoiceProfileOperation operation)
+    {
+        var current = await dbContext.CharacterVoiceProfiles.SingleOrDefaultAsync(
+            profile => profile.OwnerId == operation.OwnerId
+                && profile.CharacterProfileId == operation.CharacterProfileId
+                && profile.Id == operation.OldProfileId,
+            CancellationToken.None)
+            ?? throw new InvalidOperationException("要取代的文字設計聲線已經變更，請重新整理後再試。");
+        EnsureReplaceableBaseDesign(current);
+        if (current.ConcurrencyStamp != operation.OldProfileConcurrencyStamp)
+        {
+            throw new InvalidOperationException("要取代的文字設計聲線已被更新，禁止啟用舊 operation。");
+        }
+
+        return current;
+    }
+
+    private async Task<CharacterVoiceProfileResponse?> ResolveActivationOutcomeAsync(
+        Guid ownerId,
+        Guid operationId)
+    {
+        try
+        {
+            dbContext.ChangeTracker.Clear();
+            var operation = await dbContext.CharacterVoiceProfileOperations
+                .AsNoTracking()
+                .SingleOrDefaultAsync(
+                    candidate => candidate.OwnerId == ownerId && candidate.Id == operationId,
+                    CancellationToken.None);
+            if (operation is null)
+            {
+                return null;
+            }
+
+            var profile = await dbContext.CharacterVoiceProfiles
+                .AsNoTracking()
+                .SingleOrDefaultAsync(
+                    candidate => candidate.OwnerId == ownerId
+                        && candidate.CharacterProfileId == operation.CharacterProfileId
+                        && candidate.Id == operation.NewProfileId,
+                    CancellationToken.None);
+            return profile is not null
+                && profile.Mode == CharacterVoiceProfileMode.Clone
+                && profile.VoiceProfileTaskId == operation.RemoteTaskId
+                && profile.ReferenceAudioRelativePath == operation.ReferenceAudioRelativePath
+                    ? ToResponse(profile)
+                    : null;
+        }
+        catch
+        {
+            // Unknown stays unknown. Never compensate or delete evidence based only on an exception.
+            return null;
+        }
+    }
+
+    private async Task MarkNeedsAttentionAsync(Guid ownerId, Guid operationId, string safeErrorCode)
+    {
+        try
+        {
+            dbContext.ChangeTracker.Clear();
+            var operation = await dbContext.CharacterVoiceProfileOperations.SingleOrDefaultAsync(
+                candidate => candidate.OwnerId == ownerId && candidate.Id == operationId,
+                CancellationToken.None);
+            if (operation is null || operation.State == CharacterVoiceProfileOperationState.Activated)
+            {
+                return;
+            }
+
+            operation.MarkNeedsAttention(safeErrorCode, DateTimeOffset.UtcNow);
+            await dbContext.SaveChangesAsync(CancellationToken.None);
+        }
+        catch
+        {
+            // Do not log task handles, transcripts, credential identifiers, or paths. The staged
+            // database row and private WAV remain untouched for manual reconciliation.
+        }
+    }
+
+    private async Task MarkRejectedAsync(Guid ownerId, Guid operationId, string safeErrorCode)
+    {
+        try
+        {
+            dbContext.ChangeTracker.Clear();
+            var operation = await dbContext.CharacterVoiceProfileOperations.SingleOrDefaultAsync(
+                candidate => candidate.OwnerId == ownerId && candidate.Id == operationId,
+                CancellationToken.None);
+            if (operation is null || operation.State != CharacterVoiceProfileOperationState.Staged)
+            {
+                return;
+            }
+
+            operation.MarkRejected(safeErrorCode, DateTimeOffset.UtcNow);
+            await dbContext.SaveChangesAsync(CancellationToken.None);
+        }
+        catch
+        {
+            // If the rejection marker cannot be proven, leave the durable Staged row and WAV in
+            // place. The owner-scoped operation list exposes this as an interrupted/unknown stage.
+        }
+    }
+
+    private static CharacterVoiceProfile BuildCloneProfile(CharacterVoiceProfileOperation operation)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var profile = CharacterVoiceProfile.CreateClone(
+            operation.NewProfileId,
+            operation.OwnerId,
+            operation.CharacterProfileId,
+            operation.Kind,
+            operation.SceneCode,
+            operation.ConsentType,
+            operation.ReferenceAudioRelativePath,
+            operation.ReferenceAudioSha256,
+            operation.ReferenceAudioDurationSeconds,
+            operation.RightsConfirmedByUserId,
+            now);
+        profile.AttachExpectedTranscript(operation.ExpectedTranscript, now);
+        if (operation.AsrDraftTranscript is not null)
+        {
+            profile.AttachDraftTranscript(operation.RemoteTaskId!, operation.AsrDraftTranscript, now);
+        }
+        else
+        {
+            profile.AttachPendingTask(operation.RemoteTaskId!, now);
+        }
+
+        return profile;
+    }
+
+    private async Task EnsureNoActiveOperationAsync(
+        Guid ownerId,
+        Guid characterProfileId,
+        CharacterVoiceProfileKind kind,
+        string? sceneCode,
+        CancellationToken cancellationToken)
+    {
+        var slotKey = kind == CharacterVoiceProfileKind.Base ? "base" : $"scene:{sceneCode}";
+        var exists = await dbContext.CharacterVoiceProfileOperations.AnyAsync(
+            operation => operation.OwnerId == ownerId
+                && operation.CharacterProfileId == characterProfileId
+                && operation.SlotKey == slotKey
+                && (operation.State == CharacterVoiceProfileOperationState.Staged
+                    || operation.State == CharacterVoiceProfileOperationState.RemotePrepared
+                    || operation.State == CharacterVoiceProfileOperationState.NeedsAttention),
+            cancellationToken);
+        if (exists)
+        {
+            throw new InvalidOperationException(
+                "這個聲線位置已有待處理的 Clone operation；人工確認前禁止再次送出錄音。");
+        }
+    }
+
+    private string BuildCredentialKeyId()
+    {
+        if (!string.IsNullOrWhiteSpace(threeWaOptions.Value.CredentialKeyId))
+        {
+            return threeWaOptions.Value.CredentialKeyId.Trim();
+        }
+
+        var token = threeWaOptions.Value.ApiToken?.Trim();
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return "unconfigured";
+        }
+
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(token));
+        return $"sha256:{Convert.ToHexString(hash.AsSpan(0, 8)).ToLowerInvariant()}";
+    }
+
+    private static NormalizedProviderDraft NormalizeProviderDraftForStorage(string? draftTranscript)
+    {
+        if (string.IsNullOrWhiteSpace(draftTranscript))
+        {
+            return new NormalizedProviderDraft(Value: null, IsInvalid: false);
+        }
+
+        try
+        {
+            var normalized = StoryVoice.Domain.Series.SeriesValueValidator.NormalizePrintable(
+                draftTranscript,
+                2_000,
+                nameof(draftTranscript));
+            return new NormalizedProviderDraft(normalized, IsInvalid: false);
+        }
+        catch (ArgumentException)
+        {
+            // The task handle is more important than an untrusted provider draft. Persist the
+            // handle first, then leave the operation in NeedsAttention without activating it.
+            return new NormalizedProviderDraft(Value: null, IsInvalid: true);
+        }
+    }
+
+    private sealed record NormalizedProviderDraft(string? Value, bool IsInvalid);
+
+    private static void EnsureReplaceableBaseDesign(CharacterVoiceProfile profile)
+    {
+        if (profile.Kind != CharacterVoiceProfileKind.Base
+            || profile.SceneCode is not null
+            || profile.Mode != CharacterVoiceProfileMode.Design)
+        {
+            throw new InvalidOperationException("只有既有的文字設計基礎聲線可以安全取代為錄音克隆。");
+        }
+    }
+
+    internal static string BuildProfileName(
+        string characterName,
+        CharacterVoiceProfileKind kind,
+        string? sceneCode)
+    {
+        var slot = kind == CharacterVoiceProfileKind.Base ? "base" : sceneCode!;
+        var fullName = $"{characterName}-{slot}";
+        if (fullName.Length <= 120)
+        {
+            return fullName;
+        }
+
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(fullName)))
+            .ToLowerInvariant()[..12];
+        var suffix = $"-{slot}-{hash}";
+        var prefixBudget = 120 - suffix.Length;
+        var builder = new StringBuilder(prefixBudget);
+        foreach (var rune in characterName.EnumerateRunes())
+        {
+            if (builder.Length + rune.Utf16SequenceLength > prefixBudget)
+            {
+                break;
+            }
+
+            builder.Append(rune.ToString());
+        }
+
+        return builder.Append(suffix).ToString();
+    }
 
     private static CharacterVoiceProfileKind ParseKind(string kind)
     {
@@ -335,12 +1196,60 @@ internal sealed class CharacterVoiceProfileService(
             profile.Mode.ToString(),
             profile.ConsentType,
             profile.VoicePromptText,
+            profile.ExpectedTranscript,
+            profile.AsrDraftTranscript,
+            profile.ConfirmationTranscriptIntent,
             profile.Transcript,
             profile.TranscriptConfirmedAt is not null,
             profile.Status.ToString(),
             profile.ReferenceAudioDurationSeconds,
             profile.CreatedAt,
             profile.UpdatedAt);
+
+    private static CharacterVoiceProfileOperationResponse ToOperationResponse(
+        CharacterVoiceProfileOperation operation) =>
+        new(
+            operation.Id,
+            operation.NewProfileId,
+            operation.OldProfileId,
+            operation.Type.ToString(),
+            operation.State.ToString(),
+            operation.Kind.ToString(),
+            operation.SceneCode,
+            operation.RemoteTaskId is not null,
+            operation.State == CharacterVoiceProfileOperationState.Activated
+                ? null
+                : GetOperationAttentionCode(operation),
+            HasCurrentConsentEvidence(operation) ? "attested" : "missing",
+            operation.UsageScopes,
+            operation.CreatedAt,
+            operation.UpdatedAt,
+            operation.RemotePreparedAt,
+            operation.ActivatedAt);
+
+    private static bool HasCurrentConsentEvidence(CharacterVoiceProfileOperation operation) =>
+        operation.PrivateEvaluationAllowed
+        && string.Equals(
+            operation.EvidenceVersion,
+            CharacterVoiceConsentEvidence.CurrentEvidenceVersion,
+            StringComparison.Ordinal)
+        && string.Equals(
+            operation.AttestationVersion,
+            CharacterVoiceConsentEvidence.CurrentAttestationVersion,
+            StringComparison.Ordinal)
+        && operation.ConsentRecordSha256.Length == 64
+        && operation.ConsentReceiptSha256.Length == 64
+        && operation.ExpectedTranscriptSha256.Length == 64;
+
+    private static string GetOperationAttentionCode(CharacterVoiceProfileOperation operation) =>
+        operation.SafeErrorCode
+        ?? operation.State switch
+        {
+            CharacterVoiceProfileOperationState.Staged => "staged_or_prepare_outcome_unknown",
+            CharacterVoiceProfileOperationState.RemotePrepared => "activation_pending",
+            CharacterVoiceProfileOperationState.Rejected => "remote_prepare_rejected",
+            _ => "operation_needs_attention",
+        };
 
     private Guid EnsureCurrentOwnerId()
     {
@@ -351,4 +1260,5 @@ internal sealed class CharacterVoiceProfileService(
 
         return currentUser.UserId;
     }
+
 }

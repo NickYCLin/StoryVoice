@@ -266,6 +266,17 @@ public sealed class StoryPipelineWorker(
                         job.CastRevisionId!.Value,
                         stoppingToken);
                     synthesisProviderName = castRevision.NarratorProvider;
+                    if (string.Equals(
+                            castRevision.NarratorProvider,
+                            CharacterVoiceProviders.ThreeWaVoxCpm2,
+                            StringComparison.OrdinalIgnoreCase)
+                        && !ThreeWaSynthesisCapabilities.SupportsTrustedCloneFormalNarration)
+                    {
+                        throw new PermanentNarrationProviderException(
+                            ThreeWaSynthesisCapabilities.CloneFormalNarrationUnavailableCode,
+                            ThreeWaSynthesisCapabilities.CloneFormalNarrationUnavailableMessage);
+                    }
+
                     var chapterPlans = await LoadChapterPlanSourcesAsync(
                         db,
                         job.OwnerId,
@@ -506,7 +517,17 @@ public sealed class StoryPipelineWorker(
         var characterProfileIds = characterProfileIdsByCharacterId.Values.Distinct().ToArray();
         var profiles = await db.CharacterVoiceProfiles
             .AsNoTracking()
-            .Where(profile => profile.OwnerId == ownerId && characterProfileIds.Contains(profile.CharacterProfileId))
+            .Where(profile => profile.OwnerId == ownerId
+                && characterProfileIds.Contains(profile.CharacterProfileId)
+                && (profile.Mode != CharacterVoiceProfileMode.Clone
+                    || db.CharacterVoiceProfileOperations.Any(operation =>
+                        operation.OwnerId == ownerId
+                        && operation.CharacterProfileId == profile.CharacterProfileId
+                        && operation.NewProfileId == profile.Id
+                        && operation.State == CharacterVoiceProfileOperationState.Activated
+                        && operation.EvidenceVersion == CharacterVoiceConsentEvidence.CurrentEvidenceVersion
+                        && operation.AttestationVersion == CharacterVoiceConsentEvidence.CurrentAttestationVersion
+                        && operation.FormalNarrationAllowed)))
             .ToListAsync(cancellationToken);
         return (profiles, characterProfileIdsByCharacterId);
     }

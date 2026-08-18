@@ -54,8 +54,9 @@ public sealed class ThreeWaVoiceProfileClientTests
         Assert.Contains("測試角色", request.Body, StringComparison.Ordinal);
         Assert.Contains("consent_type", request.Body, StringComparison.Ordinal);
         Assert.Contains("explicit_permission", request.Body, StringComparison.Ordinal);
-        Assert.Contains("prompt_text", request.Body, StringComparison.Ordinal);
+        Assert.Contains("expected_text", request.Body, StringComparison.Ordinal);
         Assert.Contains("自訂逐字稿", request.Body, StringComparison.Ordinal);
+        Assert.DoesNotContain("name=prompt_text", request.Body, StringComparison.Ordinal);
         Assert.Contains("reference_wav", request.Body, StringComparison.Ordinal);
         Assert.Contains("sample.wav", request.Body, StringComparison.Ordinal);
         Assert.DoesNotContain("cluster_api.php", request.Uri.AbsoluteUri, StringComparison.Ordinal);
@@ -115,6 +116,25 @@ public sealed class ThreeWaVoiceProfileClientTests
     }
 
     [Fact]
+    public async Task PrepareAsync_rejects_blank_expected_text_before_sending_a_request()
+    {
+        var handler = new RecordingHandler(() => throw new InvalidOperationException("must not send"));
+        using var httpClient = CreateHttpClient(handler);
+        var client = CreateClient(httpClient);
+        await using var referenceWav = new MemoryStream("RIFF-test-WAVE"u8.ToArray());
+
+        await Assert.ThrowsAsync<ThreeWaAiHubException>(() => client.PrepareAsync(
+            referenceWav,
+            "sample.wav",
+            "測試角色",
+            "explicit_permission",
+            "   ",
+            CancellationToken.None));
+
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
     public async Task HTTP_failures_are_bounded_and_never_expose_provider_details_or_secrets()
     {
         const string privateProviderBody = "private-provider-diagnostics";
@@ -130,6 +150,7 @@ public sealed class ThreeWaVoiceProfileClientTests
             client.GetStatusAsync(privateTaskId, CancellationToken.None));
 
         Assert.Equal("3wa Cluster API request failed with HTTP 400.", exception.Message);
+        Assert.Equal(ThreeWaAiHubFailureKind.OutcomeUnknown, exception.FailureKind);
         Assert.DoesNotContain(privateProviderBody, exception.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain(privateTaskId, exception.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain(ApiToken, exception.ToString(), StringComparison.Ordinal);
@@ -191,6 +212,7 @@ public sealed class ThreeWaVoiceProfileClientTests
             client.GetStatusAsync("731245", CancellationToken.None));
 
         Assert.Contains("ApiToken", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(ThreeWaAiHubFailureKind.PreSend, exception.FailureKind);
         Assert.Empty(handler.Requests);
     }
 
@@ -206,7 +228,51 @@ public sealed class ThreeWaVoiceProfileClientTests
             client.GetStatusAsync("731245", CancellationToken.None));
 
         Assert.Equal("3wa Cluster API token format is invalid.", exception.Message);
+        Assert.Equal(ThreeWaAiHubFailureKind.PreSend, exception.FailureKind);
         Assert.DoesNotContain(invalidToken, exception.ToString(), StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Unauthorized)]
+    [InlineData(HttpStatusCode.Forbidden)]
+    public async Task Authentication_rejections_are_typed_as_definite_remote_rejections(
+        HttpStatusCode statusCode)
+    {
+        var handler = new RecordingHandler(() => new HttpResponseMessage(statusCode));
+        using var httpClient = CreateHttpClient(handler);
+        var client = CreateClient(httpClient);
+        await using var referenceWav = new MemoryStream("RIFF-test-WAVE"u8.ToArray());
+
+        var exception = await Assert.ThrowsAsync<ThreeWaAiHubException>(() => client.PrepareAsync(
+            referenceWav,
+            "sample.wav",
+            "測試角色",
+            "explicit_permission",
+            "自訂逐字稿",
+            CancellationToken.None));
+
+        Assert.Equal(ThreeWaAiHubFailureKind.RemoteAuthenticationRejected, exception.FailureKind);
+        Assert.DoesNotContain(ApiToken, exception.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PrepareAsync_rejects_an_overlong_profile_name_before_sending()
+    {
+        var handler = new RecordingHandler(() => throw new InvalidOperationException("must not send"));
+        using var httpClient = CreateHttpClient(handler);
+        var client = CreateClient(httpClient);
+        await using var referenceWav = new MemoryStream("RIFF-test-WAVE"u8.ToArray());
+
+        var exception = await Assert.ThrowsAsync<ThreeWaAiHubException>(() => client.PrepareAsync(
+            referenceWav,
+            "sample.wav",
+            new string('角', 121),
+            "explicit_permission",
+            "自訂逐字稿",
+            CancellationToken.None));
+
+        Assert.Equal(ThreeWaAiHubFailureKind.PreSend, exception.FailureKind);
         Assert.Empty(handler.Requests);
     }
 

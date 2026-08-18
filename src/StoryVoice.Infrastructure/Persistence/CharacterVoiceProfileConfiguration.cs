@@ -53,12 +53,17 @@ internal sealed class CharacterVoiceProfileConfiguration : IEntityTypeConfigurat
             .HasMaxLength(64)
             .IsFixedLength();
         builder.Property(profile => profile.VoicePromptText).HasMaxLength(2_000);
+        builder.Property(profile => profile.ExpectedTranscript).HasMaxLength(2_000);
+        builder.Property(profile => profile.AsrDraftTranscript).HasMaxLength(2_000);
+        builder.Property(profile => profile.ConfirmationTranscriptIntent).HasMaxLength(2_000);
         builder.Property(profile => profile.Transcript).HasMaxLength(2_000);
-        builder.Property(profile => profile.VoiceProfileTaskId).HasMaxLength(191);
+        builder.Property(profile => profile.VoiceProfileTaskId)
+            .HasMaxLength(CharacterVoiceProfileOperation.MaximumStoredRemoteTaskIdLength);
         builder.Property(profile => profile.Status)
             .HasConversion<string>()
             .HasMaxLength(32)
             .IsRequired();
+        builder.Property(profile => profile.ConcurrencyStamp).IsConcurrencyToken();
 
         builder.HasIndex(profile => new { profile.OwnerId, profile.CharacterProfileId, profile.Kind })
             .HasDatabaseName("UX_cvp_base_per_character")

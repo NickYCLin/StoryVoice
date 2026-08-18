@@ -36,22 +36,46 @@ public sealed class LocalCharacterVoiceAudioStorage(IOptions<CharacterVoiceStora
         var fullPath = Resolve(relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
 
-        using var sha256 = SHA256.Create();
-        await using (var destination = new FileStream(
-            fullPath,
-            FileMode.CreateNew,
-            FileAccess.Write,
-            FileShare.None,
-            bufferSize: 81920,
-            FileOptions.Asynchronous | FileOptions.SequentialScan))
-        await using (var hashing = new CryptoStream(destination, sha256, CryptoStreamMode.Write))
+        try
         {
-            await content.CopyToAsync(hashing, cancellationToken);
-            await hashing.FlushAsync(cancellationToken);
-        }
+            using var sha256 = SHA256.Create();
+            await using (var destination = new FileStream(
+                fullPath,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None,
+                bufferSize: 81920,
+                FileOptions.Asynchronous | FileOptions.SequentialScan))
+            await using (var hashing = new CryptoStream(destination, sha256, CryptoStreamMode.Write))
+            {
+                await content.CopyToAsync(hashing, cancellationToken);
+                await hashing.FlushAsync(cancellationToken);
+            }
 
-        var hashHex = Convert.ToHexString(sha256.Hash!).ToLowerInvariant();
-        return new StoredCharacterVoiceAudio(relativePath, hashHex);
+            var hashHex = Convert.ToHexString(sha256.Hash!).ToLowerInvariant();
+            return new StoredCharacterVoiceAudio(relativePath, hashHex);
+        }
+        catch
+        {
+            try
+            {
+                if (File.Exists(fullPath))
+                {
+                    File.Delete(fullPath);
+                }
+            }
+            catch (IOException)
+            {
+                // Preserve the original upload/validation failure. The caller has not created a
+                // durable operation yet, and a later storage sweep may remove this partial file.
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Same as above: never replace the primary failure with cleanup diagnostics.
+            }
+
+            throw;
+        }
     }
 
     public Task DeleteAsync(string relativePath, CancellationToken cancellationToken)

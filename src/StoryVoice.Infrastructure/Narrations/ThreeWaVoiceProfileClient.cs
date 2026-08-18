@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
+using StoryVoice.Domain.Narrations;
 
 namespace StoryVoice.Infrastructure.Narrations;
 
@@ -20,23 +21,30 @@ public sealed class ThreeWaVoiceProfileClient(HttpClient httpClient, IOptions<Th
         string fileName,
         string profileName,
         string consentType,
-        string? promptText,
+        string expectedText,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(referenceWav);
+        var normalizedFileName = Require(fileName, "3wa voice profile file name is required.");
+        var normalizedProfileName = Require(profileName, "3wa voice profile name is required.");
+        if (normalizedProfileName.Length > 120)
+        {
+            throw PreSend("3wa voice profile name exceeds the supported length.");
+        }
+
+        var normalizedConsentType = Require(consentType, "3wa voice profile consent type is required.");
+        var normalizedExpectedText = Require(expectedText, "3wa voice profile expected text is required.");
         using var content = new MultipartFormDataContent
         {
             { new StringContent("profile_prepare"), "operation" },
-            { new StringContent(profileName), "profile_name" },
-            { new StringContent(consentType), "consent_type" },
+            { new StringContent(normalizedProfileName), "profile_name" },
+            { new StringContent(normalizedConsentType), "consent_type" },
+            { new StringContent(normalizedExpectedText), "expected_text" },
         };
-        if (!string.IsNullOrWhiteSpace(promptText))
-        {
-            content.Add(new StringContent(promptText), "prompt_text");
-        }
 
         var audioContent = new StreamContent(referenceWav);
         audioContent.Headers.ContentType = new MediaTypeHeaderValue("audio/wav");
-        content.Add(audioContent, "reference_wav", fileName);
+        content.Add(audioContent, "reference_wav", normalizedFileName);
 
         using var response = await SendAsync(
             HttpMethod.Post,
@@ -46,7 +54,9 @@ public sealed class ThreeWaVoiceProfileClient(HttpClient httpClient, IOptions<Th
         using var body = await ReadJsonAsync(response, cancellationToken);
         var root = body.RootElement;
         var taskId = GetIdentifier(root, "task_id");
-        if (!IsOk(root) || taskId is null)
+        if (!IsOk(root)
+            || taskId is null
+            || taskId.Length > CharacterVoiceProfileOperation.MaximumStoredRemoteTaskIdLength)
         {
             throw new ThreeWaAiHubException("聲線 profile_prepare 未回傳有效的 task_id。");
         }
@@ -56,9 +66,13 @@ public sealed class ThreeWaVoiceProfileClient(HttpClient httpClient, IOptions<Th
 
     public async Task<VoiceProfileStatusResult> GetStatusAsync(string taskId, CancellationToken cancellationToken)
     {
-        var normalizedTaskId = Require(taskId, "3wa voice profile task id is required.");
+        var normalizedTaskId = RequireTaskId(taskId);
         var path = $"{CanonicalVoiceGeneratePath}&operation=profile_status&voice_profile_task_id={Uri.EscapeDataString(normalizedTaskId)}";
-        using var response = await SendAsync(HttpMethod.Get, path, content: null, cancellationToken);
+        using var response = await SendAsync(
+            HttpMethod.Get,
+            path,
+            content: null,
+            cancellationToken);
         using var body = await ReadJsonAsync(response, cancellationToken);
         var root = body.RootElement;
         if (!IsOk(root))
@@ -75,7 +89,7 @@ public sealed class ThreeWaVoiceProfileClient(HttpClient httpClient, IOptions<Th
 
     public async Task ConfirmAsync(string taskId, string transcript, CancellationToken cancellationToken)
     {
-        var normalizedTaskId = Require(taskId, "3wa voice profile task id is required.");
+        var normalizedTaskId = RequireTaskId(taskId);
         var normalizedTranscript = Require(transcript, "3wa voice profile transcript is required.");
         using var content = System.Net.Http.Json.JsonContent.Create(new
         {
@@ -104,7 +118,7 @@ public sealed class ThreeWaVoiceProfileClient(HttpClient httpClient, IOptions<Th
         var apiToken = options.Value.ApiToken;
         if (string.IsNullOrWhiteSpace(apiToken))
         {
-            throw new ThreeWaAiHubException("尚未設定 3wa Cluster API token（ThreeWaAiHub__ApiToken）。");
+            throw PreSend("尚未設定 3wa Cluster API token（ThreeWaAiHub__ApiToken）。");
         }
 
         using var request = new HttpRequestMessage(method, relativePath) { Content = content };
@@ -114,7 +128,7 @@ public sealed class ThreeWaVoiceProfileClient(HttpClient httpClient, IOptions<Th
         }
         catch (FormatException)
         {
-            throw new ThreeWaAiHubException("3wa Cluster API token format is invalid.");
+            throw PreSend("3wa Cluster API token format is invalid.");
         }
 
         HttpResponseMessage response;
@@ -146,7 +160,13 @@ public sealed class ThreeWaVoiceProfileClient(HttpClient httpClient, IOptions<Th
         {
             var statusCode = response.StatusCode;
             response.Dispose();
-            throw new ThreeWaAiHubException($"3wa Cluster API request failed with HTTP {(int)statusCode}.");
+            var failureKind = statusCode is System.Net.HttpStatusCode.Unauthorized
+                or System.Net.HttpStatusCode.Forbidden
+                    ? ThreeWaAiHubFailureKind.RemoteAuthenticationRejected
+                    : ThreeWaAiHubFailureKind.OutcomeUnknown;
+            throw new ThreeWaAiHubException(
+                $"3wa Cluster API request failed with HTTP {(int)statusCode}.",
+                failureKind);
         }
 
         return response;
@@ -237,10 +257,42 @@ public sealed class ThreeWaVoiceProfileClient(HttpClient httpClient, IOptions<Th
             : null;
 
     private static string Require(string? value, string message) =>
-        Normalize(value) ?? throw new ThreeWaAiHubException(message);
+        Normalize(value) ?? throw PreSend(message);
+
+    private static ThreeWaAiHubException PreSend(string message) =>
+        new(message, ThreeWaAiHubFailureKind.PreSend);
+
+    private static string RequireTaskId(string? value)
+    {
+        var normalized = Require(value, "3wa voice profile task id is required.");
+        if (normalized.Length > CharacterVoiceProfileOperation.MaximumStoredRemoteTaskIdLength)
+        {
+            throw new ThreeWaAiHubException("3wa voice profile task id is invalid.");
+        }
+
+        return normalized;
+    }
 
     private static string? Normalize(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }
 
-public sealed class ThreeWaAiHubException(string message) : InvalidOperationException(message);
+public enum ThreeWaAiHubFailureKind
+{
+    PreSend,
+    RemoteAuthenticationRejected,
+    OutcomeUnknown,
+}
+
+public sealed class ThreeWaAiHubException : InvalidOperationException
+{
+    public ThreeWaAiHubException(
+        string message,
+        ThreeWaAiHubFailureKind failureKind = ThreeWaAiHubFailureKind.OutcomeUnknown)
+        : base(message)
+    {
+        FailureKind = failureKind;
+    }
+
+    public ThreeWaAiHubFailureKind FailureKind { get; }
+}

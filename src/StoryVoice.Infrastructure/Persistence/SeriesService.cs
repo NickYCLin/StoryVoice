@@ -484,7 +484,15 @@ internal sealed class SeriesService(
                 && characterProfileIds.Contains(profile.CharacterProfileId)
                 && profile.Kind == CharacterVoiceProfileKind.Base
                 && profile.Mode == CharacterVoiceProfileMode.Clone
-                && profile.Status == CharacterVoiceProfileStatus.Ready)
+                && profile.Status == CharacterVoiceProfileStatus.Ready
+                && dbContext.CharacterVoiceProfileOperations.Any(operation =>
+                    operation.OwnerId == series.OwnerId
+                    && operation.CharacterProfileId == profile.CharacterProfileId
+                    && operation.NewProfileId == profile.Id
+                    && operation.State == CharacterVoiceProfileOperationState.Activated
+                    && operation.EvidenceVersion == CharacterVoiceConsentEvidence.CurrentEvidenceVersion
+                    && operation.AttestationVersion == CharacterVoiceConsentEvidence.CurrentAttestationVersion
+                    && operation.FormalNarrationAllowed))
             .Select(profile => profile.CharacterProfileId)
             .Distinct()
             .ToArrayAsync(cancellationToken);
@@ -718,6 +726,11 @@ internal sealed class SeriesService(
                     voice.Provider,
                     CharacterVoiceProviders.BlueMagpie,
                     StringComparison.OrdinalIgnoreCase))
+            .Where(voice => ThreeWaSynthesisCapabilities.SupportsTrustedCloneFormalNarration
+                || !string.Equals(
+                    voice.Provider,
+                    CharacterVoiceProviders.ThreeWaVoxCpm2,
+                    StringComparison.OrdinalIgnoreCase))
             .OrderBy(voice => voice.Locale, StringComparer.Ordinal)
             .ThenBy(voice => voice.DisplayName, StringComparer.Ordinal)
             .Select(voice => new SeriesVoiceOptionResponse(
@@ -749,6 +762,7 @@ internal sealed class SeriesService(
             throw new InvalidOperationException(
                 "BlueMagpie 目前只開放固定句試音；正式小說配音尚未由管理員啟用。");
         }
+
     }
 
     private static void EnsureSingleSynthesisProvider(

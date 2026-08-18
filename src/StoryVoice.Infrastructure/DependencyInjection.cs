@@ -11,6 +11,7 @@ using StoryVoice.Application.Library;
 using StoryVoice.Application.Narrations;
 using StoryVoice.Application.Narrations.SpeechPlanning;
 using StoryVoice.Application.Series;
+using StoryVoice.Domain.Narrations;
 using StoryVoice.Infrastructure.BookImports;
 using StoryVoice.Infrastructure.Characters;
 using StoryVoice.Infrastructure.Identity;
@@ -48,6 +49,10 @@ public static class DependencyInjection
                 "3wa JSON response limit must be between 1 KiB and 1 MiB.")
             .Validate(options => options.MaximumAudioResponseBytes is >= 64 * 1024 and <= 100 * 1024 * 1024,
                 "3wa audio response limit must be between 64 KiB and 100 MiB.")
+            .Validate(options => string.IsNullOrWhiteSpace(options.CredentialKeyId)
+                    || options.CredentialKeyId.Trim().Length
+                        <= CharacterVoiceProfileOperation.MaximumCredentialKeyIdLength,
+                "3wa credential key id is too long.")
             .ValidateOnStart();
         services.AddOptions<NarrationOptions>()
             .Bind(configuration.GetSection(NarrationOptions.SectionName))
@@ -231,6 +236,10 @@ public static class DependencyInjection
             var hubOptions = provider.GetRequiredService<IOptions<ThreeWaAiHubOptions>>().Value;
             client.BaseAddress = new Uri(hubOptions.BaseUrl, UriKind.Absolute);
         })
+        // profile_status's official contract places the private task handle in the query string.
+        // Disable HttpClientFactory's URL loggers for this dedicated client so reverse-proxy-safe
+        // application logs never receive that handle.
+        .RemoveAllLoggers()
         .ConfigurePrimaryHttpMessageHandler(static () => new SocketsHttpHandler
         {
             UseProxy = false,

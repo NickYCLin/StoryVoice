@@ -119,6 +119,10 @@ public sealed class CharacterVoiceProfile
     public string? ReferenceAudioSha256 { get; private set; }
     public double? ReferenceAudioDurationSeconds { get; private set; }
     public string? VoicePromptText { get; private set; }
+    public string? ExpectedTranscript { get; private set; }
+    public string? AsrDraftTranscript { get; private set; }
+    public string? ConfirmationTranscriptIntent { get; private set; }
+    public DateTimeOffset? ConfirmationRequestedAt { get; private set; }
     public string? Transcript { get; private set; }
     public DateTimeOffset? TranscriptConfirmedAt { get; private set; }
     public string? VoiceProfileTaskId { get; private set; }
@@ -215,8 +219,23 @@ public sealed class CharacterVoiceProfile
             throw new InvalidOperationException("這個聲線的文字稿已經確認過，不可再覆寫草稿。");
         }
 
-        VoiceProfileTaskId = SeriesValueValidator.NormalizePrintable(taskId, 191, nameof(taskId));
-        Transcript = SeriesValueValidator.NormalizePrintable(draftTranscript, 2_000, nameof(draftTranscript));
+        if (ConfirmationTranscriptIntent is not null)
+        {
+            throw new InvalidOperationException("這個聲線已有等待遠端確認的逐字稿，不可再覆寫 ASR 草稿。");
+        }
+
+        VoiceProfileTaskId = SeriesValueValidator.NormalizePrintable(
+            taskId,
+            CharacterVoiceProfileOperation.MaximumStoredRemoteTaskIdLength,
+            nameof(taskId));
+        AsrDraftTranscript = SeriesValueValidator.NormalizePrintable(
+            draftTranscript,
+            2_000,
+            nameof(draftTranscript));
+        // Keep the legacy review field populated until the transcript is confirmed so existing
+        // clients can continue presenting the ASR draft. AsrDraftTranscript remains immutable
+        // audit evidence when Transcript later becomes the confirmed final text.
+        Transcript = AsrDraftTranscript;
         Status = CharacterVoiceProfileStatus.AwaitingTranscriptConfirmation;
         Touch(now);
     }
@@ -226,11 +245,37 @@ public sealed class CharacterVoiceProfile
     public void AttachPendingTask(string taskId, DateTimeOffset now)
     {
         EnsureCloneMode();
-        VoiceProfileTaskId = SeriesValueValidator.NormalizePrintable(taskId, 191, nameof(taskId));
+        VoiceProfileTaskId = SeriesValueValidator.NormalizePrintable(
+            taskId,
+            CharacterVoiceProfileOperation.MaximumStoredRemoteTaskIdLength,
+            nameof(taskId));
+        Touch(now);
+    }
+
+    /// <summary>Stores the speaker-supplied verbatim transcript before profile preparation. It is
+    /// retained separately from both the provider's ASR draft and the eventual confirmed text.</summary>
+    public void AttachExpectedTranscript(string expectedTranscript, DateTimeOffset now)
+    {
+        EnsureCloneMode();
+        if (VoiceProfileTaskId is not null || Status != CharacterVoiceProfileStatus.Pending)
+        {
+            throw new InvalidOperationException("只有尚未送出處理的克隆聲線可以設定預期逐字稿。");
+        }
+
+        ExpectedTranscript = SeriesValueValidator.NormalizePrintable(
+            expectedTranscript,
+            2_000,
+            nameof(expectedTranscript));
         Touch(now);
     }
 
     public void ConfirmTranscript(string confirmedTranscript, DateTimeOffset now)
+    {
+        StageTranscriptConfirmation(confirmedTranscript, now);
+        CompleteTranscriptConfirmation(now);
+    }
+
+    public void StageTranscriptConfirmation(string confirmedTranscript, DateTimeOffset now)
     {
         EnsureCloneMode();
         if (Status != CharacterVoiceProfileStatus.AwaitingTranscriptConfirmation)
@@ -238,7 +283,36 @@ public sealed class CharacterVoiceProfile
             throw new InvalidOperationException("只有等待確認文字稿的聲線可以確認。");
         }
 
-        Transcript = SeriesValueValidator.NormalizePrintable(confirmedTranscript, 2_000, nameof(confirmedTranscript));
+        var normalized = SeriesValueValidator.NormalizePrintable(
+            confirmedTranscript,
+            2_000,
+            nameof(confirmedTranscript));
+        if (ConfirmationTranscriptIntent is not null)
+        {
+            if (!string.Equals(ConfirmationTranscriptIntent, normalized, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("已有另一份等待遠端確認的逐字稿，禁止覆寫確認意圖。");
+            }
+
+            return;
+        }
+
+        ConfirmationTranscriptIntent = normalized;
+        ConfirmationRequestedAt = now;
+        Touch(now);
+    }
+
+    public void CompleteTranscriptConfirmation(DateTimeOffset now)
+    {
+        EnsureCloneMode();
+        if (Status != CharacterVoiceProfileStatus.AwaitingTranscriptConfirmation
+            || ConfirmationTranscriptIntent is null
+            || ConfirmationRequestedAt is null)
+        {
+            throw new InvalidOperationException("只有已持久化確認意圖的等待中聲線可以完成確認。");
+        }
+
+        Transcript = ConfirmationTranscriptIntent;
         TranscriptConfirmedAt = now;
         Status = CharacterVoiceProfileStatus.Ready;
         Touch(now);
@@ -261,7 +335,10 @@ public sealed class CharacterVoiceProfile
             throw new InvalidOperationException("只有已確認文字稿的聲線可以重建。");
         }
 
-        VoiceProfileTaskId = SeriesValueValidator.NormalizePrintable(newTaskId, 191, nameof(newTaskId));
+        VoiceProfileTaskId = SeriesValueValidator.NormalizePrintable(
+            newTaskId,
+            CharacterVoiceProfileOperation.MaximumStoredRemoteTaskIdLength,
+            nameof(newTaskId));
         Status = CharacterVoiceProfileStatus.Ready;
         Touch(now);
     }

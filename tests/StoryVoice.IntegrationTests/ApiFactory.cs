@@ -43,6 +43,12 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
     {
         builder.UseEnvironment("Testing");
         builder.UseSetting("BookStorage:RootPath", _storageRoot);
+        builder.UseSetting(
+            "CharacterVoiceStorage:RootPath",
+            Path.Combine(_storageRoot, "character-voices"));
+        builder.UseSetting(
+            "CharacterAvatarStorage:RootPath",
+            Path.Combine(_storageRoot, "character-avatars"));
         builder.UseSetting("Narration:AudioRootPath", Path.Combine(_storageRoot, "audio"));
         builder.UseSetting(
             "Auth:DataProtectionKeysPath",

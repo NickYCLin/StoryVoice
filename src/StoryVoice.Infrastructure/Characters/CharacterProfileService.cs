@@ -1,3 +1,4 @@
+using System.Data;
 using Microsoft.EntityFrameworkCore;
 using StoryVoice.Application.Authentication;
 using StoryVoice.Application.Characters;
@@ -121,7 +122,14 @@ internal sealed class CharacterProfileService(
     public async Task<bool> DeleteAsync(Guid characterProfileId, CancellationToken cancellationToken)
     {
         var ownerId = EnsureCurrentOwnerId();
-        var profile = await LoadAsync(ownerId, characterProfileId, cancellationToken);
+        await using var mutationLease = await CharacterVoiceMutationCoordinator.AcquireAsync(
+            ownerId,
+            characterProfileId,
+            cancellationToken);
+        await using var transaction = dbContext.Database.IsRelational()
+            ? await dbContext.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken)
+            : null;
+        var profile = await LockForVoiceMutationAsync(ownerId, characterProfileId, cancellationToken);
         if (profile is null)
         {
             return false;
@@ -135,6 +143,21 @@ internal sealed class CharacterProfileService(
             throw new InvalidOperationException("這個角色目前還被某些系列使用中，請先從系列移除這個角色後再刪除。");
         }
 
+        var hasCloneOrCloneOperation = await dbContext.CharacterVoiceProfiles.AnyAsync(
+                voiceProfile => voiceProfile.OwnerId == ownerId
+                    && voiceProfile.CharacterProfileId == characterProfileId
+                    && voiceProfile.Mode == StoryVoice.Domain.Narrations.CharacterVoiceProfileMode.Clone,
+                cancellationToken)
+            || await dbContext.CharacterVoiceProfileOperations.AnyAsync(
+                operation => operation.OwnerId == ownerId
+                    && operation.CharacterProfileId == characterProfileId,
+                cancellationToken);
+        if (hasCloneOrCloneOperation)
+        {
+            throw new InvalidOperationException(
+                "這個角色含有 Clone 或待處理的 Clone operation；遠端刪除尚未能持久化確認前禁止刪除整個角色。");
+        }
+
         var voiceAudioPaths = await dbContext.CharacterVoiceProfiles
             .Where(voiceProfile => voiceProfile.OwnerId == ownerId && voiceProfile.CharacterProfileId == characterProfileId)
             .Select(voiceProfile => voiceProfile.ReferenceAudioRelativePath)
@@ -145,6 +168,10 @@ internal sealed class CharacterProfileService(
         {
             dbContext.CharacterProfiles.Remove(profile);
             await dbContext.SaveChangesAsync(cancellationToken);
+            if (transaction is not null)
+            {
+                await transaction.CommitAsync(cancellationToken);
+            }
         }
         catch (DbUpdateException exception)
         {
@@ -162,6 +189,27 @@ internal sealed class CharacterProfileService(
         }
 
         return true;
+    }
+
+    private async Task<CharacterProfile?> LockForVoiceMutationAsync(
+        Guid ownerId,
+        Guid characterProfileId,
+        CancellationToken cancellationToken)
+    {
+        if (!dbContext.Database.IsRelational())
+        {
+            return await LoadAsync(ownerId, characterProfileId, cancellationToken);
+        }
+
+        return await dbContext.CharacterProfiles
+            .FromSqlInterpolated(
+                $"""
+                SELECT *
+                FROM character_profiles
+                WHERE "OwnerId" = {ownerId} AND "Id" = {characterProfileId}
+                FOR UPDATE
+                """)
+            .SingleOrDefaultAsync(cancellationToken);
     }
 
     public async Task<CharacterProfileAvatar?> GetAvatarAsync(Guid characterProfileId, CancellationToken cancellationToken)

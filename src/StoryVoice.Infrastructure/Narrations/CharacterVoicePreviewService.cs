@@ -59,6 +59,26 @@ internal sealed class CharacterVoicePreviewService(
             throw new InvalidOperationException("這組聲線還沒就緒，無法試講。");
         }
 
+        if (profile.Mode == CharacterVoiceProfileMode.Clone)
+        {
+            var privateEvaluationAuthorized = await dbContext.CharacterVoiceProfileOperations
+                .AsNoTracking()
+                .AnyAsync(
+                    operation => operation.OwnerId == ownerId
+                        && operation.CharacterProfileId == characterProfileId
+                        && operation.NewProfileId == profile.Id
+                        && operation.State == CharacterVoiceProfileOperationState.Activated
+                        && operation.EvidenceVersion == CharacterVoiceConsentEvidence.CurrentEvidenceVersion
+                        && operation.AttestationVersion == CharacterVoiceConsentEvidence.CurrentAttestationVersion
+                        && operation.PrivateEvaluationAllowed,
+                    cancellationToken);
+            if (!privateEvaluationAuthorized)
+            {
+                throw new InvalidOperationException(
+                    "這組克隆聲線缺少可驗證的私人試音授權，無法試講。");
+            }
+        }
+
         var mode = profile.Mode == CharacterVoiceProfileMode.Clone ? "ultimate_clone" : "design";
         var handle = await synthesisClient.SubmitAsync(
             new ThreeWaSynthesisRequest(text, mode, profile.VoiceProfileTaskId, profile.VoicePromptText),

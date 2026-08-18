@@ -73,6 +73,16 @@ internal sealed class SeriesNarrationService(
                     "BlueMagpie 目前只開放固定句試音；正式小說配音尚未由管理員啟用。");
             }
 
+            var isThreeWa = string.Equals(
+                series.NarratorProvider,
+                CharacterVoiceProviders.ThreeWaVoxCpm2,
+                StringComparison.OrdinalIgnoreCase);
+            if (isThreeWa && !ThreeWaSynthesisCapabilities.SupportsTrustedCloneFormalNarration)
+            {
+                throw new InvalidOperationException(
+                    ThreeWaSynthesisCapabilities.CloneFormalNarrationUnavailableMessage);
+            }
+
             var memberships = series.Books
                 .OrderBy(member => member.SortOrder)
                 .ThenBy(member => member.Id)
@@ -741,7 +751,15 @@ internal sealed class SeriesNarrationService(
                 && characterProfileIds.Contains(profile.CharacterProfileId)
                 && profile.Kind == CharacterVoiceProfileKind.Base
                 && profile.Mode == CharacterVoiceProfileMode.Clone
-                && profile.Status == CharacterVoiceProfileStatus.Ready)
+                && profile.Status == CharacterVoiceProfileStatus.Ready
+                && dbContext.CharacterVoiceProfileOperations.Any(operation =>
+                    operation.OwnerId == ownerId
+                    && operation.CharacterProfileId == profile.CharacterProfileId
+                    && operation.NewProfileId == profile.Id
+                    && operation.State == CharacterVoiceProfileOperationState.Activated
+                    && operation.EvidenceVersion == CharacterVoiceConsentEvidence.CurrentEvidenceVersion
+                    && operation.AttestationVersion == CharacterVoiceConsentEvidence.CurrentAttestationVersion
+                    && operation.FormalNarrationAllowed))
             .Select(profile => profile.CharacterProfileId)
             .Distinct()
             .ToArrayAsync(cancellationToken);
