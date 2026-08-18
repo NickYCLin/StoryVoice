@@ -28,4 +28,4 @@ EXPOSE 8082
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
   CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8082/health/ready', timeout=3).read()"]
 
-CMD ["uvicorn", "local_clone_gateway.main:app", "--host", "0.0.0.0", "--port", "8082", "--workers", "1", "--limit-concurrency", "4", "--no-access-log", "--no-proxy-headers", "--no-server-header", "--timeout-keep-alive", "5"]
+CMD ["uvicorn", "local_clone_gateway.main:app", "--host", "0.0.0.0", "--port", "8082", "--workers", "1", "--limit-concurrency", "8", "--no-access-log", "--no-proxy-headers", "--no-server-header", "--timeout-keep-alive", "5"]

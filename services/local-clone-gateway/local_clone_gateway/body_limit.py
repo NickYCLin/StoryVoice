@@ -1,10 +1,28 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import secrets
 
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+
+logger = logging.getLogger("local_clone_gateway")
+SYNTHESIS_STAGE_HEADER = "X-StoryVoice-Local-Clone-Stage"
+SYNTHESIS_REJECTION_STAGES = frozenset(
+    {
+        "auth",
+        "content_length",
+        "multipart",
+        "request_contract",
+        "upstream_readiness",
+        "admission",
+        "queue",
+        "upstream_terminal",
+        "upstream_contract",
+    }
+)
 
 
 class RequestBodyLimitMiddleware:
@@ -50,7 +68,7 @@ class RequestBodyLimitMiddleware:
             self._token_digest,
         )
         if len(token_values) != 1 or not token_matches:
-            await self._reject(scope, receive, send, 401, "unauthorized")
+            await self._reject(scope, receive, send, 401, "unauthorized", "auth")
             return
 
         content_lengths = [
@@ -62,13 +80,19 @@ class RequestBodyLimitMiddleware:
             try:
                 declared = {int(value) for value in content_lengths}
             except ValueError:
-                await self._reject(scope, receive, send, 400, "invalid content length")
+                await self._reject(
+                    scope, receive, send, 400, "invalid content length", "content_length"
+                )
                 return
             if len(declared) != 1 or next(iter(declared)) < 0:
-                await self._reject(scope, receive, send, 400, "invalid content length")
+                await self._reject(
+                    scope, receive, send, 400, "invalid content length", "content_length"
+                )
                 return
             if next(iter(declared)) > self._max_bytes:
-                await self._reject(scope, receive, send, 413, "request body too large")
+                await self._reject(
+                    scope, receive, send, 413, "request body too large", "content_length"
+                )
                 return
 
         chunks: list[bytes] = []
@@ -82,7 +106,9 @@ class RequestBodyLimitMiddleware:
             chunk = message.get("body", b"")
             received_bytes += len(chunk)
             if received_bytes > self._max_bytes:
-                await self._reject(scope, receive, send, 413, "request body too large")
+                await self._reject(
+                    scope, receive, send, 413, "request body too large", "content_length"
+                )
                 return
             if chunk:
                 chunks.append(chunk)
@@ -112,6 +138,18 @@ class RequestBodyLimitMiddleware:
         send: Send,
         status_code: int,
         detail: str,
+        stage: str,
     ) -> None:
-        response = JSONResponse(status_code=status_code, content={"detail": detail})
+        if stage not in SYNTHESIS_REJECTION_STAGES:
+            raise RuntimeError("invalid synthesis rejection stage")
+        logger.warning(
+            "synthesis_rejected stage=%s status=%d",
+            stage,
+            status_code,
+        )
+        response = JSONResponse(
+            status_code=status_code,
+            content={"detail": detail},
+            headers={SYNTHESIS_STAGE_HEADER: stage},
+        )
         await response(scope, receive, send)

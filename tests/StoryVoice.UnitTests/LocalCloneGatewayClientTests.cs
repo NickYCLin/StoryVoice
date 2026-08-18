@@ -3,6 +3,8 @@ using System.Net;
 using System.Net.Http.Headers;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using StoryVoice.Application.Series;
 using StoryVoice.Infrastructure;
@@ -19,7 +21,7 @@ public sealed class LocalCloneGatewayClientTests
         var output = CreatePcmWave(sampleRate: 24_000, durationSeconds: 1);
         var handler = new StubHandler(_ => CreateSuccessResponse(output));
         using var httpClient = CreateHttpClient(handler);
-        var client = new LocalCloneGatewayClient(httpClient, CreateOptions());
+        var client = CreateClient(httpClient);
 
         var result = await client.SynthesizeAsync(
             new LocalCloneGatewayRequest(
@@ -41,38 +43,150 @@ public sealed class LocalCloneGatewayClientTests
     public async Task Rejects_an_output_that_is_not_pcm16_24khz_mono()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
+        var logger = new RecordingLogger<LocalCloneGatewayClient>();
         var handler = new StubHandler(_ => CreateSuccessResponse(
             CreatePcmWave(sampleRate: 48_000, durationSeconds: 1)));
         using var httpClient = CreateHttpClient(handler);
-        var client = new LocalCloneGatewayClient(httpClient, CreateOptions());
+        var client = CreateClient(httpClient, logger);
 
         var exception = await Assert.ThrowsAsync<LocalClonePreviewUnavailableException>(() =>
             client.SynthesizeAsync(
-                new LocalCloneGatewayRequest("試音", "逐字稿", [1, 2, 3]),
+                new LocalCloneGatewayRequest(
+                    "private-preview-text",
+                    "private-reference-transcript",
+                    [1, 2, 3]),
                 cancellationToken));
 
         Assert.Equal(LocalClonePreviewFailureKind.GatewayContractInvalid, exception.FailureKind);
         Assert.Equal("local_clone_preview_gateway_contract_invalid", exception.StableCode);
+        Assert.Contains("FailureClass=ResponseContract", logger.Combined);
+        Assert.Contains("ContractStage=Audio", logger.Combined);
+        Assert.DoesNotContain("private-preview-text", logger.Combined);
+        Assert.DoesNotContain("private-reference-transcript", logger.Combined);
     }
 
     [Fact]
     public async Task Maps_transient_gateway_status_without_reading_an_error_body()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
-        var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+        var logger = new RecordingLogger<LocalCloneGatewayClient>();
+        var handler = new StubHandler(_ =>
         {
-            Content = new StringContent("private diagnostic must not escape"),
+            var response = new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+            {
+                Content = new StringContent("private diagnostic must not escape"),
+            };
+            response.Headers.Add("X-StoryVoice-Local-Clone-Stage", "queue");
+            return response;
         });
         using var httpClient = CreateHttpClient(handler);
-        var client = new LocalCloneGatewayClient(httpClient, CreateOptions());
+        var client = CreateClient(httpClient, logger);
 
         var exception = await Assert.ThrowsAsync<LocalClonePreviewUnavailableException>(() =>
             client.SynthesizeAsync(
-                new LocalCloneGatewayRequest("試音", "逐字稿", [1, 2, 3]),
+                new LocalCloneGatewayRequest(
+                    "private-preview-text",
+                    "private-reference-transcript",
+                    [1, 2, 3]),
                 cancellationToken));
 
         Assert.Equal(LocalClonePreviewFailureKind.GatewayUnavailable, exception.FailureKind);
         Assert.Equal("local_clone_preview_gateway_unavailable", exception.StableCode);
+        Assert.Contains("FailureClass=HttpStatus", logger.Combined);
+        Assert.Contains("StatusCode=503", logger.Combined);
+        Assert.Contains("GatewayStage=queue", logger.Combined);
+        Assert.DoesNotContain("private diagnostic must not escape", logger.Combined);
+        Assert.DoesNotContain("private-preview-text", logger.Combined);
+        Assert.DoesNotContain("private-reference-transcript", logger.Combined);
+    }
+
+    [Fact]
+    public async Task Replaces_unknown_or_duplicate_gateway_stage_without_logging_it()
+    {
+        const string privateStage = "private-filename-token-transcript";
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var logger = new RecordingLogger<LocalCloneGatewayClient>();
+        var responses = new Queue<HttpResponseMessage>(
+        [
+            CreateFailureResponse(privateStage),
+            CreateFailureResponse("queue", privateStage),
+            CreateFailureResponse(),
+        ]);
+        var handler = new StubHandler(_ => responses.Dequeue());
+        using var httpClient = CreateHttpClient(handler);
+        var client = CreateClient(httpClient, logger);
+
+        for (var index = 0; index < 3; index++)
+        {
+            await Assert.ThrowsAsync<LocalClonePreviewUnavailableException>(() =>
+                client.SynthesizeAsync(
+                    new LocalCloneGatewayRequest("private-text", "private-transcript", [1]),
+                    cancellationToken));
+        }
+
+        Assert.Equal(3, logger.Messages.Count);
+        Assert.All(logger.Messages, message =>
+            Assert.Contains("GatewayStage=unknown_or_front_server", message));
+        Assert.DoesNotContain(privateStage, logger.Combined);
+        Assert.DoesNotContain("private-text", logger.Combined);
+        Assert.DoesNotContain("private-transcript", logger.Combined);
+    }
+
+    [Fact]
+    public async Task Logs_only_safe_transport_classification()
+    {
+        const string privateDiagnostic =
+            "private-text private-transcript reference.wav internal-token http://private-host";
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var logger = new RecordingLogger<LocalCloneGatewayClient>();
+        using var httpClient = CreateHttpClient(new ThrowingHandler(
+            new HttpRequestException(
+                HttpRequestError.ConnectionError,
+                privateDiagnostic)));
+        var client = CreateClient(httpClient, logger);
+
+        var exception = await Assert.ThrowsAsync<LocalClonePreviewUnavailableException>(() =>
+            client.SynthesizeAsync(
+                new LocalCloneGatewayRequest("private-text", "private-transcript", [1]),
+                cancellationToken));
+
+        Assert.Equal(LocalClonePreviewFailureKind.GatewayUnavailable, exception.FailureKind);
+        Assert.Null(exception.InnerException);
+        Assert.Contains("FailureClass=Transport", logger.Combined);
+        Assert.Contains("HttpRequestError=ConnectionError", logger.Combined);
+        Assert.DoesNotContain(privateDiagnostic, logger.Combined);
+        Assert.DoesNotContain("private-text", logger.Combined);
+        Assert.DoesNotContain("private-transcript", logger.Combined);
+    }
+
+    [Theory]
+    [InlineData(true, "Timeout")]
+    [InlineData(false, "Io")]
+    public async Task Logs_only_fixed_timeout_or_io_failure_class(
+        bool timeout,
+        string expectedFailureClass)
+    {
+        const string privateDiagnostic =
+            "private-text private-transcript reference.wav internal-token http://private-host";
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var logger = new RecordingLogger<LocalCloneGatewayClient>();
+        Exception thrown = timeout
+            ? new OperationCanceledException(privateDiagnostic)
+            : new IOException(privateDiagnostic);
+        using var httpClient = CreateHttpClient(new ThrowingHandler(thrown));
+        var client = CreateClient(httpClient, logger);
+
+        var exception = await Assert.ThrowsAsync<LocalClonePreviewUnavailableException>(() =>
+            client.SynthesizeAsync(
+                new LocalCloneGatewayRequest("private-text", "private-transcript", [1]),
+                cancellationToken));
+
+        Assert.Equal(LocalClonePreviewFailureKind.GatewayUnavailable, exception.FailureKind);
+        Assert.Null(exception.InnerException);
+        Assert.Contains($"FailureClass={expectedFailureClass}", logger.Combined);
+        Assert.DoesNotContain(privateDiagnostic, logger.Combined);
+        Assert.DoesNotContain("private-text", logger.Combined);
+        Assert.DoesNotContain("private-transcript", logger.Combined);
     }
 
     [Fact]
@@ -89,7 +203,7 @@ public sealed class LocalCloneGatewayClientTests
             return response;
         });
         using var httpClient = CreateHttpClient(handler);
-        var client = new LocalCloneGatewayClient(httpClient, CreateOptions());
+        var client = CreateClient(httpClient);
 
         var exception = await Assert.ThrowsAsync<LocalClonePreviewUnavailableException>(() =>
             client.SynthesizeAsync(
@@ -181,6 +295,14 @@ public sealed class LocalCloneGatewayClientTests
         Timeout = TimeSpan.FromSeconds(30),
     };
 
+    private static LocalCloneGatewayClient CreateClient(
+        HttpClient httpClient,
+        ILogger<LocalCloneGatewayClient>? logger = null) =>
+        new(
+            httpClient,
+            CreateOptions(),
+            logger ?? NullLogger<LocalCloneGatewayClient>.Instance);
+
     private static IOptions<LocalClonePreviewOptions> CreateOptions() => Options.Create(
         new LocalClonePreviewOptions
         {
@@ -204,6 +326,19 @@ public sealed class LocalCloneGatewayClientTests
         response.Headers.Add(
             "X-CosyVoice-Model-Revision",
             LocalClonePreviewOptions.PinnedModelRevision);
+        return response;
+    }
+
+    private static HttpResponseMessage CreateFailureResponse(params string[] stages)
+    {
+        var response = new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
+        if (stages.Length != 0)
+        {
+            response.Headers.TryAddWithoutValidation(
+                "X-StoryVoice-Local-Clone-Stage",
+                stages);
+        }
+
         return response;
     }
 
@@ -250,5 +385,32 @@ public sealed class LocalCloneGatewayClientTests
                 .ToArray();
             return Task.FromResult(responseFactory(request));
         }
+    }
+
+    private sealed class ThrowingHandler(Exception exception) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken) =>
+            Task.FromException<HttpResponseMessage>(exception);
+    }
+
+    private sealed class RecordingLogger<T> : ILogger<T>
+    {
+        public List<string> Messages { get; } = [];
+
+        public string Combined => string.Join(Environment.NewLine, Messages);
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter) =>
+            Messages.Add(formatter(state, null));
     }
 }

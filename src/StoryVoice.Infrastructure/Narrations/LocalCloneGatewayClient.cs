@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Net;
 using System.Net.Http.Headers;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using StoryVoice.Application.Series;
 
@@ -8,12 +9,27 @@ namespace StoryVoice.Infrastructure.Narrations;
 
 public sealed class LocalCloneGatewayClient(
     HttpClient httpClient,
-    IOptions<LocalClonePreviewOptions> options) : ILocalCloneGatewayClient
+    IOptions<LocalClonePreviewOptions> options,
+    ILogger<LocalCloneGatewayClient> logger) : ILocalCloneGatewayClient
 {
     private const string TokenHeader = "X-StoryVoice-Internal-Token";
     private const string SourceRevisionHeader = "X-CosyVoice-Source-Revision";
     private const string ModelIdHeader = "X-CosyVoice-Model-Id";
     private const string ModelRevisionHeader = "X-CosyVoice-Model-Revision";
+    private const string FailureStageHeader = "X-StoryVoice-Local-Clone-Stage";
+    private const string UnknownFailureStage = "unknown_or_front_server";
+    private static readonly HashSet<string> AllowedFailureStages = new(StringComparer.Ordinal)
+    {
+        "auth",
+        "content_length",
+        "multipart",
+        "request_contract",
+        "upstream_readiness",
+        "admission",
+        "queue",
+        "upstream_terminal",
+        "upstream_contract",
+    };
 
     public async Task<LocalCloneGatewayAudio> SynthesizeAsync(
         LocalCloneGatewayRequest request,
@@ -41,6 +57,11 @@ public sealed class LocalCloneGatewayClient(
                 cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
+                logger.LogWarning(
+                    "Local clone gateway request failed. FailureClass={FailureClass} StatusCode={StatusCode} GatewayStage={GatewayStage}",
+                    LocalCloneGatewayFailureClass.HttpStatus,
+                    (int)response.StatusCode,
+                    ReadSafeFailureStage(response));
                 throw FailureFor(response.StatusCode);
             }
 
@@ -50,7 +71,7 @@ public sealed class LocalCloneGatewayClient(
                 || declaredLength <= 0
                 || declaredLength > options.Value.MaximumResponseBytes)
             {
-                throw ContractInvalid();
+                throw ContractInvalid(LocalCloneGatewayContractStage.DeclaredLength);
             }
 
             await using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
@@ -60,16 +81,16 @@ public sealed class LocalCloneGatewayClient(
                 cancellationToken);
             if (content.LongLength != declaredLength)
             {
-                throw ContractInvalid();
+                throw ContractInvalid(LocalCloneGatewayContractStage.BodyLength);
             }
 
             try
             {
                 LocalClonePcmWaveValidator.ValidateOutput(content, options.Value.MaximumResponseBytes);
             }
-            catch (InvalidDataException exception)
+            catch (InvalidDataException)
             {
-                throw ContractInvalid(exception);
+                throw ContractInvalid(LocalCloneGatewayContractStage.Audio);
             }
 
             return new LocalCloneGatewayAudio(content, "audio/wav");
@@ -80,24 +101,32 @@ public sealed class LocalCloneGatewayClient(
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
+            logger.LogWarning(
+                "Local clone gateway request failed. FailureClass={FailureClass}",
+                LocalCloneGatewayFailureClass.Timeout);
             throw new LocalClonePreviewUnavailableException(
                 LocalClonePreviewFailureKind.GatewayUnavailable);
         }
         catch (HttpRequestException exception)
         {
+            logger.LogWarning(
+                "Local clone gateway request failed. FailureClass={FailureClass} HttpRequestError={HttpRequestError}",
+                LocalCloneGatewayFailureClass.Transport,
+                exception.HttpRequestError);
             throw new LocalClonePreviewUnavailableException(
-                LocalClonePreviewFailureKind.GatewayUnavailable,
-                exception);
+                LocalClonePreviewFailureKind.GatewayUnavailable);
         }
-        catch (IOException exception)
+        catch (IOException)
         {
+            logger.LogWarning(
+                "Local clone gateway request failed. FailureClass={FailureClass}",
+                LocalCloneGatewayFailureClass.Io);
             throw new LocalClonePreviewUnavailableException(
-                LocalClonePreviewFailureKind.GatewayUnavailable,
-                exception);
+                LocalClonePreviewFailureKind.GatewayUnavailable);
         }
     }
 
-    private static void ValidateResponseHeaders(HttpResponseMessage response)
+    private void ValidateResponseHeaders(HttpResponseMessage response)
     {
         if (!string.Equals(
                 response.Content.Headers.ContentType?.MediaType,
@@ -118,7 +147,7 @@ public sealed class LocalCloneGatewayClient(
                 ModelRevisionHeader,
                 LocalClonePreviewOptions.PinnedModelRevision))
         {
-            throw ContractInvalid();
+            throw ContractInvalid(LocalCloneGatewayContractStage.Headers);
         }
     }
 
@@ -137,7 +166,20 @@ public sealed class LocalCloneGatewayClient(
             && string.Equals(candidates[0], expected, StringComparison.Ordinal);
     }
 
-    private static async Task<byte[]> ReadBoundedAsync(
+    private static string ReadSafeFailureStage(HttpResponseMessage response)
+    {
+        if (!response.Headers.TryGetValues(FailureStageHeader, out var values))
+        {
+            return UnknownFailureStage;
+        }
+
+        var candidates = values.Take(2).ToArray();
+        return candidates.Length == 1 && AllowedFailureStages.Contains(candidates[0])
+            ? candidates[0]
+            : UnknownFailureStage;
+    }
+
+    private async Task<byte[]> ReadBoundedAsync(
         Stream stream,
         int maximumBytes,
         CancellationToken cancellationToken)
@@ -156,7 +198,7 @@ public sealed class LocalCloneGatewayClient(
 
                 if (output.Length > maximumBytes - read)
                 {
-                    throw ContractInvalid();
+                    throw ContractInvalid(LocalCloneGatewayContractStage.BodyLength);
                 }
 
                 output.Write(buffer, 0, read);
@@ -173,6 +215,31 @@ public sealed class LocalCloneGatewayClient(
             ? LocalClonePreviewFailureKind.GatewayUnavailable
             : LocalClonePreviewFailureKind.GatewayContractInvalid);
 
-    private static LocalClonePreviewUnavailableException ContractInvalid(Exception? inner = null) =>
-        new(LocalClonePreviewFailureKind.GatewayContractInvalid, inner);
+    private LocalClonePreviewUnavailableException ContractInvalid(
+        LocalCloneGatewayContractStage stage)
+    {
+        logger.LogWarning(
+            "Local clone gateway response contract was rejected. FailureClass={FailureClass} ContractStage={ContractStage}",
+            LocalCloneGatewayFailureClass.ResponseContract,
+            stage);
+        return new LocalClonePreviewUnavailableException(
+            LocalClonePreviewFailureKind.GatewayContractInvalid);
+    }
+
+    private enum LocalCloneGatewayFailureClass
+    {
+        HttpStatus,
+        Timeout,
+        Transport,
+        Io,
+        ResponseContract,
+    }
+
+    private enum LocalCloneGatewayContractStage
+    {
+        Headers,
+        DeclaredLength,
+        BodyLength,
+        Audio,
+    }
 }

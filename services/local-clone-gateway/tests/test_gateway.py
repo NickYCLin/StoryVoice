@@ -9,10 +9,15 @@ from pathlib import Path
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.requests import Request as StarletteRequest
 
 import local_clone_gateway.body_limit as body_limit_module
 from local_clone_gateway.app import create_app
-from local_clone_gateway.body_limit import RequestBodyLimitMiddleware
+from local_clone_gateway.body_limit import (
+    SYNTHESIS_STAGE_HEADER,
+    RequestBodyLimitMiddleware,
+)
 from local_clone_gateway.constants import (
     COSYVOICE_SOURCE_REVISION,
     MAX_OUTPUT_BYTES,
@@ -42,6 +47,7 @@ TOKEN = "offline-contract-token-at-least-32-characters"
 AUTH_HEADERS = {TOKEN_HEADER: TOKEN}
 PRIVATE_TEXT = "尚未公開的小說正文"
 PRIVATE_TRANSCRIPT = "本人授權但不得寫進記錄的逐字稿"
+PRIVATE_TOKEN = "private-token-must-never-appear-in-logs"
 
 
 def pcm_wave(
@@ -158,6 +164,18 @@ def post_synthesis(
     )
 
 
+def assert_rejection_stage(response, stage: str) -> None:
+    assert response.headers[SYNTHESIS_STAGE_HEADER] == stage
+
+
+def gateway_log_messages(caplog) -> list[str]:
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "local_clone_gateway"
+    ]
+
+
 def test_lifecycle_and_exact_health_pins() -> None:
     upstream = FakeUpstream()
     app = build_app(upstream)
@@ -185,6 +203,7 @@ def test_readiness_fails_closed_when_upstream_is_unready() -> None:
 
     assert response.status_code == 503
     assert response.json() == {"status": "not_ready"}
+    assert SYNTHESIS_STAGE_HEADER not in response.headers
 
 
 def test_gateway_never_self_attests_an_unverified_upstream() -> None:
@@ -208,6 +227,7 @@ def test_gateway_never_self_attests_an_unverified_upstream() -> None:
 
     assert health.status_code == 503
     assert speech.status_code == 503
+    assert_rejection_stage(speech, "upstream_contract")
     assert SOURCE_REVISION_HEADER not in speech.headers
     assert MODEL_ID_HEADER not in speech.headers
     assert MODEL_REVISION_HEADER not in speech.headers
@@ -225,6 +245,7 @@ def test_synthesis_returns_only_pinned_pcm_contract_and_no_store() -> None:
         )
 
     assert response.status_code == 200
+    assert SYNTHESIS_STAGE_HEADER not in response.headers
     assert response.headers["content-type"] == "audio/wav"
     assert response.headers[SOURCE_REVISION_HEADER] == COSYVOICE_SOURCE_REVISION
     assert response.headers[MODEL_ID_HEADER] == MODEL_ID
@@ -253,6 +274,8 @@ def test_internal_token_is_required() -> None:
 
     assert missing.status_code == 401
     assert wrong.status_code == 401
+    assert_rejection_stage(missing, "auth")
+    assert_rejection_stage(wrong, "auth")
     assert missing.json() == wrong.json() == {"detail": "unauthorized"}
     assert upstream.calls == []
 
@@ -290,22 +313,21 @@ def test_internal_token_accepts_both_length_boundaries(length: int) -> None:
     "headers",
     [
         [
-            (TOKEN_HEADER.lower().encode("ascii"), b"wrong-token"),
+            (TOKEN_HEADER.lower().encode("ascii"), PRIVATE_TOKEN.encode("ascii")),
             (b"content-length", str(MAX_REQUEST_BODY_BYTES + 1).encode("ascii")),
         ],
         [
-            (TOKEN_HEADER.lower().encode("ascii"), b"wrong-token"),
+            (TOKEN_HEADER.lower().encode("ascii"), PRIVATE_TOKEN.encode("ascii")),
             (b"transfer-encoding", b"chunked"),
         ],
-        [
-            (b"content-length", str(MAX_REQUEST_BODY_BYTES + 1).encode("ascii")),
-        ],
+        [(b"content-length", str(MAX_REQUEST_BODY_BYTES + 1).encode("ascii"))],
     ],
     ids=("declared-wrong", "streamed-wrong", "declared-missing"),
 )
-def test_asgi_token_precheck_never_reads_unauthorized_body(
+def test_asgi_prechecks_log_only_fixed_stage_without_reading_rejected_body(
     headers: list[tuple[bytes, bytes]],
     monkeypatch,
+    caplog,
 ) -> None:
     async def exercise() -> None:
         downstream_called = False
@@ -364,12 +386,35 @@ def test_asgi_token_precheck_never_reads_unauthorized_body(
         assert receive_called is False
         assert sent[0]["type"] == "http.response.start"
         assert sent[0]["status"] == 401
+        assert dict(sent[0]["headers"])[
+            SYNTHESIS_STAGE_HEADER.lower().encode("ascii")
+        ] == b"auth"
         assert sent[1]["body"] == b'{"detail":"unauthorized"}'
-        assert len(compare_calls) == 1
-        assert len(compare_calls[0][0]) == 32
-        assert len(compare_calls[0][1]) == 32
 
-    asyncio.run(exercise())
+        sent.clear()
+        scope["headers"] = [
+            (TOKEN_HEADER.lower().encode("ascii"), TOKEN.encode("ascii")),
+            (b"content-length", str(MAX_REQUEST_BODY_BYTES + 1).encode("ascii")),
+        ]
+        await middleware(scope, receive, send)
+        assert sent[0]["status"] == 413
+        assert dict(sent[0]["headers"])[
+            SYNTHESIS_STAGE_HEADER.lower().encode("ascii")
+        ] == b"content_length"
+        assert sent[1]["body"] == b'{"detail":"request body too large"}'
+        assert len(compare_calls) == 2
+        assert all(len(item) == 32 for call in compare_calls for item in call)
+
+    with caplog.at_level(logging.INFO, logger="local_clone_gateway"):
+        asyncio.run(exercise())
+
+    messages = gateway_log_messages(caplog)
+    assert messages == [
+        "synthesis_rejected stage=auth status=401",
+        "synthesis_rejected stage=content_length status=413",
+    ]
+    for secret in (TOKEN, PRIVATE_TOKEN, PRIVATE_TEXT, PRIVATE_TRANSCRIPT):
+        assert secret not in caplog.text
 
 
 def test_gateway_has_no_redis_runtime_dependency_or_setting() -> None:
@@ -384,6 +429,24 @@ def test_gateway_has_no_redis_runtime_dependency_or_setting() -> None:
     for path in runtime_files:
         assert "redis" not in path.read_text(encoding="utf-8").lower()
     assert not (service_root / "local_clone_gateway" / "gpu_lock.py").exists()
+
+
+def test_rejection_stage_allowlist_is_exact_and_lowercase() -> None:
+    assert body_limit_module.SYNTHESIS_REJECTION_STAGES == {
+        "auth",
+        "content_length",
+        "multipart",
+        "request_contract",
+        "upstream_readiness",
+        "admission",
+        "queue",
+        "upstream_terminal",
+        "upstream_contract",
+    }
+    assert all(
+        stage == stage.lower()
+        for stage in body_limit_module.SYNTHESIS_REJECTION_STAGES
+    )
 
 
 def test_private_fields_and_filename_are_neither_logged_nor_reflected(caplog) -> None:
@@ -407,9 +470,122 @@ def test_private_fields_and_filename_are_neither_logged_nor_reflected(caplog) ->
 
     assert response.status_code == 503
     assert response.json() == {"detail": "synthesis unavailable"}
-    for secret in (PRIVATE_TEXT, PRIVATE_TRANSCRIPT, private_filename):
+    assert_rejection_stage(response, "upstream_terminal")
+    messages = gateway_log_messages(caplog)
+    assert messages == [
+        "synthesis_rejected stage=upstream_terminal status=503"
+    ]
+    for secret in (TOKEN, PRIVATE_TEXT, PRIVATE_TRANSCRIPT, private_filename):
         assert secret not in response.text
         assert secret not in caplog.text
+
+
+def test_exception_handler_drops_unknown_private_stage_and_headers(caplog) -> None:
+    async def exercise():
+        app = build_app(FakeUpstream())
+        request = StarletteRequest(
+            {
+                "type": "http",
+                "asgi": {"version": "3.0"},
+                "http_version": "1.1",
+                "method": "POST",
+                "scheme": "http",
+                "path": UPSTREAM_SYNTHESIS_PATH,
+                "raw_path": UPSTREAM_SYNTHESIS_PATH.encode("ascii"),
+                "query_string": b"",
+                "root_path": "",
+                "headers": [],
+                "client": ("127.0.0.1", 12345),
+                "server": ("test", 80),
+                "app": app,
+            }
+        )
+        handler = app.exception_handlers[StarletteHTTPException]
+        exception = StarletteHTTPException(
+            status_code=503,
+            detail=f"{PRIVATE_TEXT}:{PRIVATE_TRANSCRIPT}",
+            headers={
+                SYNTHESIS_STAGE_HEADER: f"private-{PRIVATE_TRANSCRIPT}",
+                "Retry-After": "1",
+                "X-Private-Token": PRIVATE_TOKEN,
+            },
+        )
+        return await handler(request, exception)
+
+    with caplog.at_level(logging.INFO, logger="local_clone_gateway"):
+        response = asyncio.run(exercise())
+
+    assert response.status_code == 503
+    assert response.headers["retry-after"] == "1"
+    assert SYNTHESIS_STAGE_HEADER not in response.headers
+    assert "x-private-token" not in response.headers
+    assert response.body == b'{"detail":"synthesis unavailable"}'
+    messages = gateway_log_messages(caplog)
+    assert messages == []
+    for secret in (PRIVATE_TEXT, PRIVATE_TRANSCRIPT, PRIVATE_TOKEN):
+        assert secret not in caplog.text
+        assert secret.encode("utf-8") not in response.body
+
+
+def test_form_rejections_log_only_fixed_stage_and_status(caplog) -> None:
+    upstream = FakeUpstream()
+    unready_upstream = FakeUpstream(ready=False)
+    app = build_app(upstream)
+    private_filename = "private-owner-reference.wav"
+    malformed_body = (
+        f"--broken\r\n{PRIVATE_TEXT}\r\n{PRIVATE_TRANSCRIPT}\r\n--broken--"
+    ).encode("utf-8")
+
+    with caplog.at_level(logging.INFO, logger="local_clone_gateway"):
+        with TestClient(app) as client:
+            malformed = client.post(
+                UPSTREAM_SYNTHESIS_PATH,
+                headers={
+                    **AUTH_HEADERS,
+                    "Content-Type": "multipart/form-data; boundary=broken",
+                },
+                content=malformed_body,
+            )
+            contract = post_synthesis(
+                client,
+                headers=AUTH_HEADERS,
+                text=PRIVATE_TEXT,
+                reference_text=PRIVATE_TRANSCRIPT,
+                filename=private_filename,
+                content_type="application/octet-stream",
+            )
+        with TestClient(build_app(unready_upstream)) as client:
+            dependency = post_synthesis(
+                client,
+                headers=AUTH_HEADERS,
+                text=PRIVATE_TEXT,
+                reference_text=PRIVATE_TRANSCRIPT,
+                filename=private_filename,
+            )
+
+    assert malformed.status_code == 400
+    assert malformed.json() == {"detail": "invalid request"}
+    assert_rejection_stage(malformed, "multipart")
+    assert contract.status_code == 415
+    assert contract.json() == {"detail": "unsupported media type"}
+    assert_rejection_stage(contract, "request_contract")
+    assert dependency.status_code == 503
+    assert dependency.json() == {"detail": "synthesis unavailable"}
+    assert_rejection_stage(dependency, "upstream_readiness")
+    messages = gateway_log_messages(caplog)
+    assert messages == [
+        "synthesis_rejected stage=multipart status=400",
+        "synthesis_rejected stage=request_contract status=415",
+        "synthesis_rejected stage=upstream_readiness status=503",
+    ]
+    for secret in (
+        TOKEN,
+        PRIVATE_TEXT,
+        PRIVATE_TRANSCRIPT,
+        private_filename,
+    ):
+        assert secret not in caplog.text
+    assert upstream.calls == unready_upstream.calls == []
 
 
 def test_schema_is_exact_and_never_reflects_rejected_values() -> None:
@@ -449,6 +625,12 @@ def test_schema_is_exact_and_never_reflects_rejected_values() -> None:
 
     assert [item.status_code for item in responses] == [422, 422, 422, 400]
     assert all(item.json() == {"detail": "invalid request"} for item in responses)
+    assert [item.headers[SYNTHESIS_STAGE_HEADER] for item in responses] == [
+        "request_contract",
+        "request_contract",
+        "request_contract",
+        "multipart",
+    ]
     assert "不可反射" not in responses[-1].text
     assert upstream.calls == []
 
@@ -471,8 +653,10 @@ def test_reference_audio_type_and_ten_mib_limit_are_enforced() -> None:
 
     assert wrong_type.status_code == 415
     assert wrong_type.json() == {"detail": "unsupported media type"}
+    assert_rejection_stage(wrong_type, "request_contract")
     assert too_large.status_code == 413
     assert too_large.json() == {"detail": "request body too large"}
+    assert_rejection_stage(too_large, "request_contract")
     assert upstream.calls == []
 
 
@@ -531,6 +715,7 @@ def test_reference_must_be_pcm16_48khz_mono_for_ten_to_45_seconds(
 
     assert response.status_code == 422
     assert response.json() == {"detail": "invalid request"}
+    assert_rejection_stage(response, "request_contract")
     assert upstream.calls == []
 
 
@@ -563,6 +748,8 @@ def test_asgi_body_cap_rejects_declared_and_streamed_oversize_before_parser() ->
 
     assert declared.status_code == 413
     assert streamed.status_code == 413
+    assert_rejection_stage(declared, "content_length")
+    assert_rejection_stage(streamed, "content_length")
     assert declared.json() == streamed.json() == {
         "detail": "request body too large"
     }
@@ -589,6 +776,7 @@ def test_output_must_be_bounded_pcm16_24khz_mono(invalid_audio: bytes) -> None:
 
     assert response.status_code == 503
     assert response.json() == {"detail": "synthesis unavailable"}
+    assert_rejection_stage(response, "upstream_contract")
 
 
 class BlockingUpstream(FakeUpstream):
@@ -668,8 +856,10 @@ def test_process_local_single_flight_has_a_bounded_queue() -> None:
 
                 assert third.status_code == 503
                 assert third.headers["retry-after"] == "1"
+                assert_rejection_stage(third, "admission")
                 assert second_response.status_code == 503
                 assert second_response.headers["retry-after"] == "1"
+                assert_rejection_stage(second_response, "queue")
                 assert len(upstream.calls) == 1
 
                 upstream.release.set()

@@ -11,11 +11,16 @@ from typing import Annotated, NoReturn, TypeVar
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
+from python_multipart.exceptions import MultipartParseError
 from starlette.datastructures import UploadFile
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .audio import validate_pcm_wave, validate_reference_wave
-from .body_limit import RequestBodyLimitMiddleware
+from .body_limit import (
+    SYNTHESIS_REJECTION_STAGES,
+    SYNTHESIS_STAGE_HEADER,
+    RequestBodyLimitMiddleware,
+)
 from .constants import (
     COSYVOICE_SOURCE_REVISION,
     FATAL_WATCHDOG_EXIT_CODE,
@@ -47,6 +52,36 @@ logger = logging.getLogger("local_clone_gateway")
 UpstreamFactory = Callable[[], CloneUpstream]
 FatalExit = Callable[[int], NoReturn]
 WorkerResult = TypeVar("WorkerResult")
+
+
+def _synthesis_http_error(
+    *,
+    status_code: int,
+    detail: str,
+    stage: str,
+    retry_after: str | None = None,
+) -> HTTPException:
+    if stage not in SYNTHESIS_REJECTION_STAGES:
+        raise RuntimeError("invalid synthesis rejection stage")
+    headers = {SYNTHESIS_STAGE_HEADER: stage}
+    if retry_after is not None:
+        headers["Retry-After"] = retry_after
+    return HTTPException(
+        status_code=status_code,
+        detail=detail,
+        headers=headers,
+    )
+
+
+def _request_contract_error(
+    status_code: int = 422,
+    detail: str = "invalid request",
+) -> HTTPException:
+    return _synthesis_http_error(
+        status_code=status_code,
+        detail=detail,
+        stage="request_contract",
+    )
 
 
 def _fatal_process_exit(exit_code: int) -> NoReturn:
@@ -104,55 +139,74 @@ async def _await_upstream_terminal(
 async def _parse_synthesis_form(request: Request) -> tuple[str, str, bytes]:
     content_type = request.headers.get("content-type", "")
     if not content_type.lower().startswith("multipart/form-data;"):
-        raise HTTPException(status_code=415, detail="unsupported media type")
+        raise _synthesis_http_error(
+            status_code=415,
+            detail="unsupported media type",
+            stage="multipart",
+        )
 
-    async with request.form(
-        max_files=1,
-        max_fields=2,
-        max_part_size=MAX_REFERENCE_TEXT_LENGTH * 4,
-    ) as form:
-        items = list(form.multi_items())
-        allowed_names = {"text", "reference_text", "reference_audio"}
-        if (
-            len(items) != 3
-            or {name for name, _ in items} != allowed_names
-            or any(len(form.getlist(name)) != 1 for name in allowed_names)
-        ):
-            raise HTTPException(status_code=422, detail="invalid request")
+    try:
+        async with request.form(
+            max_files=1,
+            max_fields=2,
+            max_part_size=MAX_REFERENCE_TEXT_LENGTH * 4,
+        ) as form:
+            items = list(form.multi_items())
+            allowed_names = {"text", "reference_text", "reference_audio"}
+            if (
+                len(items) != 3
+                or {name for name, _ in items} != allowed_names
+                or any(len(form.getlist(name)) != 1 for name in allowed_names)
+            ):
+                raise _request_contract_error()
 
-        text = form.get("text")
-        reference_text = form.get("reference_text")
-        reference_audio = form.get("reference_audio")
-        if not isinstance(text, str) or not isinstance(reference_text, str):
-            raise HTTPException(status_code=422, detail="invalid request")
-        if not isinstance(reference_audio, UploadFile):
-            raise HTTPException(status_code=422, detail="invalid request")
+            text = form.get("text")
+            reference_text = form.get("reference_text")
+            reference_audio = form.get("reference_audio")
+            if not isinstance(text, str) or not isinstance(reference_text, str):
+                raise _request_contract_error()
+            if not isinstance(reference_audio, UploadFile):
+                raise _request_contract_error()
 
-        normalized_text = text.strip()
-        normalized_reference_text = reference_text.strip()
-        if not normalized_text or len(normalized_text) > MAX_TEXT_LENGTH:
-            raise HTTPException(status_code=422, detail="invalid request")
-        if (
-            not normalized_reference_text
-            or len(normalized_reference_text) > MAX_REFERENCE_TEXT_LENGTH
-        ):
-            raise HTTPException(status_code=422, detail="invalid request")
-        if reference_audio.content_type not in {
-            "audio/wav",
-            "audio/x-wav",
-            "audio/wave",
-            "audio/vnd.wave",
-        }:
-            raise HTTPException(status_code=415, detail="unsupported media type")
+            normalized_text = text.strip()
+            normalized_reference_text = reference_text.strip()
+            if not normalized_text or len(normalized_text) > MAX_TEXT_LENGTH:
+                raise _request_contract_error()
+            if (
+                not normalized_reference_text
+                or len(normalized_reference_text) > MAX_REFERENCE_TEXT_LENGTH
+            ):
+                raise _request_contract_error()
+            if reference_audio.content_type not in {
+                "audio/wav",
+                "audio/x-wav",
+                "audio/wave",
+                "audio/vnd.wave",
+            }:
+                raise _request_contract_error(
+                    status_code=415,
+                    detail="unsupported media type",
+                )
 
-        audio = await reference_audio.read(MAX_REFERENCE_AUDIO_BYTES + 1)
-        if not audio or len(audio) > MAX_REFERENCE_AUDIO_BYTES:
-            raise HTTPException(status_code=413, detail="reference audio too large")
-        try:
-            validate_reference_wave(audio)
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail="invalid request") from exc
-        return normalized_text, normalized_reference_text, audio
+            audio = await reference_audio.read(MAX_REFERENCE_AUDIO_BYTES + 1)
+            if not audio or len(audio) > MAX_REFERENCE_AUDIO_BYTES:
+                raise _request_contract_error(
+                    status_code=413,
+                    detail="reference audio too large",
+                )
+            try:
+                validate_reference_wave(audio)
+            except ValueError as exc:
+                raise _request_contract_error() from exc
+            return normalized_text, normalized_reference_text, audio
+    except HTTPException:
+        raise
+    except (StarletteHTTPException, MultipartParseError) as exc:
+        raise _synthesis_http_error(
+            status_code=getattr(exc, "status_code", 400),
+            detail="invalid request",
+            stage="multipart",
+        ) from exc
 
 
 def create_app(
@@ -209,18 +263,32 @@ def create_app(
             token,
             resolved_settings.internal_token,
         ):
-            raise HTTPException(status_code=401, detail="unauthorized")
+            raise _synthesis_http_error(
+                status_code=401,
+                detail="unauthorized",
+                stage="auth",
+            )
 
     @app.exception_handler(RequestValidationError)
     async def validation_error_handler(
-        _request: Request,
+        request: Request,
         _exception: RequestValidationError,
     ) -> JSONResponse:
-        return JSONResponse(status_code=422, content={"detail": "invalid request"})
+        headers = None
+        if request.url.path == SYNTHESIS_PATH:
+            logger.warning(
+                "synthesis_rejected stage=request_contract status=422"
+            )
+            headers = {SYNTHESIS_STAGE_HEADER: "request_contract"}
+        return JSONResponse(
+            status_code=422,
+            content={"detail": "invalid request"},
+            headers=headers,
+        )
 
     @app.exception_handler(StarletteHTTPException)
     async def http_error_handler(
-        _request: Request,
+        request: Request,
         exception: StarletteHTTPException,
     ) -> JSONResponse:
         details = {
@@ -232,15 +300,34 @@ def create_app(
             422: "invalid request",
             503: "synthesis unavailable",
         }
-        headers = None
+        headers: dict[str, str] = {}
         if exception.status_code == 503 and exception.headers:
             retry_after = exception.headers.get("Retry-After")
             if retry_after == "1":
-                headers = {"Retry-After": "1"}
+                headers["Retry-After"] = "1"
+        stage = None
+        if exception.headers:
+            stage_values = [
+                value
+                for name, value in exception.headers.items()
+                if name.lower() == SYNTHESIS_STAGE_HEADER.lower()
+            ]
+            if len(stage_values) == 1:
+                stage = stage_values[0]
+        if (
+            request.url.path == SYNTHESIS_PATH
+            and stage in SYNTHESIS_REJECTION_STAGES
+        ):
+            logger.warning(
+                "synthesis_rejected stage=%s status=%d",
+                stage,
+                exception.status_code,
+            )
+            headers[SYNTHESIS_STAGE_HEADER] = stage
         return JSONResponse(
             status_code=exception.status_code,
             content={"detail": details.get(exception.status_code, "request rejected")},
-            headers=headers,
+            headers=headers or None,
         )
 
     async def dependency_attestation() -> UpstreamAttestation | None:
@@ -280,7 +367,11 @@ def create_app(
     async def synthesize_admitted(request: Request) -> Response:
         text, reference_text, reference_audio = await _parse_synthesis_form(request)
         if await dependency_attestation() is None:
-            raise HTTPException(status_code=503, detail="synthesis unavailable")
+            raise _synthesis_http_error(
+                status_code=503,
+                detail="synthesis unavailable",
+                stage="upstream_readiness",
+            )
 
         queue_deadline = (
             asyncio.get_running_loop().time()
@@ -306,11 +397,11 @@ def create_app(
                 )
                 gate_acquired = True
             except TimeoutError as exc:
-                logger.warning("synthesis_queue_timeout")
-                raise HTTPException(
+                raise _synthesis_http_error(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail="synthesis unavailable",
-                    headers={"Retry-After": "1"},
+                    stage="queue",
+                    retry_after="1",
                 ) from exc
 
             worker = asyncio.create_task(
@@ -332,14 +423,17 @@ def create_app(
                     type(exc).__name__,
                 )
                 terminate_for_uncertainty("upstream_transport")
-            except (UpstreamRejected, UpstreamProtocolError) as exc:
-                logger.error(
-                    "upstream_terminal_failure error_type=%s",
-                    type(exc).__name__,
-                )
-                raise HTTPException(
+            except UpstreamRejected as exc:
+                raise _synthesis_http_error(
                     status_code=503,
                     detail="synthesis unavailable",
+                    stage="upstream_terminal",
+                ) from exc
+            except UpstreamProtocolError as exc:
+                raise _synthesis_http_error(
+                    status_code=503,
+                    detail="synthesis unavailable",
+                    stage="upstream_contract",
                 ) from exc
             except asyncio.CancelledError:
                 raise
@@ -378,23 +472,23 @@ def create_app(
             raise
         except asyncio.CancelledError:
             raise
-        except (ValueError, UpstreamRejected, UpstreamProtocolError) as exc:
-            logger.error(
-                "synthesis_validation_failed error_type=%s",
-                type(exc).__name__,
-            )
-            raise HTTPException(
+        except (ValueError, UpstreamProtocolError) as exc:
+            raise _synthesis_http_error(
                 status_code=503,
                 detail="synthesis unavailable",
+                stage="upstream_contract",
+            ) from exc
+        except UpstreamRejected as exc:
+            raise _synthesis_http_error(
+                status_code=503,
+                detail="synthesis unavailable",
+                stage="upstream_terminal",
             ) from exc
         except Exception as exc:
-            logger.error(
-                "synthesis_failed error_type=%s",
-                type(exc).__name__,
-            )
-            raise HTTPException(
+            raise _synthesis_http_error(
                 status_code=503,
                 detail="synthesis unavailable",
+                stage="upstream_terminal",
             ) from exc
         finally:
             if gate_acquired:
@@ -409,11 +503,11 @@ def create_app(
         try:
             admission_slots.put_nowait(None)
         except asyncio.QueueFull as exc:
-            logger.warning("synthesis_admission_full")
-            raise HTTPException(
+            raise _synthesis_http_error(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="synthesis unavailable",
-                headers={"Retry-After": "1"},
+                stage="admission",
+                retry_after="1",
             ) from exc
         try:
             return await synthesize_admitted(request)
