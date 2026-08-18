@@ -102,6 +102,21 @@ type RebuildBatch = {
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error'
 
+type LocalClonePreviewAvailability = {
+  available: boolean
+  label: string | null
+}
+
+type LocalClonePreviewAudio = {
+  characterId: string
+  url: string
+}
+
+type LocalClonePreviewRequest = {
+  characterId: string
+  controller: AbortController
+}
+
 const profileDefaults = { rate: '+0%', pitch: '+0Hz', volume: '+0%' }
 const previewSentence = '這是一段不含書籍正文的聲線示範。'
 const voiceKey = (voice: VoiceOption) => `${voice.provider}\n${voice.voice}`
@@ -127,6 +142,12 @@ export function SeriesCastPanel() {
   const [blueMagpiePreviewUrl, setBlueMagpiePreviewUrl] = useState<string | null>(null)
   const [blueMagpiePreviewState, setBlueMagpiePreviewState] = useState<'idle' | 'loading'>('idle')
   const blueMagpiePreviewRequest = useRef<AbortController | null>(null)
+  const [localCloneAvailability, setLocalCloneAvailability] = useState<Record<string, LocalClonePreviewAvailability>>({})
+  const [localClonePreviewingCharacterId, setLocalClonePreviewingCharacterId] = useState<string | null>(null)
+  const [localClonePreviewAudio, setLocalClonePreviewAudio] = useState<LocalClonePreviewAudio | null>(null)
+  const localCloneAvailabilityGeneration = useRef(0)
+  const localClonePreviewRequest = useRef<LocalClonePreviewRequest | null>(null)
+  const localClonePreviewAudioRef = useRef<LocalClonePreviewAudio | null>(null)
 
   const [seriesName, setSeriesName] = useState('')
   const [narratorVoiceKey, setNarratorVoiceKey] = useState('')
@@ -234,6 +255,57 @@ export function SeriesCastPanel() {
     const pending = blueMagpiePreviewRequest.current
     blueMagpiePreviewRequest.current = null
     pending?.abort()
+  }, [])
+
+  useEffect(() => {
+    const generation = localCloneAvailabilityGeneration.current + 1
+    localCloneAvailabilityGeneration.current = generation
+    const controller = new AbortController()
+    setLocalCloneAvailability({})
+
+    if (details) {
+      const requestedSeriesId = details.id
+      void Promise.all(details.characters.map(async (character) => {
+        try {
+          const availability = await fetchJson<LocalClonePreviewAvailability>(
+            `/api/series/${requestedSeriesId}/characters/${character.id}/local-clone-preview`,
+            { signal: controller.signal },
+          )
+          return [character.id, availability] as const
+        } catch {
+          return [character.id, { available: false, label: null }] as const
+        }
+      })).then((entries) => {
+        if (controller.signal.aborted || localCloneAvailabilityGeneration.current !== generation) return
+        setLocalCloneAvailability(Object.fromEntries(entries))
+      })
+    }
+
+    return () => {
+      localCloneAvailabilityGeneration.current += 1
+      controller.abort()
+    }
+  }, [details])
+
+  useEffect(() => {
+    const request = localClonePreviewRequest.current
+    localClonePreviewRequest.current = null
+    request?.controller.abort()
+    setLocalClonePreviewingCharacterId(null)
+
+    const audio = localClonePreviewAudioRef.current
+    localClonePreviewAudioRef.current = null
+    if (audio) URL.revokeObjectURL(audio.url)
+    setLocalClonePreviewAudio(null)
+  }, [selectedSeriesId])
+
+  useEffect(() => () => {
+    const request = localClonePreviewRequest.current
+    localClonePreviewRequest.current = null
+    request?.controller.abort()
+    const audio = localClonePreviewAudioRef.current
+    localClonePreviewAudioRef.current = null
+    if (audio) URL.revokeObjectURL(audio.url)
   }, [])
 
   useEffect(() => {
@@ -537,6 +609,50 @@ export function SeriesCastPanel() {
     }
   }
 
+  async function previewLocalClone(character: SeriesCharacter) {
+    if (!details || localClonePreviewingCharacterId !== null) return
+    const availability = localCloneAvailability[character.id]
+    if (!availability?.available) {
+      setMessage('這個角色目前沒有可用的本機私人試音資產。')
+      return
+    }
+
+    const previousAudio = localClonePreviewAudioRef.current
+    localClonePreviewAudioRef.current = null
+    if (previousAudio) URL.revokeObjectURL(previousAudio.url)
+    setLocalClonePreviewAudio(null)
+
+    const controller = new AbortController()
+    const request = { characterId: character.id, controller }
+    localClonePreviewRequest.current = request
+    setLocalClonePreviewingCharacterId(character.id)
+    setMessage(`正在用「${availability.label ?? '本機授權聲線'}」生成私人固定句試音；不會改變正式配音或 active audio。`)
+    try {
+      const blob = await fetchBlob(
+        `/api/series/${details.id}/characters/${character.id}/local-clone-preview`,
+        {
+          method: 'POST',
+          csrfToken,
+          body: { text: previewSentence },
+          signal: controller.signal,
+        },
+      )
+      if (controller.signal.aborted || localClonePreviewRequest.current !== request) return
+      const nextAudio = { characterId: character.id, url: URL.createObjectURL(blob) }
+      localClonePreviewAudioRef.current = nextAudio
+      setLocalClonePreviewAudio(nextAudio)
+      setMessage('本機私人試音已完成；系列正式 provider、cast revision 與已啟用音訊均未變更。')
+    } catch (error) {
+      if (controller.signal.aborted) return
+      setMessage(error instanceof Error ? error.message : '本機私人試音失敗。')
+    } finally {
+      if (localClonePreviewRequest.current === request) {
+        localClonePreviewRequest.current = null
+        setLocalClonePreviewingCharacterId(null)
+      }
+    }
+  }
+
   async function saveCharacterProfileLink(event: FormEvent<HTMLFormElement>, character: SeriesCharacter) {
     event.preventDefault()
     if (!details || formState === 'loading' || savingCharacterProfileId !== null) return
@@ -830,6 +946,16 @@ export function SeriesCastPanel() {
                           <p className="text-sm text-stone-800">{character.canonicalName} · {character.role}</p>
                           <div className="flex items-center gap-3">
                             <button className="text-xs text-amber-700 disabled:cursor-not-allowed disabled:text-stone-400" disabled={character.voiceProvider === VOAI_VOICE_PROVIDER} onClick={() => previewVoice(character.voiceProvider, character.voice)} type="button">{character.voiceProvider === VOAI_VOICE_PROVIDER ? 'VoAI 需伺服器試音' : '播放固定示範句'}</button>
+                            {localCloneAvailability[character.id]?.available && (
+                              <button
+                                className="text-xs font-medium text-sky-700 disabled:cursor-wait disabled:text-stone-400"
+                                disabled={localClonePreviewingCharacterId !== null}
+                                onClick={() => void previewLocalClone(character)}
+                                type="button"
+                              >
+                                {localClonePreviewingCharacterId === character.id ? '本機合成中…' : '▶ 本機 Clone 私人試音'}
+                              </button>
+                            )}
                             {character.characterProfileId && (
                               <button
                                 className="text-xs text-amber-700"
@@ -842,6 +968,15 @@ export function SeriesCastPanel() {
                           </div>
                         </div>
                         <p className="mt-1 text-xs text-stone-500">{voiceLabel(character.voiceProvider, character.voice, voiceOptions)} · 別名：{character.aliases.map((item) => item.value).join('、') || '—'}</p>
+                        {localCloneAvailability[character.id]?.available && (
+                          <p className="mt-1 text-xs text-sky-700">私人試音：{localCloneAvailability[character.id].label ?? '本機授權聲線'}。只用於比較音色，不會切換目前的 Edge 正式聲線。</p>
+                        )}
+                        {localClonePreviewAudio?.characterId === character.id && (
+                          <div className="mt-3 rounded-xl border border-sky-200 bg-sky-50 p-3">
+                            <audio autoPlay className="w-full" controls src={localClonePreviewAudio.url}>你的瀏覽器無法播放這段本機私人試音。</audio>
+                            <a className="mt-2 inline-block text-xs text-sky-800 underline" download="local-clone-private-preview.wav" href={localClonePreviewAudio.url}>下載本機私人試音</a>
+                          </div>
+                        )}
                         <form className="mt-3 flex flex-col gap-2 border-t border-stone-200 pt-3 sm:flex-row sm:items-end" onSubmit={(event) => void saveCharacterProfileLink(event, character)}>
                           <label className="min-w-0 flex-1 text-xs text-stone-500">
                             角色庫連結

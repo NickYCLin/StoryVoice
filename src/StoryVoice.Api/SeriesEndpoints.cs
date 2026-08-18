@@ -46,6 +46,50 @@ public static class SeriesEndpoints
         })
         .WithName("GetStorySeries");
 
+        group.MapGet("/{seriesId:guid}/characters/{characterId:guid}/local-clone-preview", async (
+            Guid seriesId,
+            Guid characterId,
+            HttpContext httpContext,
+            ILocalClonePreviewService service,
+            CancellationToken cancellationToken) =>
+        {
+            var availability = await service.GetAvailabilityAsync(
+                seriesId,
+                characterId,
+                cancellationToken);
+            httpContext.Response.Headers.CacheControl = "private, no-store";
+            httpContext.Response.Headers.Pragma = "no-cache";
+            return availability is null ? Results.NotFound() : Results.Ok(availability);
+        })
+        .WithName("GetLocalClonePreviewAvailability");
+
+        group.MapPost("/{seriesId:guid}/characters/{characterId:guid}/local-clone-preview", async (
+            Guid seriesId,
+            Guid characterId,
+            LocalClonePreviewRequest request,
+            HttpContext httpContext,
+            ILocalClonePreviewService service,
+            CancellationToken cancellationToken) =>
+        {
+            var preview = await service.PreviewAsync(
+                seriesId,
+                characterId,
+                request,
+                cancellationToken);
+            if (preview is null)
+            {
+                return Results.NotFound();
+            }
+
+            httpContext.Response.Headers.CacheControl = "private, no-store";
+            httpContext.Response.Headers.Pragma = "no-cache";
+            httpContext.Response.Headers["X-Content-Type-Options"] = "nosniff";
+            httpContext.Response.ContentLength = preview.Content.LongLength;
+            return Results.File(preview.Content, "audio/wav");
+        })
+        .AddEndpointFilter<AntiforgeryEndpointFilter>()
+        .WithName("PreviewLocalCloneCharacterVoice");
+
         group.MapPost("/", async (
             CreateStorySeriesRequest request,
             HttpContext httpContext,

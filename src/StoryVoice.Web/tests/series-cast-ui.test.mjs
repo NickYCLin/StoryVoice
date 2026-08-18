@@ -96,6 +96,23 @@ test('BlueMagpie 保留伺服器固定句試音，正式系列聲線另走原子
   assert.equal(settings.SeriesVoiceCatalog.Voices.filter((voice) => voice.Provider === 'bluemagpie').length, 2)
 })
 
+test('系列角色可使用 owner-scoped 本機 Clone 私人試音，且不會切換正式聲線', () => {
+  assert.match(panel, /LocalClonePreviewAvailability/)
+  assert.match(panel, /\/api\/series\/\$\{requestedSeriesId\}\/characters\/\$\{character\.id\}\/local-clone-preview/)
+  assert.match(panel, /\/api\/series\/\$\{details\.id\}\/characters\/\$\{character\.id\}\/local-clone-preview/)
+  assert.match(panel, /body: \{ text: previewSentence \}/)
+  assert.match(panel, /csrfToken,/)
+  assert.match(panel, /本機 Clone 私人試音/)
+  assert.match(panel, /不會切換目前的 Edge 正式聲線/)
+  assert.match(panel, /系列正式 provider、cast revision 與已啟用音訊均未變更/)
+  assert.match(panel, /URL\.createObjectURL\(blob\)/)
+  assert.match(panel, /URL\.revokeObjectURL\(audio\.url\)/)
+  assert.match(panel, /localClonePreviewRequest\.current = null[\s\S]*request\?\.controller\.abort\(\)/)
+  assert.match(panel, /<audio autoPlay[\s\S]*controls/)
+  assert.match(panel, /download="local-clone-private-preview\.wav"/)
+  assert.doesNotMatch(panel, /LOCAL_CLONE_PROVIDER/)
+})
+
 test('整系列聲線切換送出完整角色集合，依旁白 provider 限制逐角選項', () => {
   assert.match(panel, /configuredNarratorVoiceKey/)
   assert.match(panel, /configuredCharacterVoiceKeys/)

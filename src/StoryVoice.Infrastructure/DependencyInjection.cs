@@ -129,6 +129,29 @@ public static class DependencyInjection
             .Validate(options => options.MaximumJobAudioBytes >= options.MaximumResponseBytes,
                 "BlueMagpie 單一工作 PCM 音訊上限不得小於單一 response 上限。")
             .ValidateOnStart();
+        services.AddOptions<LocalClonePreviewOptions>()
+            .Bind(configuration.GetSection(LocalClonePreviewOptions.SectionName))
+            .Validate(options => string.Equals(
+                    options.GatewayBaseUrl,
+                    LocalClonePreviewOptions.PinnedGatewayBaseUrl,
+                    StringComparison.Ordinal),
+                "Local clone preview gateway URL must be the pinned internal HTTP endpoint.")
+            .Validate(options => !options.Enabled
+                || IsValidLocalCloneInternalToken(options.InternalToken),
+                "Enabled local clone preview requires a 32-512 character printable ASCII internal token.")
+            .Validate(options => !options.Enabled || IsValidPrivateAssetRoot(options.AssetRootPath),
+                "Enabled local clone preview requires a non-root private asset directory.")
+            .Validate(options => options.ConnectTimeoutSeconds is >= 1 and <= 30,
+                "Local clone preview connect timeout must be between 1 and 30 seconds.")
+            .Validate(options => options.RequestTimeoutSeconds is >= 30 and <= 3_600,
+                "Local clone preview request timeout must be between 30 and 3600 seconds.")
+            .Validate(options => options.RequestTimeoutSeconds > options.ConnectTimeoutSeconds,
+                "Local clone preview request timeout must exceed its connect timeout.")
+            .Validate(options => options.MaximumResponseBytes is >= 64 * 1024 and <= 16 * 1024 * 1024,
+                "Local clone preview response limit must be between 64 KiB and 16 MiB.")
+            .Validate(options => !options.Enabled || IsValidLocalCloneAllowlist(options.AllowedProfiles),
+                "Enabled local clone preview requires a valid exact CharacterProfileId allowlist.")
+            .ValidateOnStart();
         services.AddOptions<MultiCharacterNarrationOptions>()
             .Bind(configuration.GetSection(MultiCharacterNarrationOptions.SectionName))
             .Validate(options => !string.IsNullOrWhiteSpace(options.ProviderVersion)
@@ -195,6 +218,23 @@ public static class DependencyInjection
             ConnectTimeout = TimeSpan.FromSeconds(
                 provider.GetRequiredService<IOptions<BlueMagpieOptions>>().Value.ConnectTimeoutSeconds),
         });
+        services.AddHttpClient<ILocalCloneGatewayClient, LocalCloneGatewayClient>((provider, client) =>
+        {
+            var localCloneOptions = provider.GetRequiredService<IOptions<LocalClonePreviewOptions>>().Value;
+            client.BaseAddress = new Uri(localCloneOptions.GatewayBaseUrl, UriKind.Absolute);
+            client.Timeout = TimeSpan.FromSeconds(localCloneOptions.RequestTimeoutSeconds);
+        })
+        // The request contains private reference audio and its canonical transcript. Disable the
+        // default client loggers in addition to keeping both values out of the URL.
+        .RemoveAllLoggers()
+        .ConfigurePrimaryHttpMessageHandler(provider => new SocketsHttpHandler
+        {
+            UseProxy = false,
+            AllowAutoRedirect = false,
+            AutomaticDecompression = System.Net.DecompressionMethods.None,
+            ConnectTimeout = TimeSpan.FromSeconds(
+                provider.GetRequiredService<IOptions<LocalClonePreviewOptions>>().Value.ConnectTimeoutSeconds),
+        });
         services.AddScoped<IBookInsightsService, BookInsightsService>();
         services.AddScoped<ILibraryStatusService, LibraryStatusService>();
         services.AddScoped<INarrationService, NarrationService>();
@@ -202,6 +242,7 @@ public static class DependencyInjection
         services.AddScoped<IStagedNarrationBatchProgressService, StagedNarrationBatchProgressService>();
         services.AddScoped<IStorySeriesRepository, StorySeriesRepository>();
         services.AddScoped<ISeriesService, SeriesService>();
+        services.AddScoped<ILocalClonePreviewService, LocalClonePreviewService>();
         // A singleton owns the successful two-voice preview cache for the lifetime of the API process.
         services.AddSingleton<ISeriesVoicePreviewService, SeriesVoicePreviewService>();
         services.AddScoped<IBookCollectionRepository, BookCollectionRepository>();
@@ -283,4 +324,81 @@ public static class DependencyInjection
             && string.IsNullOrEmpty(uri.Query)
             && string.IsNullOrEmpty(uri.Fragment);
     }
+
+    private static bool IsValidPrivateAssetRoot(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        try
+        {
+            var fullPath = Path.GetFullPath(value);
+            var pathRoot = Path.GetPathRoot(fullPath);
+            return !string.IsNullOrWhiteSpace(pathRoot)
+                && !string.Equals(
+                    fullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                    pathRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                    OperatingSystem.IsWindows()
+                        ? StringComparison.OrdinalIgnoreCase
+                        : StringComparison.Ordinal);
+        }
+        catch (Exception exception) when (exception is ArgumentException
+            or IOException
+            or NotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsValidLocalCloneAllowlist(
+        Dictionary<string, LocalClonePreviewAssetOptions>? allowedProfiles)
+    {
+        if (allowedProfiles is null || allowedProfiles.Count == 0)
+        {
+            return false;
+        }
+
+        return allowedProfiles.All(candidate =>
+            Guid.TryParseExact(candidate.Key, "D", out var profileId)
+            && string.Equals(candidate.Key, profileId.ToString("D"), StringComparison.Ordinal)
+            && candidate.Value is not null
+            && IsValidLocalCloneLabel(candidate.Value.Label)
+            && IsValidRelativeAssetPath(candidate.Value.ReferenceAudioRelativePath, ".wav")
+            && IsValidRelativeAssetPath(candidate.Value.TranscriptRelativePath, ".txt")
+            && !string.Equals(
+                candidate.Value.ReferenceAudioRelativePath,
+                candidate.Value.TranscriptRelativePath,
+                StringComparison.Ordinal)
+            && IsCanonicalSha256(candidate.Value.ExpectedReferenceAudioSha256)
+            && IsCanonicalSha256(candidate.Value.ExpectedTranscriptSha256));
+    }
+
+    private static bool IsValidLocalCloneLabel(string value) =>
+        !string.IsNullOrWhiteSpace(value)
+        && value.Length <= 120
+        && string.Equals(value, value.Trim(), StringComparison.Ordinal)
+        && value.All(character => !char.IsControl(character)
+            && char.GetUnicodeCategory(character) != System.Globalization.UnicodeCategory.Format);
+
+    private static bool IsValidRelativeAssetPath(string value, string requiredExtension)
+    {
+        if (string.IsNullOrWhiteSpace(value) || Path.IsPathRooted(value))
+        {
+            return false;
+        }
+
+        return value.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                .All(segment => segment is not ("" or "." or ".."))
+            && string.Equals(Path.GetExtension(value), requiredExtension, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsCanonicalSha256(string value) =>
+        value is { Length: 64 }
+        && value.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
+
+    private static bool IsValidLocalCloneInternalToken(string value) =>
+        value is { Length: >= 32 and <= 512 }
+        && value.All(character => character is >= '!' and <= '~');
 }

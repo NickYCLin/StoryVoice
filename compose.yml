@@ -29,6 +29,7 @@ services:
     networks:
       - default
       - bluemagpie-internal
+      - local-gpu-lock-internal
     restart: unless-stopped
 
   api:
@@ -60,17 +61,31 @@ services:
       BlueMagpie__MaximumResponseBytes: ${BLUEMAGPIE_MAXIMUM_RESPONSE_BYTES:-5242880}
       BlueMagpie__MaximumChunksPerJob: ${BLUEMAGPIE_MAXIMUM_CHUNKS_PER_JOB:-10000}
       BlueMagpie__MaximumJobAudioBytes: ${BLUEMAGPIE_MAXIMUM_JOB_AUDIO_BYTES:-8589934592}
+      LocalClonePreview__Enabled: ${LOCAL_CLONE_PREVIEW_ENABLED:-false}
+      LocalClonePreview__GatewayBaseUrl: http://local-clone-gateway:8082/
+      LocalClonePreview__InternalToken: ${LOCAL_CLONE_INTERNAL_TOKEN:-}
+      LocalClonePreview__AssetRootPath: /data/local-clone-assets
+      LocalClonePreview__ConnectTimeoutSeconds: 10
+      LocalClonePreview__RequestTimeoutSeconds: 240
+      LocalClonePreview__MaximumResponseBytes: 16777216
+      LocalClonePreview__AllowedProfiles__a592496c-6f83-4a35-b36d-0f8149af74a6__Label: ${LOCAL_CLONE_CHU_MING_YANG_LABEL:-褚冥漾（周子謙授權聲線｜私人試音）}
+      LocalClonePreview__AllowedProfiles__a592496c-6f83-4a35-b36d-0f8149af74a6__ReferenceAudioRelativePath: chu-ming-yang/reference.wav
+      LocalClonePreview__AllowedProfiles__a592496c-6f83-4a35-b36d-0f8149af74a6__TranscriptRelativePath: chu-ming-yang/transcript.txt
+      LocalClonePreview__AllowedProfiles__a592496c-6f83-4a35-b36d-0f8149af74a6__ExpectedReferenceAudioSha256: ${LOCAL_CLONE_CHU_MING_YANG_REFERENCE_SHA256:-}
+      LocalClonePreview__AllowedProfiles__a592496c-6f83-4a35-b36d-0f8149af74a6__ExpectedTranscriptSha256: ${LOCAL_CLONE_CHU_MING_YANG_TRANSCRIPT_SHA256:-}
     volumes:
       - book-storage:/data/books
       - character-voice-storage:/data/character-voices
       - character-avatar-storage:/data/character-avatars
       - audio-storage:/data/audio:ro
+      - local-clone-assets:/data/local-clone-assets:ro
       - data-protection-keys:/var/lib/storyvoice/data-protection-keys
     ports:
       - "127.0.0.1:${STORYVOICE_API_PORT:-8080}:8080"
     networks:
       - default
       - bluemagpie-internal
+      - local-clone-api-internal
     depends_on:
       postgres:
         condition: service_healthy
@@ -175,6 +190,40 @@ services:
       start_period: 180s
     restart: unless-stopped
 
+  local-clone-gateway:
+    profiles: ["local-clone"]
+    build:
+      context: services/local-clone-gateway
+      dockerfile: Dockerfile
+    environment:
+      LOCAL_CLONE_INTERNAL_TOKEN: ${LOCAL_CLONE_INTERNAL_TOKEN:-}
+      LOCAL_CLONE_QUEUE_TIMEOUT_SECONDS: ${LOCAL_CLONE_GATEWAY_QUEUE_TIMEOUT_SECONDS:-15}
+      LOCAL_CLONE_SYNTHESIS_WATCHDOG_SECONDS: ${LOCAL_CLONE_GATEWAY_SYNTHESIS_WATCHDOG_SECONDS:-180}
+      LOCAL_CLONE_READY_TIMEOUT_SECONDS: ${LOCAL_CLONE_GATEWAY_READY_TIMEOUT_SECONDS:-3}
+    expose:
+      - "8082"
+    networks:
+      - local-clone-api-internal
+      - local-clone-upstream-internal
+    cpus: 1.0
+    mem_limit: 512m
+    memswap_limit: 512m
+    pids_limit: 128
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8082/health/ready', timeout=3).read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+
   web:
     build:
       context: .
@@ -201,8 +250,18 @@ volumes:
   character-avatar-storage:
   audio-storage:
   bluemagpie-chunk-cache:
+  local-clone-assets:
   data-protection-keys:
 
 networks:
   bluemagpie-internal:
+    internal: true
+  local-clone-api-internal:
+    name: storyvoice_local-clone-api-internal
+    internal: true
+  local-clone-upstream-internal:
+    name: storyvoice_local-clone-upstream-internal
+    internal: true
+  local-gpu-lock-internal:
+    name: storyvoice_local-gpu-lock-internal
     internal: true

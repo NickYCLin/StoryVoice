@@ -29,6 +29,7 @@ public sealed class ApiExceptionHandler(
             LocalLlmCharacterAnalysisSourceChangedException => StatusCodes.Status409Conflict,
             LocalLlmCharacterAnalysisUnavailableException => StatusCodes.Status503ServiceUnavailable,
             SeriesVoicePreviewUnavailableException => StatusCodes.Status503ServiceUnavailable,
+            LocalClonePreviewUnavailableException => StatusCodes.Status503ServiceUnavailable,
             AntiforgeryValidationException => StatusCodes.Status400BadRequest,
             ArgumentException or InvalidOperationException => StatusCodes.Status400BadRequest,
             _ => StatusCodes.Status500InternalServerError
@@ -91,6 +92,11 @@ public sealed class ApiExceptionHandler(
         {
             problemDetails.Title = "Local voice preview is temporarily unavailable";
             problemDetails.Extensions["code"] = SeriesVoicePreviewUnavailableException.StableCode;
+        }
+        else if (exception is LocalClonePreviewUnavailableException localCloneException)
+        {
+            problemDetails.Title = "Local clone preview is temporarily unavailable";
+            problemDetails.Extensions["code"] = localCloneException.StableCode;
         }
 
         httpContext.Response.StatusCode = statusCode;

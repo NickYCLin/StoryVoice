@@ -96,6 +96,29 @@ separate: the Worker ignores the legacy `VOAI_API_KEY` variable and can only ena
 paid calls from `VOAI_PAID_API_KEY`. Both keys must remain empty for a no-paid-API
 deployment and for the BlueMagpie canary described here.
 
+### Authorized local Clone private preview
+
+The `local-clone` Compose profile adds an internal-only gateway to the existing
+FaceSpeak/CosyVoice executor. It does not publish a host port, does not register a
+narration provider, and cannot switch a series cast or active audiobook. The API reads
+an explicitly allowlisted reference WAV and transcript from the read-only
+`local-clone-assets` volume, verifies their configured SHA-256 values, and exposes only
+an owner-scoped character preview endpoint.
+
+Keep `LOCAL_CLONE_PREVIEW_ENABLED=false` until the FaceSpeak executor is running the
+same shared GPU exclusion lock and returns the pinned source/model attestation. Then
+populate a random `LOCAL_CLONE_INTERNAL_TOKEN` (at least 32 characters), the two exact
+asset hashes, and provision the private volume outside Git. Start only the preview
+boundary with:
+
+```bash
+docker compose --profile local-clone up -d --build redis local-clone-gateway api web
+```
+
+This path uses the self-hosted model and creates no 3wa or VoAI request. It remains a
+private evaluation feature: generated previews are returned with `no-store`, while the
+formal narration catalog and Worker remain unchanged.
+
 Compose 只把 Web 與 API 綁在 `127.0.0.1`；對外服務應由同機 reverse proxy 提供 TLS。
 
 要先在本機驗證預定的正式子路徑：
