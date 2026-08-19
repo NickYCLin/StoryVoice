@@ -4,6 +4,7 @@ import { AppLayout } from './AppLayout'
 import { CharacterLibraryPage } from './pages/CharacterLibraryPage'
 import { CollectionDetailPage } from './pages/CollectionDetailPage'
 import { CollectionsPage } from './pages/CollectionsPage'
+import { DeveloperDocsPage } from './pages/DeveloperDocsPage'
 import { LandingPage } from './pages/LandingPage'
 import { LibraryPage } from './pages/LibraryPage'
 import { PublicVoicesPage } from './pages/PublicVoicesPage'
@@ -15,6 +16,7 @@ function App() {
   return (
     <Routes>
       <Route element={<PublicVoicesPage />} path="/voices" />
+      <Route element={<DeveloperDocsPage />} path="/developers/docs" />
       <Route element={<AppLayout />} path="/">
         <Route element={<LandingPage />} index />
         <Route element={<LibraryPage />} path="library" />

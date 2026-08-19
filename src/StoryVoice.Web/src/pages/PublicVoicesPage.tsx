@@ -435,6 +435,9 @@ export function PublicVoicesPage() {
               <p className="mt-4 text-sm leading-7 text-stone-600 sm:text-base">
                 公開卡片只負責展示已核准的固定示範；實際合成另以角色 entitlement 控制。只有授權仍在有效期限、用途涵蓋商用與跨專案 API，且未被撤銷時，專案金鑰才可使用該聲線。
               </p>
+              <Link className="mt-4 inline-flex text-sm font-semibold text-amber-800 underline public-focus" to="/developers/docs">
+                查看完整 API 文件 →
+              </Link>
             </div>
 
             <div className="mt-8 grid gap-4 md:grid-cols-3">
