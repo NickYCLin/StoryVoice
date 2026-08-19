@@ -73,6 +73,11 @@ services:
       LocalClonePreview__AllowedProfiles__a592496c-6f83-4a35-b36d-0f8149af74a6__TranscriptRelativePath: chu-ming-yang/transcript.txt
       LocalClonePreview__AllowedProfiles__a592496c-6f83-4a35-b36d-0f8149af74a6__ExpectedReferenceAudioSha256: ${LOCAL_CLONE_CHU_MING_YANG_REFERENCE_SHA256:-}
       LocalClonePreview__AllowedProfiles__a592496c-6f83-4a35-b36d-0f8149af74a6__ExpectedTranscriptSha256: ${LOCAL_CLONE_CHU_MING_YANG_TRANSCRIPT_SHA256:-}
+      LocalClonePreview__AllowedProfiles__512ef88f-a4db-4c6c-b586-082a17a28274__Label: ${LOCAL_CLONE_LIN_RUO_QING_LABEL:-林若晴（合法授權素材｜私人試音）}
+      LocalClonePreview__AllowedProfiles__512ef88f-a4db-4c6c-b586-082a17a28274__ReferenceAudioRelativePath: lin-ruo-qing/reference.wav
+      LocalClonePreview__AllowedProfiles__512ef88f-a4db-4c6c-b586-082a17a28274__TranscriptRelativePath: lin-ruo-qing/transcript.txt
+      LocalClonePreview__AllowedProfiles__512ef88f-a4db-4c6c-b586-082a17a28274__ExpectedReferenceAudioSha256: ${LOCAL_CLONE_LIN_RUO_QING_REFERENCE_SHA256:-}
+      LocalClonePreview__AllowedProfiles__512ef88f-a4db-4c6c-b586-082a17a28274__ExpectedTranscriptSha256: ${LOCAL_CLONE_LIN_RUO_QING_TRANSCRIPT_SHA256:-}
     volumes:
       - book-storage:/data/books
       - character-voice-storage:/data/character-voices

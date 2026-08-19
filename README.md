@@ -107,9 +107,9 @@ an owner-scoped character preview endpoint.
 
 Keep `LOCAL_CLONE_PREVIEW_ENABLED=false` until the FaceSpeak executor is running the
 same shared GPU exclusion lock and returns the pinned source/model attestation. Then
-populate a random `LOCAL_CLONE_INTERNAL_TOKEN` (at least 32 characters), the two exact
-asset hashes, and provision the private volume outside Git. Start only the preview
-boundary with:
+populate a random `LOCAL_CLONE_INTERNAL_TOKEN` (at least 32 characters), the exact
+reference/transcript hashes for every allowlisted profile, and provision the private
+volume outside Git. Start only the preview boundary with:
 
 ```bash
 docker compose --profile local-clone up -d --build redis local-clone-gateway api web
