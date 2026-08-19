@@ -11,7 +11,7 @@ internal static class LocalClonePcmWaveValidator
             content,
             requiredSampleRate: 48_000,
             minimumDurationSeconds: 10,
-            maximumDurationSeconds: 45,
+            maximumDurationSeconds: 30,
             maximumBytes: LocalClonePreviewOptions.MaximumReferenceAudioBytes);
 
     public static void ValidateOutput(ReadOnlySpan<byte> content, int maximumBytes) =>

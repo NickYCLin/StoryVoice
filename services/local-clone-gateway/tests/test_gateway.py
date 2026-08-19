@@ -689,7 +689,7 @@ def test_existing_2_4_mb_reference_wav_fits_the_gateway_contract() -> None:
         pcm_wave(sample_rate=48_000, channels=2, frames=48_000 * 10),
         pcm_wave(sample_rate=48_000, sample_width=1, frames=48_000 * 10),
         pcm_wave(sample_rate=48_000, frames=48_000 * 10 - 1),
-        pcm_wave(sample_rate=48_000, frames=48_000 * 45 + 1),
+        pcm_wave(sample_rate=48_000, frames=48_000 * 30 + 1),
     ],
     ids=(
         "not-wav",
@@ -700,7 +700,7 @@ def test_existing_2_4_mb_reference_wav_fits_the_gateway_contract() -> None:
         "too-long",
     ),
 )
-def test_reference_must_be_pcm16_48khz_mono_for_ten_to_45_seconds(
+def test_reference_must_be_pcm16_48khz_mono_for_ten_to_30_seconds(
     invalid_reference: bytes,
 ) -> None:
     upstream = FakeUpstream()
@@ -717,6 +717,23 @@ def test_reference_must_be_pcm16_48khz_mono_for_ten_to_45_seconds(
     assert response.json() == {"detail": "invalid request"}
     assert_rejection_stage(response, "request_contract")
     assert upstream.calls == []
+
+
+def test_reference_at_exact_30_second_provider_boundary_is_accepted() -> None:
+    upstream = FakeUpstream()
+    app = build_app(upstream)
+    reference = pcm_wave(sample_rate=48_000, frames=48_000 * 30)
+
+    with TestClient(app) as client:
+        response = post_synthesis(
+            client,
+            headers=AUTH_HEADERS,
+            audio=reference,
+        )
+
+    assert response.status_code == 200
+    assert len(upstream.calls) == 1
+    assert upstream.calls[0][2] == reference
 
 
 def test_asgi_body_cap_rejects_declared_and_streamed_oversize_before_parser() -> None:

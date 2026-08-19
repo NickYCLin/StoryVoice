@@ -22,7 +22,9 @@ MAX_QUEUED_SYNTHESIS_REQUESTS = 1
 MAX_REFERENCE_AUDIO_BYTES = 10 * 1024 * 1024
 REFERENCE_SAMPLE_RATE = 48_000
 MIN_REFERENCE_DURATION_SECONDS = 10
-MAX_REFERENCE_DURATION_SECONDS = 45
+# Pinned CosyVoice `_extract_speech_token` rejects decoded prompts over 30s.
+# Keep this provider boundary exact so invalid biometric audio never reaches it.
+MAX_REFERENCE_DURATION_SECONDS = 30
 # Allow multipart framing and the two bounded text fields in addition to the
 # maximum audio part. The audio field is independently checked below.
 MAX_REQUEST_BODY_BYTES = MAX_REFERENCE_AUDIO_BYTES + (128 * 1024)

@@ -28,7 +28,7 @@ constants. Expected pins are also recorded in the image labels.
 - authentication: `X-StoryVoice-Internal-Token` (32–512 printable ASCII
   characters from `!` through `~`; no spaces or control characters)
 - multipart fields: `text`, `reference_text`, `reference_audio`
-- reference audio: PCM16 WAV, 48 kHz, mono, 10–45 seconds, at most 10 MiB
+- reference audio: PCM16 WAV, 48 kHz, mono, 10–30 seconds, at most 10 MiB
 - response: bounded PCM16 WAV, 24 kHz, mono, with `Cache-Control: no-store`
 
 The gateway does not log or return the synthesis text, reference transcript,
