@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 
 import { apiUrl, fetchJson, responseProblem } from '../api'
 import { useAuthedOutletContext } from '../authOutletContext'
@@ -32,6 +32,16 @@ type VoiceProfileSummary = {
   updatedAt: string
 }
 
+type LocalClonePreviewAvailability = {
+  available: boolean
+  label: string | null
+}
+
+type LocalCloneRequestContext = {
+  characterProfileId: string
+  abortController: AbortController
+}
+
 type LoadState = 'idle' | 'loading' | 'ready' | 'error'
 type Tab = 'basic' | 'ai' | 'voices' | 'preview' | 'tasks'
 
@@ -47,6 +57,7 @@ const emptyForm = {
 }
 
 const GENDER_OPTIONS = ['女', '男', '不指定 / 其他']
+const LOCAL_CLONE_PREVIEW_TEXT = '這是角色私人聲線試音，僅用於確認聲音，不屬於有聲書正文。'
 
 const SLOT_LABELS: Record<string, string> = {
   Base: '基礎聲線',
@@ -93,6 +104,13 @@ export function CharacterLibraryPage() {
   const [previewProfileId, setPreviewProfileId] = useState('')
   const [previewText, setPreviewText] = useState('你好，這是我的聲音示範。')
   const [previewBusy, setPreviewBusy] = useState(false)
+  const [localCloneAvailability, setLocalCloneAvailability] = useState<LocalClonePreviewAvailability | null>(null)
+  const [localCloneAvailabilityState, setLocalCloneAvailabilityState] = useState<LoadState>('idle')
+  const [localClonePreviewBusy, setLocalClonePreviewBusy] = useState(false)
+  const [localClonePreviewUrl, setLocalClonePreviewUrl] = useState<string | null>(null)
+  const localCloneAvailabilityRequest = useRef<LocalCloneRequestContext | null>(null)
+  const localClonePreviewRequest = useRef<LocalCloneRequestContext | null>(null)
+  const selectedIdRef = useRef(selectedId)
   const [statusToggleBusy, setStatusToggleBusy] = useState(false)
   const [idCopied, setIdCopied] = useState(false)
 
@@ -113,6 +131,8 @@ export function CharacterLibraryPage() {
   }, [loadCharacters])
 
   const selected = characters.find((character) => character.id === selectedId) ?? null
+  const selectedIsActive = selected?.isActive ?? false
+  selectedIdRef.current = selectedId
 
   useEffect(() => {
     setForm(selected
@@ -146,6 +166,66 @@ export function CharacterLibraryPage() {
   useEffect(() => {
     void loadVoiceProfiles()
   }, [loadVoiceProfiles])
+
+  useEffect(() => {
+    localCloneAvailabilityRequest.current?.abortController.abort()
+    localCloneAvailabilityRequest.current = null
+    localClonePreviewRequest.current?.abortController.abort()
+    localClonePreviewRequest.current = null
+    setLocalClonePreviewBusy(false)
+    setLocalClonePreviewUrl(null)
+    setLocalCloneAvailability(null)
+    if (!selectedId) {
+      setLocalCloneAvailabilityState('idle')
+      return
+    }
+
+    if (!selectedIsActive) {
+      setLocalCloneAvailability({ available: false, label: null })
+      setLocalCloneAvailabilityState('ready')
+      return
+    }
+
+    const request: LocalCloneRequestContext = {
+      characterProfileId: selectedId,
+      abortController: new AbortController(),
+    }
+    localCloneAvailabilityRequest.current = request
+    setLocalCloneAvailabilityState('loading')
+    void fetchJson<LocalClonePreviewAvailability>(
+      `/api/character-profiles/${selectedId}/local-clone-preview`,
+      { signal: request.abortController.signal },
+    ).then((availability) => {
+      if (localCloneAvailabilityRequest.current !== request
+        || selectedIdRef.current !== request.characterProfileId) return
+      setLocalCloneAvailability(availability)
+      setLocalCloneAvailabilityState('ready')
+    }).catch(() => {
+      if (request.abortController.signal.aborted
+        || localCloneAvailabilityRequest.current !== request) return
+      setLocalCloneAvailabilityState('error')
+    })
+
+    return () => {
+      request.abortController.abort()
+      if (localCloneAvailabilityRequest.current === request) {
+        localCloneAvailabilityRequest.current = null
+      }
+    }
+  }, [selectedId, selectedIsActive])
+
+  useEffect(() => () => {
+    if (localClonePreviewUrl) URL.revokeObjectURL(localClonePreviewUrl)
+  }, [localClonePreviewUrl])
+
+  useEffect(() => () => {
+    const availabilityRequest = localCloneAvailabilityRequest.current
+    const previewRequest = localClonePreviewRequest.current
+    localCloneAvailabilityRequest.current = null
+    localClonePreviewRequest.current = null
+    availabilityRequest?.abortController.abort()
+    previewRequest?.abortController.abort()
+  }, [])
 
   function resetForm() {
     setForm(selected
@@ -317,6 +397,45 @@ export function CharacterLibraryPage() {
       setMessage(error instanceof Error ? error.message : '試講失敗。')
     } finally {
       setPreviewBusy(false)
+    }
+  }
+
+  async function generateLocalClonePreview() {
+    if (!selected || !localCloneAvailability?.available || localClonePreviewRequest.current) return
+    const request: LocalCloneRequestContext = {
+      characterProfileId: selected.id,
+      abortController: new AbortController(),
+    }
+    localClonePreviewRequest.current = request
+    setLocalClonePreviewBusy(true)
+    try {
+      const response = await fetch(apiUrl(`/api/character-profiles/${selected.id}/local-clone-preview`), {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken },
+        body: JSON.stringify({ text: LOCAL_CLONE_PREVIEW_TEXT }),
+        signal: request.abortController.signal,
+      })
+      if (!response.ok) throw new Error(await responseProblem(response, '本機私人試音失敗'))
+      if (response.headers.get('Content-Type')?.split(';', 1)[0].trim().toLowerCase() !== 'audio/wav') {
+        throw new Error('本機私人試音回傳格式無法驗證。')
+      }
+
+      const blob = await response.blob()
+      if (blob.size === 0) throw new Error('本機私人試音沒有回傳音訊。')
+      if (localClonePreviewRequest.current !== request
+        || selectedIdRef.current !== request.characterProfileId) return
+      setLocalClonePreviewUrl(URL.createObjectURL(blob))
+      setMessage('私人試音已產生；只供播放或下載，不會切換正式聲線。')
+    } catch (error) {
+      if (request.abortController.signal.aborted) return
+      setLocalClonePreviewUrl(null)
+      setMessage(error instanceof Error ? error.message : '本機私人試音失敗。')
+    } finally {
+      if (localClonePreviewRequest.current === request) {
+        localClonePreviewRequest.current = null
+        setLocalClonePreviewBusy(false)
+      }
     }
   }
 
@@ -562,32 +681,88 @@ export function CharacterLibraryPage() {
 
                 {activeTab === 'preview' && (
                   <div className="mt-6 border-t border-stone-200 pt-5">
-                    <p className="text-sm text-stone-500">選一組已完成的錄音克隆聲線，輸入任意文字試講，聲音會即時合成播放（不會存檔）。文字設計聲線因 3wa 尚未將 voice_prompt 傳給 VoxCPM2，目前不可試音。</p>
-                    {readyProfiles.length === 0 && <p className="mt-3 text-sm text-stone-500">這個角色還沒有已完成的聲線，先到「聲線管理」建立一組。</p>}
-                    {readyProfiles.length > 0 && (
-                      <div className="mt-3 space-y-3">
-                        <label className="block text-xs text-stone-500">
-                          選擇聲線
-                          <select className="auth-input mt-2" onChange={(event) => setPreviewProfileId(event.target.value)} value={previewProfileId}>
-                            {readyProfiles.map((profile) => (
-                              <option key={profile.id} value={profile.id}>{slotLabel(profile)}（{profile.mode === 'Design' ? '文字設計' : '錄音克隆'}）</option>
-                            ))}
-                          </select>
-                        </label>
-                        <label className="block text-xs text-stone-500">
-                          試講文字
-                          <textarea className="auth-input mt-2 min-h-20 w-full" maxLength={200} onChange={(event) => setPreviewText(event.target.value)} value={previewText} />
-                        </label>
-                        <button
-                          className="secondary-button disabled:cursor-wait disabled:opacity-60"
-                          disabled={previewBusy || !previewProfileId || !previewText.trim()}
-                          onClick={() => void playPreview()}
-                          type="button"
-                        >
-                          {previewBusy ? '合成中…' : '▶ 播放試講'}
-                        </button>
+                    <section className="rounded-2xl border border-amber-200 bg-amber-50/60 p-4">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <h3 className="font-serif text-lg text-stone-900">本機私人試音</h3>
+                          <p className="mt-1 text-xs leading-5 text-stone-600">
+                            只會使用已列入允許清單的授權素材，不會建立配音任務、存回角色設定或切換正式聲線。
+                          </p>
+                        </div>
+                        {localCloneAvailability?.available && (
+                          <span className="rounded-full border border-emerald-200 bg-white px-3 py-1 text-xs text-emerald-700">
+                            {localCloneAvailability.label ?? '已核准私人試音'}
+                          </span>
+                        )}
                       </div>
-                    )}
+                      <div className="mt-3 rounded-xl border border-amber-100 bg-white p-3">
+                        <p className="text-[11px] font-medium text-stone-500">固定非正文測試句</p>
+                        <p className="mt-1 text-sm leading-6 text-stone-800">{LOCAL_CLONE_PREVIEW_TEXT}</p>
+                      </div>
+                      {localCloneAvailabilityState === 'loading' && (
+                        <p className="mt-3 text-sm text-stone-500">正在確認私人試音授權狀態…</p>
+                      )}
+                      {localCloneAvailabilityState === 'error' && (
+                        <p className="mt-3 text-sm text-rose-700">無法驗證私人試音狀態，已停用試音按鈕。</p>
+                      )}
+                      {localCloneAvailabilityState === 'ready' && !localCloneAvailability?.available && (
+                        <p className="mt-3 text-sm text-stone-500">這個角色目前沒有已核准的本機私人試音。</p>
+                      )}
+                      {localCloneAvailability?.available && (
+                        <div className="mt-3 space-y-3">
+                          <button
+                            className="secondary-button disabled:cursor-wait disabled:opacity-60"
+                            disabled={localClonePreviewBusy}
+                            onClick={() => void generateLocalClonePreview()}
+                            type="button"
+                          >
+                            {localClonePreviewBusy ? '產生中…' : '產生私人試音'}
+                          </button>
+                          {localClonePreviewUrl && (
+                            <div className="space-y-2 rounded-xl border border-stone-200 bg-white p-3">
+                              <audio className="w-full" controls preload="metadata" src={localClonePreviewUrl} />
+                              <a
+                                className="inline-flex rounded-full border border-stone-200 px-3 py-1.5 text-xs text-stone-700 hover:border-stone-300"
+                                download="local-clone-private-preview.wav"
+                                href={localClonePreviewUrl}
+                              >
+                                下載私人試音
+                              </a>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </section>
+
+                    <section className="mt-6 border-t border-stone-200 pt-5">
+                      <h3 className="font-serif text-lg text-stone-900">正式角色聲線試講</h3>
+                      <p className="mt-2 text-sm text-stone-500">選一組已完成的錄音克隆聲線，輸入任意文字試講，聲音會即時合成播放（不會存檔）。文字設計聲線因 3wa 尚未將 voice_prompt 傳給 VoxCPM2，目前不可試音。</p>
+                      {readyProfiles.length === 0 && <p className="mt-3 text-sm text-stone-500">這個角色還沒有已完成的聲線，先到「聲線管理」建立一組。</p>}
+                      {readyProfiles.length > 0 && (
+                        <div className="mt-3 space-y-3">
+                          <label className="block text-xs text-stone-500">
+                            選擇聲線
+                            <select className="auth-input mt-2" onChange={(event) => setPreviewProfileId(event.target.value)} value={previewProfileId}>
+                              {readyProfiles.map((profile) => (
+                                <option key={profile.id} value={profile.id}>{slotLabel(profile)}（{profile.mode === 'Design' ? '文字設計' : '錄音克隆'}）</option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="block text-xs text-stone-500">
+                            試講文字
+                            <textarea className="auth-input mt-2 min-h-20 w-full" maxLength={200} onChange={(event) => setPreviewText(event.target.value)} value={previewText} />
+                          </label>
+                          <button
+                            className="secondary-button disabled:cursor-wait disabled:opacity-60"
+                            disabled={previewBusy || !previewProfileId || !previewText.trim()}
+                            onClick={() => void playPreview()}
+                            type="button"
+                          >
+                            {previewBusy ? '合成中…' : '▶ 播放試講'}
+                          </button>
+                        </div>
+                      )}
+                    </section>
                   </div>
                 )}
 

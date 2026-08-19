@@ -1,4 +1,5 @@
 using StoryVoice.Application.Characters;
+using StoryVoice.Application.Series;
 
 namespace StoryVoice.Api;
 
@@ -26,6 +27,46 @@ public static class CharacterProfileEndpoints
             var profile = await service.GetAsync(characterProfileId, cancellationToken);
             return profile is null ? Results.NotFound() : Results.Ok(profile);
         });
+
+        group.MapGet("/{characterProfileId:guid}/local-clone-preview", async (
+            Guid characterProfileId,
+            HttpContext httpContext,
+            ILocalClonePreviewService service,
+            CancellationToken cancellationToken) =>
+        {
+            var availability = await service.GetCharacterProfileAvailabilityAsync(
+                characterProfileId,
+                cancellationToken);
+            httpContext.Response.Headers.CacheControl = "private, no-store";
+            httpContext.Response.Headers.Pragma = "no-cache";
+            return availability is null ? Results.NotFound() : Results.Ok(availability);
+        })
+        .WithName("GetCharacterProfileLocalClonePreviewAvailability");
+
+        group.MapPost("/{characterProfileId:guid}/local-clone-preview", async (
+            Guid characterProfileId,
+            LocalClonePreviewRequest request,
+            HttpContext httpContext,
+            ILocalClonePreviewService service,
+            CancellationToken cancellationToken) =>
+        {
+            var preview = await service.PreviewCharacterProfileAsync(
+                characterProfileId,
+                request,
+                cancellationToken);
+            if (preview is null)
+            {
+                return Results.NotFound();
+            }
+
+            httpContext.Response.Headers.CacheControl = "private, no-store";
+            httpContext.Response.Headers.Pragma = "no-cache";
+            httpContext.Response.Headers["X-Content-Type-Options"] = "nosniff";
+            httpContext.Response.ContentLength = preview.Content.LongLength;
+            return Results.File(preview.Content, "audio/wav");
+        })
+        .AddEndpointFilter<AntiforgeryEndpointFilter>()
+        .WithName("PreviewCharacterProfileLocalCloneVoice");
 
         group.MapPost("/", async (
             CreateCharacterProfileRequest request,

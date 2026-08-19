@@ -244,6 +244,21 @@ test('角色管理頁面走 owner-scoped 角色庫 API，並串接自訂聲線�
   assert.doesNotMatch(characterLibraryPage, /fuzzy|模糊比對/i)
 })
 
+test('角色庫本機私人試音使用固定非正文句，並且只在 allowlist 可用時開放播放與下載', () => {
+  assert.match(characterLibraryPage, /\/api\/character-profiles\/\$\{selectedId\}\/local-clone-preview/)
+  assert.match(characterLibraryPage, /\/api\/character-profiles\/\$\{selected\.id\}\/local-clone-preview/)
+  assert.match(characterLibraryPage, /LOCAL_CLONE_PREVIEW_TEXT/)
+  assert.match(characterLibraryPage, /不屬於有聲書正文/)
+  assert.match(characterLibraryPage, /localCloneAvailability\?\.available/)
+  assert.match(characterLibraryPage, /'X-CSRF-TOKEN': csrfToken/)
+  assert.match(characterLibraryPage, /response\.headers\.get\('Content-Type'\)/)
+  assert.match(characterLibraryPage, /localClonePreviewRequest\.current\?\.abortController\.abort\(\)/)
+  assert.match(characterLibraryPage, /selectedIdRef\.current !== request\.characterProfileId/)
+  assert.match(characterLibraryPage, /<audio[^>]+controls/)
+  assert.match(characterLibraryPage, /download="local-clone-private-preview\.wav"/)
+  assert.match(characterLibraryPage, /不會建立配音任務、存回角色設定或切換正式聲線/)
+})
+
 test('App 與主導覽都能開啟角色管理頁面', () => {
   assert.match(app, /path="characters"/)
   assert.match(app, /CharacterLibraryPage/)

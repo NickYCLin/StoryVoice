@@ -56,18 +56,7 @@ internal sealed class LocalClonePreviewService(
             return null;
         }
 
-        var text = request.Text?.Trim();
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            throw new ArgumentException("試音文字不可為空白。", nameof(request));
-        }
-
-        if (text.Length > MaximumPreviewTextLength)
-        {
-            throw new ArgumentException(
-                $"試音文字不可超過 {MaximumPreviewTextLength} 個字元。",
-                nameof(request));
-        }
+        var text = ValidatePreviewText(request);
 
         if (!options.Value.Enabled)
         {
@@ -83,6 +72,63 @@ internal sealed class LocalClonePreviewService(
                 LocalClonePreviewFailureKind.NotConfigured);
         }
 
+        return await SynthesizeAsync(asset, text, cancellationToken);
+    }
+
+    public async Task<LocalClonePreviewAvailabilityResponse?> GetCharacterProfileAvailabilityAsync(
+        Guid characterProfileId,
+        CancellationToken cancellationToken)
+    {
+        var profile = await FindOwnerScopedProfileAsync(characterProfileId, cancellationToken);
+        if (profile is null)
+        {
+            return null;
+        }
+
+        if (!options.Value.Enabled
+            || !profile.IsActive
+            || !TryGetAllowedProfile(characterProfileId, out var asset))
+        {
+            return new LocalClonePreviewAvailabilityResponse(false, null);
+        }
+
+        return new LocalClonePreviewAvailabilityResponse(true, asset.Label);
+    }
+
+    public async Task<LocalClonePreviewAudio?> PreviewCharacterProfileAsync(
+        Guid characterProfileId,
+        LocalClonePreviewRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var profile = await FindOwnerScopedProfileAsync(characterProfileId, cancellationToken);
+        if (profile is null)
+        {
+            return null;
+        }
+
+        var text = ValidatePreviewText(request);
+        if (!options.Value.Enabled)
+        {
+            throw new LocalClonePreviewUnavailableException(
+                LocalClonePreviewFailureKind.Disabled);
+        }
+
+        if (!profile.IsActive
+            || !TryGetAllowedProfile(characterProfileId, out var asset))
+        {
+            throw new LocalClonePreviewUnavailableException(
+                LocalClonePreviewFailureKind.NotConfigured);
+        }
+
+        return await SynthesizeAsync(asset, text, cancellationToken);
+    }
+
+    private async Task<LocalClonePreviewAudio> SynthesizeAsync(
+        LocalClonePreviewAssetOptions asset,
+        string text,
+        CancellationToken cancellationToken)
+    {
         LocalClonePrivateAssets privateAssets;
         try
         {
@@ -115,6 +161,24 @@ internal sealed class LocalClonePreviewService(
                 privateAssets.ReferenceAudio),
             CancellationToken.None);
         return new LocalClonePreviewAudio(audio.Content, audio.ContentType);
+    }
+
+    private static string ValidatePreviewText(LocalClonePreviewRequest request)
+    {
+        var text = request.Text?.Trim();
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            throw new ArgumentException("試音文字不可為空白。", nameof(request));
+        }
+
+        if (text.Length > MaximumPreviewTextLength)
+        {
+            throw new ArgumentException(
+                $"試音文字不可超過 {MaximumPreviewTextLength} 個字元。",
+                nameof(request));
+        }
+
+        return text;
     }
 
     private async Task<LocalClonePrivateAssets> ReadAndValidateAssetsAsync(
@@ -173,6 +237,19 @@ internal sealed class LocalClonePreviewService(
                     && profile.Id == characterProfileId
                     && profile.IsActive,
                 cancellationToken);
+    }
+
+    private async Task<OwnerScopedCharacterProfile?> FindOwnerScopedProfileAsync(
+        Guid characterProfileId,
+        CancellationToken cancellationToken)
+    {
+        var ownerId = EnsureCurrentOwnerId();
+        return await dbContext.CharacterProfiles
+            .AsNoTracking()
+            .Where(profile => profile.OwnerId == ownerId
+                && profile.Id == characterProfileId)
+            .Select(profile => new OwnerScopedCharacterProfile(profile.IsActive))
+            .SingleOrDefaultAsync(cancellationToken);
     }
 
     private bool TryGetAllowedProfile(
@@ -332,6 +409,8 @@ internal sealed class LocalClonePreviewService(
     }
 
     private sealed record SeriesCharacterLink(Guid? CharacterProfileId);
+
+    private sealed record OwnerScopedCharacterProfile(bool IsActive);
 
     private sealed record LocalClonePrivateAssets(
         byte[] ReferenceAudio,

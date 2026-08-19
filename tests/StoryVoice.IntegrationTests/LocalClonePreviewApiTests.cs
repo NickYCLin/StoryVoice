@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using StoryVoice.Application.Characters;
 using StoryVoice.Application.Series;
 using StoryVoice.Domain.Characters;
 using StoryVoice.Domain.Narrations;
@@ -74,6 +75,39 @@ public sealed class LocalClonePreviewApiTests(ApiFactory factory) : IClassFixtur
         Assert.Equal(
             "local_clone_preview_disabled",
             await ReadProblemCodeAsync(disabled, cancellationToken));
+
+        using var createProfile = await owner.PostWithCsrfAsync(
+            "/api/character-profiles",
+            new
+            {
+                canonicalName = "停用功能的私人試音角色",
+                age = (string?)null,
+                gender = (string?)null,
+                birthday = (string?)null,
+                personality = (string?)null,
+                catchphrase = (string?)null,
+                background = (string?)null,
+                speakingStyle = (string?)null,
+            },
+            cancellationToken);
+        var profile = Assert.IsType<CharacterProfileResponse>(
+            await createProfile.Content.ReadFromJsonAsync<CharacterProfileResponse>(cancellationToken));
+        using var disabledProfileAvailability = await owner.GetAsync(
+            ProfilePreviewPath(profile.Id),
+            cancellationToken);
+        var disabledProfileBody = await disabledProfileAvailability.Content
+            .ReadFromJsonAsync<LocalClonePreviewAvailabilityResponse>(cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, disabledProfileAvailability.StatusCode);
+        Assert.NotNull(disabledProfileBody);
+        Assert.False(disabledProfileBody.Available);
+        using var disabledProfilePreview = await owner.PostWithCsrfAsync(
+            ProfilePreviewPath(profile.Id),
+            new LocalClonePreviewRequest("停用功能不可試音"),
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, disabledProfilePreview.StatusCode);
+        Assert.Equal(
+            "local_clone_preview_disabled",
+            await ReadProblemCodeAsync(disabledProfilePreview, cancellationToken));
     }
 
     [Fact]
@@ -158,6 +192,154 @@ public sealed class LocalClonePreviewApiTests(ApiFactory factory) : IClassFixtur
             "local_clone_preview_not_configured",
             await ReadProblemCodeAsync(inactivePreview, cancellationToken));
         Assert.Equal(1, fake.Calls);
+    }
+
+    [Fact]
+    public async Task Character_profile_preview_is_owner_scoped_and_works_without_a_series_link()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var profileId = Guid.NewGuid();
+        var transcript = "林若晴授權的參考逐字稿。";
+        var reference = CreatePcmWave(48_000, durationSeconds: 10);
+        var output = CreatePcmWave(24_000, durationSeconds: 1);
+        var fake = new FakeLocalCloneGatewayClient(output);
+        var assetRoot = await WriteAssetsAsync(profileId, reference, transcript, cancellationToken);
+        using var enabledFactory = CreateEnabledFactory(
+            profileId,
+            assetRoot,
+            Sha256(reference),
+            CharacterVoiceTranscriptCanonicalizer.ComputeSha256Hex(transcript),
+            fake,
+            label: "林若晴（私人試音）");
+        using var owner = await CreateOwnerWithProfileAsync(
+            enabledFactory,
+            profileId,
+            cancellationToken);
+
+        await using (var scope = enabledFactory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+            Assert.False(await db.SeriesCharacters.AnyAsync(
+                character => character.CharacterProfileId == profileId,
+                cancellationToken));
+        }
+
+        using var anonymous = enabledFactory.CreateClient();
+        using var anonymousGet = await anonymous.GetAsync(
+            ProfilePreviewPath(profileId),
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymousGet.StatusCode);
+
+        using var availability = await owner.GetAsync(
+            ProfilePreviewPath(profileId),
+            cancellationToken);
+        var availabilityBody = await availability.Content
+            .ReadFromJsonAsync<LocalClonePreviewAvailabilityResponse>(cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, availability.StatusCode);
+        Assert.Contains("no-store", availability.Headers.CacheControl?.ToString());
+        Assert.NotNull(availabilityBody);
+        Assert.True(availabilityBody.Available);
+        Assert.Equal("林若晴（私人試音）", availabilityBody.Label);
+
+        using var missingCsrf = await owner.PostAsJsonAsync(
+            ProfilePreviewPath(profileId),
+            new LocalClonePreviewRequest("缺少 CSRF"),
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, missingCsrf.StatusCode);
+
+        using var otherOwner = await enabledFactory.CreateAuthenticatedClientAsync(cancellationToken);
+        using var foreignGet = await otherOwner.GetAsync(
+            ProfilePreviewPath(profileId),
+            cancellationToken);
+        using var foreignPost = await otherOwner.PostWithCsrfAsync(
+            ProfilePreviewPath(profileId),
+            new LocalClonePreviewRequest("越權試音"),
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.NotFound, foreignGet.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, foreignPost.StatusCode);
+
+        const string previewText = "這是角色私人聲線試音，僅用於確認聲音，不屬於有聲書正文。";
+        using var preview = await owner.PostWithCsrfAsync(
+            ProfilePreviewPath(profileId),
+            new LocalClonePreviewRequest(previewText),
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
+        Assert.Equal("audio/wav", preview.Content.Headers.ContentType?.MediaType);
+        Assert.Equal(output.LongLength, preview.Content.Headers.ContentLength);
+        Assert.Contains("no-store", preview.Headers.CacheControl?.ToString());
+        Assert.Equal("nosniff", preview.Headers.GetValues("X-Content-Type-Options").Single());
+        Assert.Equal(output, await preview.Content.ReadAsByteArrayAsync(cancellationToken));
+        Assert.Equal(1, fake.Calls);
+        Assert.Equal(previewText, fake.LastRequest?.Text);
+
+        using var unlistedCreate = await owner.PostWithCsrfAsync(
+            "/api/character-profiles",
+            new
+            {
+                canonicalName = "未列入試音角色",
+                age = (string?)null,
+                gender = (string?)null,
+                birthday = (string?)null,
+                personality = (string?)null,
+                catchphrase = (string?)null,
+                background = (string?)null,
+                speakingStyle = (string?)null,
+            },
+            cancellationToken);
+        var unlisted = Assert.IsType<CharacterProfileResponse>(
+            await unlistedCreate.Content.ReadFromJsonAsync<CharacterProfileResponse>(cancellationToken));
+        using var unlistedAvailability = await owner.GetAsync(
+            ProfilePreviewPath(unlisted.Id),
+            cancellationToken);
+        var unlistedBody = await unlistedAvailability.Content
+            .ReadFromJsonAsync<LocalClonePreviewAvailabilityResponse>(cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, unlistedAvailability.StatusCode);
+        Assert.NotNull(unlistedBody);
+        Assert.False(unlistedBody.Available);
+        Assert.Null(unlistedBody.Label);
+        using var unlistedPreview = await owner.PostWithCsrfAsync(
+            ProfilePreviewPath(unlisted.Id),
+            new LocalClonePreviewRequest("未列入角色"),
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, unlistedPreview.StatusCode);
+        Assert.Equal(
+            "local_clone_preview_not_configured",
+            await ReadProblemCodeAsync(unlistedPreview, cancellationToken));
+        Assert.Equal(1, fake.Calls);
+
+        using var deactivate = await owner.PostWithCsrfAsync(
+            $"/api/character-profiles/{profileId}/deactivate",
+            new { },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, deactivate.StatusCode);
+        using var inactiveAvailability = await owner.GetAsync(
+            ProfilePreviewPath(profileId),
+            cancellationToken);
+        var inactiveBody = await inactiveAvailability.Content
+            .ReadFromJsonAsync<LocalClonePreviewAvailabilityResponse>(cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, inactiveAvailability.StatusCode);
+        Assert.NotNull(inactiveBody);
+        Assert.False(inactiveBody.Available);
+        using var inactivePreview = await owner.PostWithCsrfAsync(
+            ProfilePreviewPath(profileId),
+            new LocalClonePreviewRequest("停用角色"),
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, inactivePreview.StatusCode);
+        Assert.Equal(
+            "local_clone_preview_not_configured",
+            await ReadProblemCodeAsync(inactivePreview, cancellationToken));
+        Assert.Equal(1, fake.Calls);
+
+        await using (var scope = enabledFactory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+            Assert.False(await db.SeriesCharacters.AnyAsync(
+                character => character.CharacterProfileId == profileId,
+                cancellationToken));
+            Assert.False(await db.CharacterVoiceProfiles.AnyAsync(
+                profile => profile.CharacterProfileId == profileId,
+                cancellationToken));
+        }
     }
 
     [Fact]
@@ -252,6 +434,7 @@ public sealed class LocalClonePreviewApiTests(ApiFactory factory) : IClassFixtur
         string referenceSha256,
         string transcriptSha256,
         FakeLocalCloneGatewayClient fake,
+        string label = "褚冥漾／周子謙（私人試音）",
         string referencePath = "reference.wav") =>
         factory.WithWebHostBuilder(builder =>
         {
@@ -261,7 +444,7 @@ public sealed class LocalClonePreviewApiTests(ApiFactory factory) : IClassFixtur
                 $"{LocalClonePreviewOptions.SectionName}:InternalToken",
                 new string('t', 32));
             builder.UseSetting($"{LocalClonePreviewOptions.SectionName}:AssetRootPath", assetRoot);
-            builder.UseSetting($"{prefix}:Label", "褚冥漾／周子謙（私人試音）");
+            builder.UseSetting($"{prefix}:Label", label);
             builder.UseSetting($"{prefix}:ReferenceAudioRelativePath", referencePath);
             builder.UseSetting($"{prefix}:TranscriptRelativePath", "transcript.txt");
             builder.UseSetting($"{prefix}:ExpectedReferenceAudioSha256", referenceSha256);
@@ -411,6 +594,9 @@ public sealed class LocalClonePreviewApiTests(ApiFactory factory) : IClassFixtur
 
     private static string PreviewPath(Guid seriesId, Guid characterId) =>
         $"/api/series/{seriesId}/characters/{characterId}/local-clone-preview";
+
+    private static string ProfilePreviewPath(Guid characterProfileId) =>
+        $"/api/character-profiles/{characterProfileId}/local-clone-preview";
 
     private static string Sha256(ReadOnlySpan<byte> content) =>
         Convert.ToHexString(SHA256.HashData(content)).ToLowerInvariant();

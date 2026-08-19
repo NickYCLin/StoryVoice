@@ -22,6 +22,15 @@ public interface ILocalClonePreviewService
         Guid characterId,
         LocalClonePreviewRequest request,
         CancellationToken cancellationToken);
+
+    Task<LocalClonePreviewAvailabilityResponse?> GetCharacterProfileAvailabilityAsync(
+        Guid characterProfileId,
+        CancellationToken cancellationToken);
+
+    Task<LocalClonePreviewAudio?> PreviewCharacterProfileAsync(
+        Guid characterProfileId,
+        LocalClonePreviewRequest request,
+        CancellationToken cancellationToken);
 }
 
 public enum LocalClonePreviewFailureKind
