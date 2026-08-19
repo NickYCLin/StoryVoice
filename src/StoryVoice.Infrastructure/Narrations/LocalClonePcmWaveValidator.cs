@@ -22,12 +22,30 @@ internal static class LocalClonePcmWaveValidator
             maximumDurationSeconds: 300,
             maximumBytes);
 
+    public static void ValidateExternalOutput(ReadOnlySpan<byte> content, int maximumBytes) =>
+        Validate(
+            content,
+            requiredSampleRate: 24_000,
+            minimumDurationSeconds: 0,
+            maximumDurationSeconds: 60,
+            maximumBytes);
+
+    public static void ValidatePublicDemo(ReadOnlySpan<byte> content, int maximumBytes) =>
+        Validate(
+            content,
+            requiredSampleRate: 24_000,
+            minimumDurationSeconds: 0,
+            maximumDurationSeconds: 60,
+            maximumBytes,
+            rejectUnknownChunks: true);
+
     private static void Validate(
         ReadOnlySpan<byte> content,
         uint requiredSampleRate,
         double minimumDurationSeconds,
         double maximumDurationSeconds,
-        int maximumBytes)
+        int maximumBytes,
+        bool rejectUnknownChunks = false)
     {
         const ushort requiredChannels = 1;
         const ushort requiredBitsPerSample = 16;
@@ -68,7 +86,7 @@ internal static class LocalClonePcmWaveValidator
 
             if (chunkId.SequenceEqual("fmt "u8))
             {
-                if (foundFormat || chunkSize < 16)
+                if (foundFormat || chunkSize < 16 || rejectUnknownChunks && chunkSize != 16)
                 {
                     throw new InvalidDataException("Invalid PCM format chunk.");
                 }
@@ -94,6 +112,10 @@ internal static class LocalClonePcmWaveValidator
                 }
 
                 dataBytes = chunkSize;
+            }
+            else if (rejectUnknownChunks)
+            {
+                throw new InvalidDataException("Public PCM WAV contains an unsupported metadata chunk.");
             }
 
             offset = checked(offset + (int)paddedChunkSize);

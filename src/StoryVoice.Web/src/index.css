@@ -28,6 +28,7 @@ body { margin: 0; min-width: 320px; min-height: 100vh; overflow-x: hidden; }
 button, input, a { font: inherit; }
 button, a { -webkit-tap-highlight-color: transparent; }
 .font-serif { font-family: Georgia, "Noto Serif TC", "Times New Roman", serif; }
+.public-focus:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
 
 .ambient { position: absolute; border-radius: 999px; filter: blur(100px); pointer-events: none; opacity: .5; }
 .ambient-one { width: 32rem; height: 32rem; left: -14rem; top: 20rem; background: rgba(244, 194, 122, .35); }
@@ -93,6 +94,23 @@ textarea.auth-input { line-height: 1.65; }
 .male { background: #e7f1fb; color: #2a5f8a; border: 1px solid #c9e0f5; }
 .emotion { font-size: .65rem; color: var(--ink-muted); }
 .eyebrow { font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .27em; color: var(--accent); }
+.public-voice-card { display: flex; min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 1.5rem; background: rgba(255, 253, 248, .96); box-shadow: 0 16px 44px rgba(96, 70, 30, .08); }
+.public-voice-card-stage { display: flex; width: 8.5rem; flex: none; flex-direction: column; justify-content: space-between; padding: 1.5rem 1.15rem; color: #613a13; background: linear-gradient(155deg, #fdecc8, #f6c97e 58%, #e9a863); border-right: 1px solid var(--accent-line); }
+.public-voice-mark { display: grid; width: 3rem; height: 3rem; place-items: center; border: 1px solid rgba(96, 70, 30, .18); border-radius: 1rem; font-family: Georgia, "Noto Serif TC", serif; font-size: 1.35rem; background: rgba(255, 253, 248, .55); }
+.public-voice-wave { display: flex; height: 5.2rem; align-items: center; gap: 3px; }
+.public-voice-wave span { width: 3px; min-height: 8%; flex: 1; border-radius: 999px; background: rgba(90, 48, 11, .58); }
+.public-status-pill { display: inline-flex; flex: none; align-items: center; gap: .4rem; border: 1px solid #b8d7bd; border-radius: 999px; padding: .35rem .65rem; color: #295b37; background: #eff8f0; font-size: .7rem; font-weight: 650; }
+.public-status-pill:not([data-status="available"]) { border-color: var(--line); color: var(--ink-soft); background: var(--surface-well); }
+.public-status-dot { width: .45rem; height: .45rem; border-radius: 999px; background: #428252; }
+.public-status-pill:not([data-status="available"]) .public-status-dot { background: #8b7f6f; }
+.public-voice-chip { border: 1px solid var(--line); border-radius: 999px; padding: .28rem .58rem; color: var(--ink-soft); background: var(--surface-well); font-size: .7rem; }
+.public-catalog-button { display: inline-flex; min-height: 2.75rem; width: 100%; align-items: center; justify-content: center; gap: .5rem; border: 1px solid var(--line); border-radius: .85rem; padding: .65rem 1rem; font-size: .8rem; font-weight: 700; text-align: center; transition: .18s ease; }
+.public-catalog-button-preview { border-color: var(--accent-line); color: var(--accent-strong); background: var(--accent-soft); }
+.public-catalog-button-preview:hover { border-color: var(--accent); background: #fbe5ba; }
+.public-catalog-button-primary { border-color: #8a4c0c; color: white; background: var(--accent-strong); }
+.public-catalog-button-primary:hover { background: #6f3b08; }
+.public-catalog-button-muted { color: var(--ink-muted); background: var(--surface-well); cursor: not-allowed; }
+@media (max-width: 640px) { .public-voice-card { flex-direction: column; } .public-voice-card-stage { width: auto; min-height: 6rem; flex-direction: row; align-items: center; border-right: 0; border-bottom: 1px solid var(--accent-line); } .public-voice-wave { width: 7rem; height: 3.5rem; } }
 .library-state { display: grid; place-items: center; border: 1px dashed var(--line); border-radius: 1.5rem; padding: 3rem; color: var(--ink-muted); text-align: center; background: var(--surface); }
 .book-card { display: flex; gap: 1.1rem; padding: 1.1rem; border-radius: 1.3rem; border: 1px solid var(--line); background: var(--surface); transition: .2s ease; box-shadow: 0 1px 2px rgba(96, 70, 30, .04); }
 .book-card:hover { transform: translateY(-2px); border-color: var(--accent-line); background: var(--accent-soft); box-shadow: 0 8px 20px rgba(96, 70, 30, .08); }

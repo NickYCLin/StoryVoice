@@ -686,7 +686,7 @@ export function CharacterLibraryPage() {
                         <div>
                           <h3 className="font-serif text-lg text-stone-900">本機私人試音</h3>
                           <p className="mt-1 text-xs leading-5 text-stone-600">
-                            只會使用已列入允許清單的授權素材，不會建立配音任務、存回角色設定或切換正式聲線。
+                            只會使用已列入允許清單的本機素材，不會建立配音任務、存回角色設定或切換正式聲線。
                           </p>
                         </div>
                         {localCloneAvailability?.available && (

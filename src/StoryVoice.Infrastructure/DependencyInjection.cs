@@ -1,23 +1,28 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using StoryVoice.Application.BookImports;
 using StoryVoice.Application.Books;
 using StoryVoice.Application.Characters;
 using StoryVoice.Application.Collections;
+using StoryVoice.Application.ExternalVoices;
 using StoryVoice.Application.Insights;
 using StoryVoice.Application.Library;
 using StoryVoice.Application.Narrations;
 using StoryVoice.Application.Narrations.SpeechPlanning;
 using StoryVoice.Application.Series;
+using StoryVoice.Application.VoiceCatalog;
 using StoryVoice.Domain.Narrations;
 using StoryVoice.Infrastructure.BookImports;
 using StoryVoice.Infrastructure.Characters;
+using StoryVoice.Infrastructure.ExternalVoices;
 using StoryVoice.Infrastructure.Identity;
 using StoryVoice.Infrastructure.Insights;
 using StoryVoice.Infrastructure.Narrations;
 using StoryVoice.Infrastructure.Persistence;
+using StoryVoice.Infrastructure.VoiceCatalog;
 
 namespace StoryVoice.Infrastructure;
 
@@ -152,6 +157,14 @@ public static class DependencyInjection
             .Validate(options => !options.Enabled || IsValidLocalCloneAllowlist(options.AllowedProfiles),
                 "Enabled local clone preview requires a valid exact CharacterProfileId allowlist.")
             .ValidateOnStart();
+        services.AddSingleton<IValidateOptions<ExternalVoiceApiOptions>, ExternalVoiceApiOptionsValidator>();
+        services.AddOptions<ExternalVoiceApiOptions>()
+            .Bind(configuration.GetSection(ExternalVoiceApiOptions.SectionName))
+            .ValidateOnStart();
+        services.AddSingleton<IValidateOptions<VoiceCatalogOptions>, VoiceCatalogOptionsValidator>();
+        services.AddOptions<VoiceCatalogOptions>()
+            .Bind(configuration.GetSection(VoiceCatalogOptions.SectionName))
+            .ValidateOnStart();
         services.AddOptions<MultiCharacterNarrationOptions>()
             .Bind(configuration.GetSection(MultiCharacterNarrationOptions.SectionName))
             .Validate(options => !string.IsNullOrWhiteSpace(options.ProviderVersion)
@@ -242,6 +255,12 @@ public static class DependencyInjection
         services.AddScoped<IStagedNarrationBatchProgressService, StagedNarrationBatchProgressService>();
         services.AddScoped<IStorySeriesRepository, StorySeriesRepository>();
         services.AddScoped<ISeriesService, SeriesService>();
+        services.TryAddSingleton(TimeProvider.System);
+        services.AddSingleton<ExternalVoiceIdempotencyCoordinator>();
+        services.AddSingleton<ExternalVoiceConcurrencyGate>();
+        services.AddScoped<LocalCloneProfileSynthesizer>();
+        services.AddScoped<IExternalVoiceSynthesisService, ExternalVoiceSynthesisService>();
+        services.AddSingleton<IPublicVoiceCatalogService, PublicVoiceCatalogService>();
         services.AddScoped<ILocalClonePreviewService, LocalClonePreviewService>();
         // A singleton owns the successful two-voice preview cache for the lifetime of the API process.
         services.AddSingleton<ISeriesVoicePreviewService, SeriesVoicePreviewService>();

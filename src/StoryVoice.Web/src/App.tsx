@@ -6,6 +6,7 @@ import { CollectionDetailPage } from './pages/CollectionDetailPage'
 import { CollectionsPage } from './pages/CollectionsPage'
 import { LandingPage } from './pages/LandingPage'
 import { LibraryPage } from './pages/LibraryPage'
+import { PublicVoicesPage } from './pages/PublicVoicesPage'
 import { SharedCollectionPage } from './pages/SharedCollectionPage'
 import { SharedWithMePage } from './pages/SharedWithMePage'
 import { SeriesCastPanel } from './SeriesCastPanel'
@@ -13,6 +14,7 @@ import { SeriesCastPanel } from './SeriesCastPanel'
 function App() {
   return (
     <Routes>
+      <Route element={<PublicVoicesPage />} path="/voices" />
       <Route element={<AppLayout />} path="/">
         <Route element={<LandingPage />} index />
         <Route element={<LibraryPage />} path="library" />

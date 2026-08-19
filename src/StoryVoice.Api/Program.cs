@@ -6,11 +6,14 @@ using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Options;
 using Serilog;
 using StackExchange.Redis;
+using System.Threading.RateLimiting;
 using StoryVoice.Api;
 using StoryVoice.Application.Authentication;
 using StoryVoice.Application.BookImports;
@@ -18,10 +21,12 @@ using StoryVoice.Application.Books;
 using StoryVoice.Application.Bookshelves;
 using StoryVoice.Application.Narrations;
 using StoryVoice.Infrastructure;
+using StoryVoice.Infrastructure.ExternalVoices;
 using StoryVoice.Infrastructure.Health;
 using StoryVoice.Infrastructure.Identity;
 using StoryVoice.Infrastructure.Insights;
 using StoryVoice.Infrastructure.Persistence;
+using StoryVoice.Infrastructure.VoiceCatalog;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -93,6 +98,9 @@ builder.Services.AddAuthentication(options =>
     })
     .AddScheme<AuthenticationSchemeOptions, CompanionAuthenticationHandler>(
         CompanionAuthenticationDefaults.Scheme,
+        _ => { })
+    .AddScheme<AuthenticationSchemeOptions, ExternalVoiceAuthenticationHandler>(
+        ExternalVoiceAuthenticationDefaults.Scheme,
         _ => { });
 builder.Services.AddAuthorizationBuilder()
     .AddPolicy(StoryVoicePolicies.UserSession, policy =>
@@ -107,7 +115,42 @@ builder.Services.AddAuthorizationBuilder()
         policy.RequireClaim(
             CompanionAuthenticationDefaults.ScopeClaim,
             CompanionAuthenticationDefaults.BookshelfSyncScope);
+    })
+    .AddPolicy(StoryVoicePolicies.ExternalVoiceSynthesis, policy =>
+    {
+        policy.AddAuthenticationSchemes(ExternalVoiceAuthenticationDefaults.Scheme);
+        policy.RequireAuthenticatedUser();
+        policy.RequireClaim(
+            ExternalVoiceAuthenticationDefaults.ScopeClaim,
+            ExternalVoiceAuthenticationDefaults.SynthesisScope);
     });
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.OnRejected = ExternalVoiceEndpoints.WriteRateLimitRejectionAsync;
+    options.AddPolicy<string>(ExternalVoiceEndpoints.RateLimitPolicy, httpContext =>
+    {
+        var consumerKeyId = httpContext.User.FindFirst(
+            ExternalVoiceAuthenticationDefaults.ConsumerKeyIdClaim)?.Value;
+        if (string.IsNullOrEmpty(consumerKeyId))
+        {
+            return RateLimitPartition.GetNoLimiter("unauthenticated");
+        }
+
+        var apiOptions = httpContext.RequestServices
+            .GetRequiredService<IOptions<ExternalVoiceApiOptions>>()
+            .Value;
+        return RateLimitPartition.GetFixedWindowLimiter(consumerKeyId, _ =>
+            new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = Math.Max(1, apiOptions.RequestsPerMinute),
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                AutoReplenishment = true,
+            });
+    });
+});
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
     options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
@@ -158,8 +201,14 @@ if (!string.IsNullOrWhiteSpace(configuredPathBase))
 
 app.UseSerilogRequestLogging();
 app.UseExceptionHandler();
+app.UseRouting();
 app.UseAuthentication();
 app.UseAuthorization();
+// Endpoint-specific authentication runs during authorization because the regular
+// web application keeps its cookie scheme as the default. Rate limiting must run
+// afterwards so its partition is the authenticated external consumer, not an
+// unauthenticated shared bucket.
+app.UseRateLimiter();
 
 if (app.Environment.IsDevelopment())
 {
@@ -212,6 +261,16 @@ app.MapCollectionEndpoints();
 app.MapSpeechPlanEndpoints();
 app.MapCharacterProfileEndpoints();
 app.MapCharacterVoiceProfileEndpoints();
+var externalVoiceApiOptions = app.Services.GetRequiredService<IOptions<ExternalVoiceApiOptions>>().Value;
+if (externalVoiceApiOptions.Enabled)
+{
+    app.MapExternalVoiceEndpoints();
+}
+var voiceCatalogOptions = app.Services.GetRequiredService<IOptions<VoiceCatalogOptions>>().Value;
+if (voiceCatalogOptions.Enabled)
+{
+    app.MapPublicVoiceCatalogEndpoints();
+}
 app.Run();
 
 public partial class Program;

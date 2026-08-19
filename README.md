@@ -119,6 +119,30 @@ This path uses the self-hosted model and creates no 3wa or VoAI request. It rema
 private evaluation feature: generated previews are returned with `no-store`, while the
 formal narration catalog and Worker remain unchanged.
 
+### Cross-project and subscription voice API
+
+StoryVoice also defines a disabled-by-default, bearer-authenticated API for approved
+consumers. It is synthetic-only and accepts exactly `voice` and `text`. A short-lived
+`private-development` tier uses an `svd1` credential and a single, maximum-30-day
+`voice-api-synthetic-development-grant/v1`; it is private, non-public and non-commercial,
+does not require a catalog entry or demo, and keeps `VoiceCatalog` disabled. The
+`subscription-commercial` tier uses an `svv1` credential and retains the complete
+publication, provider-rights, catalog and `voice-api-synthetic-usage-grant/v1` chain.
+Token prefixes and grant schemas cannot cross tiers. Both paths re-read their exact
+private assets and verify owner, active profile, project, time and hashes before GPU use.
+
+The external API does not enable browser preview and does not change formal narration or
+active audiobooks.
+Provisioning, request/idempotency rules, stable errors, activation, and credential
+rotation are documented in [`docs/EXTERNAL_VOICE_API.md`](docs/EXTERNAL_VOICE_API.md);
+the unified source/publication contract is documented in
+[`docs/VOICE_PUBLICATION_GRANT.md`](docs/VOICE_PUBLICATION_GRANT.md).
+
+The names currently discussed for public cards are only synthetic candidates based on
+the owner's statement. This checkout contains no real active authorization, provider
+terms snapshot, generation manifest, fixed demo, usage grant, consumer token, enabled
+catalog entry, or deployment for them.
+
 Compose 只把 Web 與 API 綁在 `127.0.0.1`；對外服務應由同機 reverse proxy 提供 TLS。
 
 要先在本機驗證預定的正式子路徑：
@@ -303,6 +327,9 @@ tests/
 - 對外提供 VoAI 產物時，應依適用法規與平台規範揭露該語音由 AI 生成或合成。
 - VoAI 免費試用音訊含背景音樂或浮水印，只供串接測試、不可作為商用成品；商用前須購買適用方案並確認聲線授權。
 - BlueMagpie 程式碼與模型權重不是同一授權；模型權重目前標示為 `other`。本專案的 BlueMagpie 路徑僅供私人內網固定句試音或短篇 staged canary，公開、重新散布或商業使用前須先取得明確授權。
+- 自行產生聲線不建立第三方簽署欄位，但公開／訂閱前仍須保存實際 generation manifest、reference／transcript／fixed-demo SHA、工具／模型版本、license 與供應商條款快照，並以 authenticated owner action 啟用唯一的合成聲線授權。provider commercial/public/API/derivation rights 只能在受控條款審查後核准，不能靠使用者勾選。
+- 合成聲線授權要求沒有可識別真人仿效及第三方角色／品牌主張；私人角色試音不會自動取得公開角色名、品牌或官方合作的權利。
+- AI 產出是否構成受保護著作取決於個案的人類創意投入，StoryVoice 不自動判定著作權成立。參考智慧財產局[電子郵件1140516b](https://www.tipo.gov.tw/tw/copyright/692-34249.html)與[電子郵件1140522c](https://www.tipo.gov.tw/tw/copyright/692-34252.html)；商用前仍須確認供應商授權與是否容許轉授權／API 利用。
 - Uploaded books, generated audio, analysis results and runtime volumes are ignored by Git.
 - Generated audio is not automatically licensed for redistribution.
 

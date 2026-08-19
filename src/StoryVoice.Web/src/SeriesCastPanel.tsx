@@ -626,7 +626,7 @@ export function SeriesCastPanel() {
     const request = { characterId: character.id, controller }
     localClonePreviewRequest.current = request
     setLocalClonePreviewingCharacterId(character.id)
-    setMessage(`正在用「${availability.label ?? '本機授權聲線'}」生成私人固定句試音；不會改變正式配音或 active audio。`)
+    setMessage(`正在用「${availability.label ?? '本機私人試音聲線'}」生成私人固定句試音；不會改變正式配音或 active audio。`)
     try {
       const blob = await fetchBlob(
         `/api/series/${details.id}/characters/${character.id}/local-clone-preview`,
@@ -969,7 +969,7 @@ export function SeriesCastPanel() {
                         </div>
                         <p className="mt-1 text-xs text-stone-500">{voiceLabel(character.voiceProvider, character.voice, voiceOptions)} · 別名：{character.aliases.map((item) => item.value).join('、') || '—'}</p>
                         {localCloneAvailability[character.id]?.available && (
-                          <p className="mt-1 text-xs text-sky-700">私人試音：{localCloneAvailability[character.id].label ?? '本機授權聲線'}。只用於比較音色，不會切換目前的 Edge 正式聲線。</p>
+                          <p className="mt-1 text-xs text-sky-700">私人試音：{localCloneAvailability[character.id].label ?? '本機私人試音聲線'}。只用於比較音色，不會切換目前的 Edge 正式聲線。</p>
                         )}
                         {localClonePreviewAudio?.characterId === character.id && (
                           <div className="mt-3 rounded-xl border border-sky-200 bg-sky-50 p-3">

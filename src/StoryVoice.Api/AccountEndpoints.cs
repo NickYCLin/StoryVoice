@@ -9,6 +9,7 @@ public static class StoryVoicePolicies
 {
     public const string UserSession = "StoryVoiceUserSession";
     public const string BookshelfSync = "StoryVoiceBookshelfSync";
+    public const string ExternalVoiceSynthesis = "StoryVoiceExternalVoiceSynthesis";
 }
 
 public static class AccountEndpoints

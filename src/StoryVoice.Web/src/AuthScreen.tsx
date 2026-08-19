@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react'
+import { Link } from 'react-router-dom'
 
 import { apiUrl } from './api'
 
@@ -71,6 +72,7 @@ export function AuthScreen({ csrfToken, onAuthenticated }: AuthScreenProps) {
             <li><span className="mr-3 text-orange-700">02</span>登入自己的博客來官方書櫃</li>
             <li><span className="mr-3 text-rose-600">03</span>用 Companion 同步已呈現的書目</li>
           </ol>
+          <Link className="secondary-button mt-8 public-focus" to="/voices">瀏覽公開聲線館</Link>
         </div>
 
         <div className="p-8 sm:p-12">
