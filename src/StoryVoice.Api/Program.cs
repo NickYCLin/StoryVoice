@@ -155,11 +155,12 @@ builder.Services.AddRateLimiter(options =>
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
     options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
-    // 只吃反向代理「附加」的最後一組值：nginx 用 proxy_add_x_forwarded_for（append），
-    // ForwardLimit=1 時最右邊那組才會生效，網際網路客戶端自帶的 X-Forwarded-For
-    // 只會留在字串裡，無法偽造 RemoteIp 或 X-Forwarded-Proto。
-    options.ForwardLimit = 1;
-    // 只信任本機與私有網段的代理（nginx 從 docker bridge 172.26.0.1 連進來）。
+    // 部署鏈是兩跳代理：主機 nginx（https 終端）→ web 容器 nginx → API，
+    // 兩層都 append X-Forwarded-For，所以要消化兩組；防偽造靠下面的信任網段
+    // 檢查——中介軟體由右往左走，一旦碰到不在信任清單裡的來源就停下，
+    // 網際網路客戶端自帶的假 X-Forwarded-For 永遠不會被採用。
+    options.ForwardLimit = 2;
+    // 只信任本機與私有網段的代理（兩跳都在 docker bridge／loopback 上）。
     // 兩個清單都清空會讓中介軟體信任任何直連客戶端，等於人人可偽造轉送標頭。
     options.KnownIPNetworks.Clear();
     options.KnownProxies.Clear();
