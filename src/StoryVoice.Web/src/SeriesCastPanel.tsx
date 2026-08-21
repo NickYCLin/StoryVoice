@@ -96,7 +96,7 @@ type SeriesDetails = {
 
 type RebuildBatch = {
   id: string
-  status: 'Building' | 'ReadyToActivate' | 'Activated' | 'Failed' | 'Invalidated'
+  status: 'Building' | 'ReadyToActivate' | 'Activated' | 'Failed'
   members: Array<{ id: string; bookId: string; status: string; stagedNarrationJobId: string | null }>
 }
 
@@ -146,6 +146,7 @@ export function SeriesCastPanel() {
   const [localClonePreviewingCharacterId, setLocalClonePreviewingCharacterId] = useState<string | null>(null)
   const [localClonePreviewAudio, setLocalClonePreviewAudio] = useState<LocalClonePreviewAudio | null>(null)
   const localCloneAvailabilityGeneration = useRef(0)
+  const detailsGenerationRef = useRef(0)
   const localClonePreviewRequest = useRef<LocalClonePreviewRequest | null>(null)
   const localClonePreviewAudioRef = useRef<LocalClonePreviewAudio | null>(null)
 
@@ -197,12 +198,17 @@ export function SeriesCastPanel() {
   }, [requestedSeriesId])
 
   const loadDetails = useCallback(async (seriesId: string) => {
+    // 換系列時舊回應不可以蓋掉新系列：沒有 guard 的話，晚到的舊 GET 會讓
+    // 側欄高亮 B、實際 details 是 A，之後所有表單都寫到錯的系列。
+    const generation = detailsGenerationRef.current + 1
+    detailsGenerationRef.current = generation
     if (!seriesId) {
       setDetails(null)
       return
     }
     try {
       const detail = await fetchJson<SeriesDetails>(`/api/series/${seriesId}`)
+      if (detailsGenerationRef.current !== generation) return
       setDetails(detail)
       setConfiguredNarratorVoiceKey(`${detail.narratorProvider}\n${detail.narratorVoice}`)
       setConfiguredCharacterVoiceKeys(Object.fromEntries(
@@ -217,6 +223,7 @@ export function SeriesCastPanel() {
         detail.characters.map((character) => [character.id, character.characterProfileId ?? '']),
       ))
     } catch (error) {
+      if (detailsGenerationRef.current !== generation) return
       setDetails(null)
       setMessage(error instanceof Error ? error.message : '無法讀取這個系列。')
     }
@@ -317,11 +324,19 @@ export function SeriesCastPanel() {
 
     let stale = false
     void (async () => {
-      const loadedBooks = await Promise.all(details.books.map(async (member) => {
+      // 一本書失敗不可以讓整批消失（否則審核區永久顯示「正在讀取…」）：
+      // 保留成功的部分，失敗時給出明確訊息。
+      const results = await Promise.allSettled(details.books.map(async (member) => {
         const book = await fetchJson<BookDetails>(`/api/books/${member.bookId}`)
         return [member.bookId, book] as const
-      })).catch(() => [])
+      }))
       if (stale) return
+      const loadedBooks = results
+        .filter((result): result is PromiseFulfilledResult<readonly [string, BookDetails]> => result.status === 'fulfilled')
+        .map((result) => result.value)
+      if (results.some((result) => result.status === 'rejected')) {
+        setMessage('部分書籍資料讀取失敗，劇本審核清單可能不完整；請重新整理頁面。')
+      }
       const detailsById = Object.fromEntries(loadedBooks)
       setBookDetails(detailsById)
 
@@ -344,10 +359,23 @@ export function SeriesCastPanel() {
 
   useEffect(() => {
     if (!details || !batch || batch.status !== 'Building') return
+    // 批次可能在輪詢期間被清除（例如另一個分頁重建時清掉 Failed 批次，GET 變 404）；
+    // 連續失敗三次就停止追蹤，不要無限空轉。
+    let consecutiveFailures = 0
     const timer = window.setInterval(() => {
       fetchJson<RebuildBatch>(`/api/series/${details.id}/narration-rebuilds/${batch.id}`)
-        .then(setBatch)
-        .catch(() => undefined)
+        .then((updated) => {
+          consecutiveFailures = 0
+          setBatch(updated)
+        })
+        .catch(() => {
+          consecutiveFailures += 1
+          if (consecutiveFailures >= 3) {
+            window.clearInterval(timer)
+            setBatch(null)
+            setMessage('無法再取得重建批次狀態（批次可能已被清除），已停止追蹤；請重新整理頁面確認。')
+          }
+        })
     }, 2_000)
     return () => window.clearInterval(timer)
   }, [batch, details])

@@ -273,24 +273,41 @@ export function BookInsightsPanel({ book, books, csrfToken, onBookUpdated }: Boo
 
   async function handleApplyAnalyzedCharacters() {
     if (!characterAnalysis || !selectedSeriesId) return
-    const selections = characterAnalysis.candidates
-      .filter((candidate) => candidateDrafts[candidate.name]?.selected)
-      .map((candidate) => {
-        const draft = candidateDrafts[candidate.name]
-        const voice = applicableVoiceOptions.find((option) => voiceKey(option) === draft.voiceKey)
-        if (!draft.canonicalName.trim() || !voice) throw new Error(`請補齊「${candidate.name}」的 canonical 名稱與聲線。`)
-        return {
-          sourceName: candidate.name,
-          canonicalName: draft.canonicalName.trim(),
-          aliases: splitAliases(draft.aliases),
-          role: draft.role,
-          voiceProvider: voice.provider,
-          voice: voice.voice,
-          rate: '+0%',
-          pitch: '+0Hz',
-          volume: '+0%',
-        }
-      })
+    let selections: Array<{
+      sourceName: string
+      canonicalName: string
+      aliases: string[]
+      role: CandidateDraft['role']
+      voiceProvider: string
+      voice: string
+      rate: string
+      pitch: string
+      volume: string
+    }>
+    try {
+      selections = characterAnalysis.candidates
+        .filter((candidate) => candidateDrafts[candidate.name]?.selected)
+        .map((candidate) => {
+          const draft = candidateDrafts[candidate.name]
+          const voice = applicableVoiceOptions.find((option) => voiceKey(option) === draft.voiceKey)
+          if (!draft.canonicalName.trim() || !voice) throw new Error(`請補齊「${candidate.name}」的 canonical 名稱與聲線。`)
+          return {
+            sourceName: candidate.name,
+            canonicalName: draft.canonicalName.trim(),
+            aliases: splitAliases(draft.aliases),
+            role: draft.role,
+            voiceProvider: voice.provider,
+            voice: voice.voice,
+            rate: '+0%',
+            pitch: '+0Hz',
+            volume: '+0%',
+          }
+        })
+    } catch (error) {
+      setApplyState('error')
+      setApplyMessage(error instanceof Error ? error.message : '角色候選資料不完整。')
+      return
+    }
     if (selections.length === 0) {
       setApplyState('error')
       setApplyMessage('請至少勾選一位角色候選。')

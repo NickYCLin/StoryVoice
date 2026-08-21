@@ -121,8 +121,10 @@ export function CollectionDetailPage() {
         csrfToken,
       })
       setCollection(updated)
-    } catch {
-      setDetailState('error')
+    } catch (error) {
+      // 單次操作失敗不應把整頁換成「找不到書冊」；資料還在，就地顯示錯誤。
+      setAddBookState('error')
+      setAddBookMessage(error instanceof Error ? error.message : '移除書籍失敗，請再試一次。')
     }
   }
 
@@ -157,8 +159,9 @@ export function CollectionDetailPage() {
         csrfToken,
       })
       setCollection(updated)
-    } catch {
-      setDetailState('error')
+    } catch (error) {
+      setShareState('error')
+      setShareMessage(error instanceof Error ? error.message : '撤銷分享失敗，請再試一次。')
     }
   }
 

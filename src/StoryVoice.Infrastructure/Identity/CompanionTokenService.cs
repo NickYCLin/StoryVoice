@@ -78,6 +78,15 @@ public sealed class CompanionTokenService(StoryVoiceDbContext dbContext)
             return null;
         }
 
+        // 帳號處於鎖定期間時，companion token 一併失效——否則被鎖住的帳號
+        // 仍能透過 token 持續寫入書架同步資料。
+        if (token.User.LockoutEnabled
+            && token.User.LockoutEnd is { } lockoutEnd
+            && lockoutEnd > now)
+        {
+            return null;
+        }
+
         return new CompanionTokenPrincipal(token.UserId, token.User.Email);
     }
 

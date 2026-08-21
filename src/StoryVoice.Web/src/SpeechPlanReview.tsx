@@ -20,7 +20,7 @@ export type SpeechPlanSegment = {
   characterName: string | null
   confidence: number
   decisionSource: string
-  reviewStatus: 'Confirmed' | 'Suggested' | 'NeedsReview'
+  reviewStatus: 'Confirmed' | 'Suggested' | 'NeedsReview' | 'Rejected'
 }
 
 export type SpeechPlanDraft = {
@@ -50,7 +50,7 @@ type Props = {
   onDraftUpdated: (draft: SpeechPlanDraft) => void
   onRebuildCreated: (batch: {
     id: string
-    status: 'Building' | 'ReadyToActivate' | 'Activated' | 'Failed' | 'Invalidated'
+    status: 'Building' | 'ReadyToActivate' | 'Activated' | 'Failed'
   }) => void
 }
 
@@ -135,7 +135,7 @@ export function SpeechPlanReview({
     setStageState('loading')
     setMessage('正在建立全系列 staged 多角色工作…')
     try {
-      const batch = await fetchJson<{ id: string; status: 'Building' | 'ReadyToActivate' | 'Activated' | 'Failed' | 'Invalidated' }>(
+      const batch = await fetchJson<{ id: string; status: 'Building' | 'ReadyToActivate' | 'Activated' | 'Failed' }>(
         `/api/series/${seriesId}/narration-rebuilds`,
         { method: 'POST', csrfToken, body: { rightsAttested } },
       )
@@ -190,7 +190,11 @@ export function SpeechPlanReview({
                         <span className={`shrink-0 text-xs ${segment.reviewStatus === 'Confirmed' ? 'text-emerald-700' : 'text-amber-700'}`}>
                           {segment.kind === 'Dialogue' && `${segment.characterName ?? '無法判定'} · `}
                           {segment.kind === 'InnerMonologue' && `內心／默讀：${segment.characterName ?? '無法判定'} · `}
-                          {segment.reviewStatus === 'Confirmed' ? '已確認' : `待審核 · 信心 ${segment.confidence}%`}
+                          {segment.reviewStatus === 'Confirmed'
+                            ? '已確認'
+                            : segment.reviewStatus === 'Rejected'
+                              ? `已拒絕，請重新指派 · 信心 ${segment.confidence}%`
+                              : `待審核 · 信心 ${segment.confidence}%`}
                         </span>
                       </div>
                       {segment.kind === 'Dialogue' && segment.reviewStatus !== 'Confirmed' && (

@@ -43,6 +43,23 @@ type LoadedProfiles = {
   items: VoiceProfile[]
 }
 
+type CloneOperation = {
+  id: string
+  newProfileId: string
+  oldProfileId: string | null
+  type: 'Create' | 'Replace'
+  state: 'Staged' | 'RemotePrepared' | 'Activated' | 'NeedsAttention' | 'Rejected'
+  kind: 'Base' | 'Scene'
+  sceneCode: string | null
+  hasRemoteTask: boolean
+  attentionCode: string | null
+}
+
+type LoadedOperations = {
+  characterProfileId: string
+  items: CloneOperation[]
+}
+
 type ConsentReceiptSummary = {
   fileIdentity: string
   schema: string
@@ -208,6 +225,14 @@ const STATUS_LABEL: Record<VoiceProfile['status'], string> = {
   Failed: '失敗',
 }
 
+const ATTENTION_LABEL: Record<string, string> = {
+  local_activation_uncertain: '遠端建立已完成，只剩本地啟用未確認；可以直接繼續啟用。',
+  remote_prepare_uncertain: '上傳到 3wa 的結果不明；operation、task 與錄音已保留，需人工確認。',
+  remote_task_persistence_uncertain: '3wa 已接受，但遠端 task 的本地保存結果不明，需人工對帳。',
+  remote_draft_contract_mismatch: '3wa 回傳的辨識草稿不符合約，需人工處理。',
+  remote_task_id_contract_mismatch: '3wa 回傳的 task 代號不符合約，需人工處理。',
+}
+
 const STATUS_STYLE: Record<VoiceProfile['status'], string> = {
   Pending: 'border-stone-200 bg-stone-100 text-stone-600',
   AwaitingTranscriptConfirmation: 'border-amber-200 bg-amber-50 text-amber-700',
@@ -232,6 +257,7 @@ type Props = {
 
 export function CharacterVoiceProfilesPanel({ characterProfileId, characterName, csrfToken }: Props) {
   const [profilesState, setProfilesState] = useState<LoadedProfiles | null>(null)
+  const [operationsState, setOperationsState] = useState<LoadedOperations | null>(null)
   const [message, setMessage] = useState('')
   const [busySlot, setBusySlot] = useState<string | null>(null)
   const [openSlot, setOpenSlot] = useState<string | null>(null)
@@ -249,17 +275,22 @@ export function CharacterVoiceProfilesPanel({ characterProfileId, characterName,
   currentCharacterProfileIdRef.current = characterProfileId
 
   const profiles = profilesState?.characterProfileId === characterProfileId ? profilesState.items : null
+  const operations = operationsState?.characterProfileId === characterProfileId ? operationsState.items : null
   const previewingId = previewing?.characterProfileId === characterProfileId ? previewing.profileId : null
 
   const load = useCallback(async (signal?: AbortSignal) => {
     const requestedCharacterProfileId = characterProfileId
     const requestedGeneration = loadGenerationRef.current
     try {
-      const list = await fetchJson<VoiceProfile[]>(basePath(requestedCharacterProfileId), { signal })
+      const [list, operationList] = await Promise.all([
+        fetchJson<VoiceProfile[]>(basePath(requestedCharacterProfileId), { signal }),
+        fetchJson<CloneOperation[]>(`${basePath(requestedCharacterProfileId)}/clone-operations`, { signal }),
+      ])
       if (signal?.aborted
         || loadGenerationRef.current !== requestedGeneration
         || currentCharacterProfileIdRef.current !== requestedCharacterProfileId) return
       setProfilesState({ characterProfileId: requestedCharacterProfileId, items: list })
+      setOperationsState({ characterProfileId: requestedCharacterProfileId, items: operationList })
     } catch (error) {
       if (signal?.aborted
         || loadGenerationRef.current !== requestedGeneration
@@ -272,6 +303,7 @@ export function CharacterVoiceProfilesPanel({ characterProfileId, characterName,
     loadGenerationRef.current += 1
     const controller = new AbortController()
     setProfilesState(null)
+    setOperationsState(null)
     setConsentReceipts({})
     void load(controller.signal)
     return () => {
@@ -296,6 +328,27 @@ export function CharacterVoiceProfilesPanel({ characterProfileId, characterName,
 
   function profileFor(sceneCode: string | null) {
     return profiles?.find((profile) => (sceneCode === null ? profile.kind === 'Base' : profile.sceneCode === sceneCode)) ?? null
+  }
+
+  function blockingOperationFor(sceneCode: string | null) {
+    return operations?.find((operation) =>
+      (operation.state === 'Staged' || operation.state === 'RemotePrepared' || operation.state === 'NeedsAttention')
+      && (sceneCode === null ? operation.kind === 'Base' : operation.sceneCode === sceneCode)) ?? null
+  }
+
+  async function resumeActivation(operation: CloneOperation) {
+    setBusySlot(operation.id)
+    try {
+      await fetchJson(
+        `${basePath(characterProfileId)}/clone-operations/${operation.id}/resume-activation`,
+        { method: 'POST', csrfToken, body: {} })
+      await load()
+      setMessage('已完成先前中斷的啟用。')
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '繼續啟用失敗。')
+    } finally {
+      setBusySlot(null)
+    }
   }
 
   async function readConsentReceipt(event: ChangeEvent<HTMLInputElement>, receiptKey: string) {
@@ -649,8 +702,11 @@ export function CharacterVoiceProfilesPanel({ characterProfileId, characterName,
         {SLOTS.map((slot) => {
           const slotKey = `${characterProfileId}:${slot.sceneCode ?? 'base'}`
           const profile = profileFor(slot.sceneCode)
+          const blockingOperation = blockingOperationFor(slot.sceneCode)
           const isOpen = openSlot === slotKey
-          const isBusy = busySlot === slotKey || (profile !== null && busySlot === profile.id)
+          const isBusy = busySlot === slotKey
+            || (profile !== null && busySlot === profile.id)
+            || (blockingOperation !== null && busySlot === blockingOperation.id)
           const slotMode = mode[slotKey] ?? 'Clone'
           const designUnavailable = profile?.mode === 'Design' && !DESIGN_VOICE_AVAILABLE
           const currentPreview = profile
@@ -671,7 +727,27 @@ export function CharacterVoiceProfilesPanel({ characterProfileId, characterName,
               </div>
               <p className="mt-0.5 text-[11px] text-stone-400">{slot.description}</p>
 
-              {!profile && (
+              {blockingOperation && (
+                <div className={`mt-2 space-y-2 rounded-lg border px-2 py-2 text-xs leading-5 ${blockingOperation.state === 'NeedsAttention' ? 'border-amber-300 bg-amber-50 text-amber-900' : 'border-stone-200 bg-white text-stone-600'}`}>
+                  <p>
+                    {blockingOperation.state === 'NeedsAttention'
+                      ? (ATTENTION_LABEL[blockingOperation.attentionCode ?? ''] ?? `這筆 Clone operation 需要人工處理（代碼 ${blockingOperation.attentionCode ?? '未知'}）。`)
+                      : '這個位置有一筆處理中的 Clone operation；完成前無法建立新聲線。'}
+                  </p>
+                  {blockingOperation.state === 'NeedsAttention' && blockingOperation.attentionCode === 'local_activation_uncertain' && (
+                    <button
+                      className="secondary-button w-full px-3 py-2 text-xs disabled:cursor-wait disabled:opacity-60"
+                      disabled={isBusy}
+                      onClick={() => void resumeActivation(blockingOperation)}
+                      type="button"
+                    >
+                      繼續啟用
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {!profile && !blockingOperation && (
                 <div className="mt-2">
                   {!isOpen && (
                     <button className="secondary-button w-full px-3 py-2 text-xs" onClick={() => setOpenSlot(slotKey)} type="button">

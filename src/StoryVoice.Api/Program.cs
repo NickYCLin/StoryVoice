@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -154,9 +155,19 @@ builder.Services.AddRateLimiter(options =>
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
     options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
-    options.ForwardLimit = 2;
+    // 只吃反向代理「附加」的最後一組值：nginx 用 proxy_add_x_forwarded_for（append），
+    // ForwardLimit=1 時最右邊那組才會生效，網際網路客戶端自帶的 X-Forwarded-For
+    // 只會留在字串裡，無法偽造 RemoteIp 或 X-Forwarded-Proto。
+    options.ForwardLimit = 1;
+    // 只信任本機與私有網段的代理（nginx 從 docker bridge 172.26.0.1 連進來）。
+    // 兩個清單都清空會讓中介軟體信任任何直連客戶端，等於人人可偽造轉送標頭。
     options.KnownIPNetworks.Clear();
     options.KnownProxies.Clear();
+    options.KnownIPNetworks.Add(new System.Net.IPNetwork(IPAddress.Loopback, 8));
+    options.KnownIPNetworks.Add(new System.Net.IPNetwork(IPAddress.IPv6Loopback, 128));
+    options.KnownIPNetworks.Add(new System.Net.IPNetwork(IPAddress.Parse("10.0.0.0"), 8));
+    options.KnownIPNetworks.Add(new System.Net.IPNetwork(IPAddress.Parse("172.16.0.0"), 12));
+    options.KnownIPNetworks.Add(new System.Net.IPNetwork(IPAddress.Parse("192.168.0.0"), 16));
 });
 var dataProtectionKeysPath = builder.Configuration["Auth:DataProtectionKeysPath"];
 if (!string.IsNullOrWhiteSpace(dataProtectionKeysPath))

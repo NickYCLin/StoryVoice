@@ -15,9 +15,11 @@ test('library organizer exposes accessible search, source, layout, TTS, and sort
   ]) assert.ok(app.includes(marker), `missing ${marker}`)
 })
 
-test('library renders filtered books and moves selection away from hidden results', () => {
+test('library renders filtered books and only redirects when the book no longer exists', () => {
   assert.match(app, /visibleBooks\.map\(\(book\)/)
-  assert.match(app, /!visibleBooks\.some\(\(book\) => book\.id === routeBookId\)/)
+  // 重導只在這本書「真的不存在」時發生；被篩選條件濾出側欄仍保留使用者的選書。
+  assert.match(app, /!books\.some\(\(book\) => book\.id === routeBookId\)/)
+  assert.doesNotMatch(app, /!visibleBooks\.some\(\(book\) => book\.id === routeBookId\)/)
   assert.match(app, /navigate\(`\/library\/\$\{visibleBooks\[0\]\.id\}`, \{ replace: true \}\)/)
 })
 

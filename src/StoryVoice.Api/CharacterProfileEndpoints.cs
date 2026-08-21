@@ -122,10 +122,13 @@ public static class CharacterProfileEndpoints
 
         group.MapGet("/{characterProfileId:guid}/avatar", async (
             Guid characterProfileId,
+            HttpContext httpContext,
             ICharacterProfileService service,
             CancellationToken cancellationToken) =>
         {
             var avatar = await service.GetAvatarAsync(characterProfileId, cancellationToken);
+            httpContext.Response.Headers.CacheControl = "private, no-store";
+            httpContext.Response.Headers.XContentTypeOptions = "nosniff";
             return avatar is null
                 ? Results.NotFound()
                 : Results.File(avatar.AbsolutePath, avatar.ContentType, enableRangeProcessing: true);

@@ -39,6 +39,18 @@ public sealed class ApiExceptionHandler(
         {
             logger.LogError(exception, "Unhandled API exception");
         }
+        else
+        {
+            // 4xx／503 也要留下伺服器端紀錄：這條路徑會把 exception.Message 回給
+            // 客戶端，若完全不記錄，框架丟出的 InvalidOperationException（EF、LINQ
+            // 轉譯失敗等真正的 bug）會被無聲吞成 400，永遠查不到。
+            logger.LogWarning(
+                exception,
+                "API request failed with {StatusCode} on {Method} {Path}",
+                statusCode,
+                httpContext.Request.Method,
+                httpContext.Request.Path);
+        }
 
         var problemDetails = new ProblemDetails
         {

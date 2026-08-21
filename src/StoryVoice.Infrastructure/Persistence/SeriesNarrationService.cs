@@ -28,6 +28,7 @@ internal sealed class SeriesNarrationService(
     IOptions<NarrationAdmissionOptions> admissionOptions,
     IOptions<MultiCharacterNarrationOptions> compositionOptions,
     IOptions<BlueMagpieOptions> blueMagpieOptions,
+    IOptions<NarrationOptions> narrationOptions,
     PostgreSqlCastEpochActivationPublisher activationPublisher) : ISeriesNarrationService
 {
     public async Task<SeriesNarrationRebuildResponse?> CreateRebuildAsync(
@@ -498,6 +499,27 @@ internal sealed class SeriesNarrationService(
         }
 
         var batchIds = failedBatches.Select(batch => batch.Id).ToArray();
+        // 還在 Running 的 staged job 不可以被硬刪（合成中的資料列被另一個交易憑空
+        // 移除只是「靠巧合安全」）；整個 batch 先跳過，等取消落地後下一輪再清。
+        var runningBatchIds = await dbContext.NarrationJobs
+            .Where(job => job.OwnerId == ownerId
+                && job.SeriesId == seriesId
+                && job.RebuildBatchId != null
+                && batchIds.Contains(job.RebuildBatchId!.Value)
+                && job.Visibility == NarrationArtifactVisibility.Staged
+                && job.Status == NarrationJobStatus.Running)
+            .Select(job => job.RebuildBatchId!.Value)
+            .Distinct()
+            .ToArrayAsync(cancellationToken);
+        failedBatches = failedBatches
+            .Where(batch => !runningBatchIds.Contains(batch.Id))
+            .ToArray();
+        if (failedBatches.Length == 0)
+        {
+            return;
+        }
+
+        batchIds = failedBatches.Select(batch => batch.Id).ToArray();
         var staleJobs = await dbContext.NarrationJobs
             .Where(job => job.OwnerId == ownerId
                 && job.SeriesId == seriesId
@@ -507,6 +529,10 @@ internal sealed class SeriesNarrationService(
                 && job.Visibility == NarrationArtifactVisibility.Staged)
             .ToArrayAsync(cancellationToken);
         var staleJobIds = staleJobs.Select(job => job.Id).ToArray();
+        var purgeableAudioRelativePaths = staleJobs
+            .Where(job => !string.IsNullOrWhiteSpace(job.AudioRelativePath))
+            .Select(job => job.AudioRelativePath!)
+            .ToArray();
         var stalePlanLinks = await dbContext.NarrationJobSpeechPlans
             .Where(link => staleJobIds.Contains(link.NarrationJobId))
             .ToArrayAsync(cancellationToken);
@@ -529,6 +555,41 @@ internal sealed class SeriesNarrationService(
         dbContext.NarrationCastRevisions.RemoveRange(purgeableDraftRevisions);
 
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        // 資料列成功刪除後才清音檔（順序反過來會在刪列失敗時遺失檔案）。
+        // 沒有這一步的話，失敗批次裡已完成書冊的 MP3 會永久留在磁碟上。
+        DeletePurgedAudioFiles(purgeableAudioRelativePaths);
+    }
+
+    private void DeletePurgedAudioFiles(IReadOnlyList<string> relativePaths)
+    {
+        if (relativePaths.Count == 0)
+        {
+            return;
+        }
+
+        var root = Path.GetFullPath(narrationOptions.Value.AudioRootPath);
+        var rootPrefix = root.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        foreach (var relativePath in relativePaths)
+        {
+            try
+            {
+                var fullPath = Path.GetFullPath(Path.Combine(root, relativePath));
+                if (!fullPath.StartsWith(rootPrefix, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                File.Delete(fullPath);
+            }
+            catch (Exception exception) when (exception is IOException
+                or UnauthorizedAccessException
+                or ArgumentException
+                or NotSupportedException)
+            {
+                // 檔案清理失敗不可以阻擋 purge 本身；殘檔留待下次人工或後續清理。
+            }
+        }
     }
 
     private async Task<Dictionary<Guid, Book>> LoadSeriesBooksAsync(

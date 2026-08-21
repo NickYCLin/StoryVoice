@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using StoryVoice.Application.Authentication;
 using StoryVoice.Application.Collections;
+using StoryVoice.Domain.Books;
 
 namespace StoryVoice.Infrastructure.Persistence;
 
@@ -32,7 +33,10 @@ internal sealed class SharedCollectionService(
                 collection.Name,
                 collection.Description,
                 collection.OwnerId,
-                BookCount = collection.Books.Count
+                BookCount = collection.Books.Count(member =>
+                    dbContext.Books.Any(book => book.Id == member.BookId
+                        && !book.IsArchived
+                        && book.Status != BookStatus.Linked))
             })
             .ToDictionaryAsync(collection => collection.Id, cancellationToken);
         var ownerEmails = await ResolveOwnerEmailsAsync(
@@ -82,9 +86,13 @@ internal sealed class SharedCollectionService(
         }
 
         var bookIds = collection.Books.Select(book => book.BookId).ToArray();
+        // 與加入書冊時相同的排除條件：擁有者事後封存或轉為 Linked 的書
+        // 不再透過分享路徑露出，而不是顯示成「未知書籍」佔位。
         var bookInfo = await dbContext.Books
             .AsNoTracking()
-            .Where(book => bookIds.Contains(book.Id))
+            .Where(book => bookIds.Contains(book.Id)
+                && !book.IsArchived
+                && book.Status != BookStatus.Linked)
             .Select(book => new { book.Id, book.Title, book.Author, book.CoverImageUrl })
             .ToDictionaryAsync(book => book.Id, cancellationToken);
         var ownerEmails = await ResolveOwnerEmailsAsync([collection.OwnerId], cancellationToken);
@@ -95,15 +103,16 @@ internal sealed class SharedCollectionService(
             collection.Description,
             ownerEmails.GetValueOrDefault(collection.OwnerId, "未知使用者"),
             collection.Books
+                .Where(book => bookInfo.ContainsKey(book.BookId))
                 .OrderBy(book => book.SortOrder)
                 .Select(book =>
                 {
-                    var info = bookInfo.GetValueOrDefault(book.BookId);
+                    var info = bookInfo[book.BookId];
                     return new SharedCollectionBookResponse(
                         book.BookId,
-                        info?.Title ?? "未知書籍",
-                        info?.Author ?? string.Empty,
-                        info?.CoverImageUrl,
+                        info.Title,
+                        info.Author,
+                        info.CoverImageUrl,
                         book.VolumeLabel,
                         book.SortOrder);
                 })
@@ -139,7 +148,8 @@ internal sealed class SharedCollectionService(
             .AsNoTracking()
             .Include(candidate => candidate.Chapters)
             .SingleOrDefaultAsync(candidate => candidate.Id == bookId, cancellationToken);
-        if (book is null)
+        // 擁有者封存或轉為 Linked 後，分享對象即失去正文存取（與加入時的條件一致）。
+        if (book is null || book.IsArchived || book.Status == BookStatus.Linked)
         {
             return null;
         }

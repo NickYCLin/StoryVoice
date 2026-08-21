@@ -79,10 +79,13 @@ export function LibraryPage() {
   useEffect(() => {
     if (libraryState !== 'ready' || books.length === 0) return
     if (visibleBooks.length === 0) return
-    if (!routeBookId || !visibleBooks.some((book) => book.id === routeBookId)) {
+    // 只有這本書「真的不存在」（例如已刪除）才重導到第一本可見書；
+    // 只是被目前的篩選條件濾出側欄時要保留使用者的選書，
+    // 否則輸入關鍵字或匯入後套用篩選都會被搶走選擇。
+    if (!routeBookId || !books.some((book) => book.id === routeBookId)) {
       navigate(`/library/${visibleBooks[0].id}`, { replace: true })
     }
-  }, [books.length, libraryState, navigate, routeBookId, visibleBooks])
+  }, [books, libraryState, navigate, routeBookId, visibleBooks])
 
   useEffect(() => {
     if (!routeBookId) {

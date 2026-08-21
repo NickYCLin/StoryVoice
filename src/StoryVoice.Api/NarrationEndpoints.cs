@@ -58,10 +58,13 @@ public static class NarrationEndpoints
 
         jobGroup.MapGet("/audio", async (
             Guid jobId,
+            HttpContext httpContext,
             INarrationService service,
             CancellationToken cancellationToken) =>
         {
             var audio = await service.GetAudioAsync(jobId, cancellationToken);
+            httpContext.Response.Headers.CacheControl = "private, no-store";
+            httpContext.Response.Headers.XContentTypeOptions = "nosniff";
             return audio is null
                 ? Results.NotFound()
                 : Results.File(audio.AbsolutePath, audio.ContentType, enableRangeProcessing: true);

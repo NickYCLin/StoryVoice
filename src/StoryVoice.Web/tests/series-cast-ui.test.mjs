@@ -167,6 +167,15 @@ test('自訂聲線工作室固定使用 owner-scoped 角色庫 voice-profiles AP
   assert.doesNotMatch(voiceProfilesPanel, /fuzzy|模糊比對/i)
 })
 
+test('卡住的 Clone operation 會顯示在對應槽位，可恢復的提供繼續啟用', () => {
+  assert.match(voiceProfilesPanel, /\/clone-operations/)
+  assert.match(voiceProfilesPanel, /\/resume-activation/)
+  assert.match(voiceProfilesPanel, /local_activation_uncertain/)
+  assert.match(voiceProfilesPanel, /繼續啟用/)
+  assert.match(voiceProfilesPanel, /需要人工處理/)
+  assert.match(voiceProfilesPanel, /!profile && !blockingOperation/)
+})
+
 test('3wa Design 依驗證過的 provider contract 固定 fail closed，existing profile 也不可試音', () => {
   assert.match(voiceProfilesPanel, /const DESIGN_VOICE_AVAILABLE = false/)
   assert.match(voiceProfilesPanel, /const slotMode = mode\[slotKey\] \?\? 'Clone'/)
@@ -317,7 +326,7 @@ test('切換角色時會清空舊 profiles、中止舊 GET，並拒絕晚到回�
   assert.match(voiceProfilesPanel, /currentCharacterProfileIdRef\.current !== requestedCharacterProfileId/)
   assert.match(voiceProfilesPanel, /setProfilesState\(\{ characterProfileId: requestedCharacterProfileId, items: list \}\)/)
   assert.match(voiceProfilesPanel, /const profiles = profilesState\?\.characterProfileId === characterProfileId \? profilesState\.items : null/)
-  assert.match(voiceProfilesPanel, /loadGenerationRef\.current \+= 1\s*const controller = new AbortController\(\)\s*setProfilesState\(null\)\s*setConsentReceipts\(\{\}\)\s*void load\(controller\.signal\)/)
+  assert.match(voiceProfilesPanel, /loadGenerationRef\.current \+= 1\s*const controller = new AbortController\(\)\s*setProfilesState\(null\)\s*setOperationsState\(null\)\s*setConsentReceipts\(\{\}\)\s*void load\(controller\.signal\)/)
   assert.match(voiceProfilesPanel, /return \(\) => \{\s*loadGenerationRef\.current \+= 1\s*controller\.abort\(\)/)
   assert.match(voiceProfilesPanel, /catch \(error\) \{\s*if \(signal\?\.aborted[\s\S]*currentCharacterProfileIdRef\.current !== requestedCharacterProfileId\) return\s*setMessage/)
 })

@@ -98,6 +98,24 @@ internal sealed class StagedNarrationBatchProgressService(StoryVoiceDbContext db
             return;
         }
 
+        // 批次一旦 Failed，其餘成員的 staged jobs 不該繼續消耗 GPU／付費 API：
+        // 佇列中的立即取消，執行中的標記取消請求（worker 監看後會中止 provider）。
+        // 這些產物本來就注定在下一次 purge 被整批刪除。
+        if (batch.Status == SeriesCastRebuildBatchStatus.Failed)
+        {
+            var siblingJobs = await dbContext.NarrationJobs
+                .Where(candidate => candidate.RebuildBatchId == batch.Id
+                    && candidate.Id != job.Id
+                    && candidate.Visibility == NarrationArtifactVisibility.Staged
+                    && (candidate.Status == NarrationJobStatus.Queued
+                        || candidate.Status == NarrationJobStatus.Running))
+                .ToListAsync(cancellationToken);
+            foreach (var siblingJob in siblingJobs)
+            {
+                siblingJob.RequestCancellation();
+            }
+        }
+
         await dbContext.SaveChangesAsync(cancellationToken);
         if (transaction is not null)
         {

@@ -485,9 +485,29 @@ internal sealed class CharacterVoiceProfileService(
             return null;
         }
 
-        return new CharacterVoiceProfileAudio(
-            audioStorage.ResolveFullPath(profile.ReferenceAudioRelativePath),
-            "audio/wav");
+        var fullPath = audioStorage.ResolveFullPath(profile.ReferenceAudioRelativePath);
+        // 服務前驗證整檔雜湊（≤10 MiB，成本可接受）：把磁碟上被改動的檔案
+        // 當成「已同意的錄音」播放給擁有者是完整性錯誤，不是 404。
+        if (profile.ReferenceAudioSha256 is not null)
+        {
+            var actualSha256 = await ComputeFileSha256Async(fullPath, cancellationToken);
+            if (!string.Equals(actualSha256, profile.ReferenceAudioSha256, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    "參考音檔與入庫時的雜湊不符，已停止提供播放；請聯絡管理員檢查儲存空間。");
+            }
+        }
+
+        return new CharacterVoiceProfileAudio(fullPath, "audio/wav");
+    }
+
+    private static async Task<string> ComputeFileSha256Async(
+        string path,
+        CancellationToken cancellationToken = default)
+    {
+        await using var stream = File.OpenRead(path);
+        var hash = await SHA256.HashDataAsync(stream, cancellationToken);
+        return Convert.ToHexString(hash).ToLowerInvariant();
     }
 
     private async Task<CharacterProfile?> LoadCharacterProfileAsync(
@@ -754,11 +774,28 @@ internal sealed class CharacterVoiceProfileService(
         CharacterProfile character,
         CharacterVoiceProfileOperation stagedOperation)
     {
+        // 上傳前先驗證本地 WAV 與入庫時的 canonical 雜湊一致——這是唯一會把
+        // 檔案內容送去克隆的地方；損毀或被調包的音檔絕不能被當成已同意的錄音送出。
+        var referenceAudioFullPath = audioStorage.ResolveFullPath(
+            stagedOperation.ReferenceAudioRelativePath);
+        var actualReferenceSha256 = await ComputeFileSha256Async(referenceAudioFullPath);
+        if (!string.Equals(
+            actualReferenceSha256,
+            stagedOperation.ReferenceAudioSha256,
+            StringComparison.OrdinalIgnoreCase))
+        {
+            await MarkRejectedAsync(
+                ownerId,
+                stagedOperation.Id,
+                "reference_audio_integrity_mismatch");
+            throw new InvalidOperationException(
+                "本地保存的參考音檔與入庫時的雜湊不符，已中止上傳；請重新上傳原始錄音。");
+        }
+
         VoiceProfilePrepareResult providerProfile;
         try
         {
-            await using var uploadStream = File.OpenRead(
-                audioStorage.ResolveFullPath(stagedOperation.ReferenceAudioRelativePath));
+            await using var uploadStream = File.OpenRead(referenceAudioFullPath);
             // Durable path：同上，用有限逾時取代 CancellationToken.None，
             // 避免 3wa 停在 body 中途時永遠佔住要求與 DbContext。
             using var remotePrepareTimeout = new CancellationTokenSource(DurableRemoteCallTimeout);
