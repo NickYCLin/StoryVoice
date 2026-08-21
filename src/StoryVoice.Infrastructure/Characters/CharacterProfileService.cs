@@ -150,7 +150,10 @@ internal sealed class CharacterProfileService(
                 cancellationToken)
             || await dbContext.CharacterVoiceProfileOperations.AnyAsync(
                 operation => operation.OwnerId == ownerId
-                    && operation.CharacterProfileId == characterProfileId,
+                    && operation.CharacterProfileId == characterProfileId
+                    // Rejected 依領域定義證明沒有建立任何遠端 task，只是稽核紀錄，
+                    // 不應永久封鎖整個角色的刪除。
+                    && operation.State != StoryVoice.Domain.Narrations.CharacterVoiceProfileOperationState.Rejected,
                 cancellationToken);
         if (hasCloneOrCloneOperation)
         {

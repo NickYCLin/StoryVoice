@@ -124,14 +124,26 @@ public sealed class ThreeWaVoxCpm2NarrationProvider(
     {
         if (reference.Kind == VoiceReferenceKind.Edge)
         {
+            // edge-tts 輸出 24 kHz MP3；先落地再統一轉碼成 44.1 kHz，
+            // 否則 -c copy 串接會產生取樣率混雜的破碎輸出。
+            var edgeRawPath = Path.Combine(
+                workDirectory,
+                $"{Path.GetFileNameWithoutExtension(outputPartPath)}-edge-raw.mp3");
             await SynthesizeEdgeFallbackChunkAsync(
                 reference.EdgeVoice!,
                 turn.Rate,
                 turn.Pitch,
                 turn.Volume,
                 text,
-                outputPartPath,
+                edgeRawPath,
                 cancellationToken);
+            await TranscodeAsync(edgeRawPath, outputPartPath, cancellationToken);
+            File.Delete(edgeRawPath);
+            if (!File.Exists(outputPartPath) || new FileInfo(outputPartPath).Length < 1)
+            {
+                throw new InvalidOperationException("edge-tts 備援音檔轉檔失敗。");
+            }
+
             return;
         }
 
@@ -326,9 +338,11 @@ public sealed class ThreeWaVoxCpm2NarrationProvider(
         return chunks;
     }
 
+    // 固定 44100 Hz／mono：串接時是 -c copy，所有片段（含 anullsrc 靜音）的
+    // codec 參數必須一致，否則混入 24 kHz 的 edge 退回片段會產生破碎輸出。
     private static async Task TranscodeAsync(string inputPath, string outputPath, CancellationToken cancellationToken) =>
         await RunFfmpegAsync(
-            ["-y", "-i", inputPath, "-c:a", "libmp3lame", "-q:a", "2", outputPath],
+            ["-y", "-i", inputPath, "-ar", "44100", "-ac", "1", "-c:a", "libmp3lame", "-q:a", "2", outputPath],
             cancellationToken);
 
     private static async Task GenerateSilenceAsync(string outputPath, int milliseconds, CancellationToken cancellationToken)

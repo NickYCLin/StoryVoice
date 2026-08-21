@@ -159,7 +159,16 @@ StoryVoice
 
 ### P0：把目前已上線的私人 API 做成可用產品
 
-#### A. 開發者總覽 `/developer`
+#### A. 開發者總覽 `/developer` — ✅ 唯讀版 LIVE（2026-08-21）
+
+> 已交付唯讀第一版：`GET /api/developer/external-voice/overview`（owner-scoped、UserSession cookie 授權）
+> 由 `DeveloperVoiceConsoleService` 直接投影既有 `ExternalVoiceApi` 設定，前端頁面
+> `src/StoryVoice.Web/src/pages/DeveloperConsolePage.tsx` 掛在登入殼層 `/developer`。
+> 涵蓋：服務啟用狀態、專案卡（名稱／ID、access tier、token prefix+keyId、效期、
+> not-yet-effective／active／expiring-soon／expired 狀態）、聲線授權（active／revoked）、
+> 共用限制與空狀態。刻意不含：TokenSha256、evidence 路徑／雜湊、owner GUID、
+> 金鑰建立／換發／撤銷（維持人工核發）、Playground、用量資料。
+> `ExternalVoiceAuthenticationHandler` 與正式驗證路徑完全未動。
 
 **使用者**：已取得私人開發權限的專案 owner／developer。
 

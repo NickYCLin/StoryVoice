@@ -4,6 +4,7 @@ import { AppLayout } from './AppLayout'
 import { CharacterLibraryPage } from './pages/CharacterLibraryPage'
 import { CollectionDetailPage } from './pages/CollectionDetailPage'
 import { CollectionsPage } from './pages/CollectionsPage'
+import { DeveloperConsolePage } from './pages/DeveloperConsolePage'
 import { DeveloperDocsPage } from './pages/DeveloperDocsPage'
 import { LandingPage } from './pages/LandingPage'
 import { LibraryPage } from './pages/LibraryPage'
@@ -25,6 +26,7 @@ function App() {
         <Route element={<CollectionDetailPage />} path="collections/:collectionId" />
         <Route element={<SharedWithMePage />} path="shared" />
         <Route element={<CharacterLibraryPage />} path="characters" />
+        <Route element={<DeveloperConsolePage />} path="developer" />
         <Route element={<SeriesCastPanel />} path="/series" />
         <Route element={<SharedCollectionPage />} path="shared/:collectionId" />
       </Route>

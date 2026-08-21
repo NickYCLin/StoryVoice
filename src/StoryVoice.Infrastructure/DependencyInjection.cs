@@ -261,6 +261,7 @@ public static class DependencyInjection
         services.AddScoped<LocalCloneProfileSynthesizer>();
         services.AddScoped<IExternalVoiceSynthesisService, ExternalVoiceSynthesisService>();
         services.AddSingleton<IPublicVoiceCatalogService, PublicVoiceCatalogService>();
+        services.AddScoped<IDeveloperVoiceConsoleService, DeveloperVoiceConsoleService>();
         services.AddScoped<ILocalClonePreviewService, LocalClonePreviewService>();
         // A singleton owns the successful two-voice preview cache for the lifetime of the API process.
         services.AddSingleton<ISeriesVoicePreviewService, SeriesVoicePreviewService>();
@@ -295,6 +296,7 @@ public static class DependencyInjection
         {
             var hubOptions = provider.GetRequiredService<IOptions<ThreeWaAiHubOptions>>().Value;
             client.BaseAddress = new Uri(hubOptions.BaseUrl, UriKind.Absolute);
+            client.Timeout = TimeSpan.FromSeconds(Math.Max(30, hubOptions.HttpTimeoutSeconds));
         })
         // profile_status's official contract places the private task handle in the query string.
         // Disable HttpClientFactory's URL loggers for this dedicated client so reverse-proxy-safe
@@ -310,6 +312,7 @@ public static class DependencyInjection
         {
             var hubOptions = provider.GetRequiredService<IOptions<ThreeWaAiHubOptions>>().Value;
             client.BaseAddress = new Uri(hubOptions.BaseUrl, UriKind.Absolute);
+            client.Timeout = TimeSpan.FromSeconds(Math.Max(30, hubOptions.HttpTimeoutSeconds));
         })
         .ConfigurePrimaryHttpMessageHandler(static () => new SocketsHttpHandler
         {

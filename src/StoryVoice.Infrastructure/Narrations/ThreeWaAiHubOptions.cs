@@ -13,6 +13,12 @@ public sealed class ThreeWaAiHubOptions
     /// </summary>
     public string CredentialKeyId { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Upper bound for a single HTTP round-trip to 3wa (headers phase; body reads are bounded by
+    /// the caller's token). Prevents a stalled station from pinning a request forever.
+    /// </summary>
+    public int HttpTimeoutSeconds { get; set; } = 300;
+
     /// <summary>Maximum accepted JSON body for submit, status, and result responses.</summary>
     public int MaximumJsonResponseBytes { get; set; } = 64 * 1024;
 

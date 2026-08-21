@@ -286,7 +286,9 @@ public sealed class CharacterVoiceProfileApiTests(ApiFactory factory) : IClassFi
         Assert.Equal(1, fake.PrepareCount);
         Assert.Equal("這是錄音中的實際內容。", fake.ExpectedText);
         Assert.Equal("explicit_permission", fake.ConsentType);
-        Assert.False(fake.PrepareCancellationCanBeCanceled);
+        // Durable path 現在帶伺服器端逾時 token（不是呼叫端的 HTTP token）：
+        // 可取消，但只會因為逾時保護觸發，呼叫端斷線仍不會中斷 prepare。
+        Assert.True(fake.PrepareCancellationCanBeCanceled);
         Assert.Equal(0, fake.DeleteCount);
 
         var operation = await LoadOnlyOperationAsync(

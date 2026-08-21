@@ -40,11 +40,13 @@ internal sealed class ExternalVoiceIdempotencyCoordinator(
             }
             else
             {
-                if (entries.Count >= options.Value.IdempotencyCacheEntries)
+                // The capacity is per consumer: a single tenant filling its own window
+                // must not exhaust the cache and starve every other consumer's keys.
+                if (CountConsumerEntries(consumerKeyId) >= options.Value.IdempotencyCacheEntries)
                 {
                     throw new ExternalVoiceSynthesisException(
                         ExternalVoiceSynthesisFailureKind.RateLimited,
-                        CalculateRetryAfterSeconds(now));
+                        CalculateRetryAfterSeconds(consumerKeyId, now));
                 }
 
                 completion = new TaskCompletionSource<ExternalVoiceAudio>(
@@ -77,17 +79,13 @@ internal sealed class ExternalVoiceIdempotencyCoordinator(
             var audio = await factory().ConfigureAwait(false);
             completion.TrySetResult(Clone(audio));
         }
-        catch (ExternalVoiceSynthesisException exception)
-            when (exception.FailureKind == ExternalVoiceSynthesisFailureKind.RateLimited)
-        {
-            // The global single-flight gate rejected this request before any GPU
-            // submission. It is safe to retry the same logical request after the
-            // advertised delay, so do not pin this pre-commit 429 for the full TTL.
-            removeImmediately = true;
-            completion.TrySetException(exception);
-        }
         catch (Exception exception)
         {
+            // Only successful audio is pinned for TTL replay. The documented contract
+            // tells clients to retry a failed request with the SAME Idempotency-Key,
+            // so a transient failure (gateway 503, timeout, caller disconnect) must
+            // release the key instead of replaying the stale failure for the TTL.
+            removeImmediately = true;
             completion.TrySetException(exception);
         }
         finally
@@ -129,11 +127,17 @@ internal sealed class ExternalVoiceIdempotencyCoordinator(
         }
     }
 
-    private int CalculateRetryAfterSeconds(DateTimeOffset now)
+    private int CountConsumerEntries(string consumerKeyId) =>
+        entries.Keys.Count(key =>
+            string.Equals(key.ConsumerKeyId, consumerKeyId, StringComparison.Ordinal));
+
+    private int CalculateRetryAfterSeconds(string consumerKeyId, DateTimeOffset now)
     {
-        var earliestExpiry = entries.Values
-            .Where(entry => entry.ExpiresAtUtc != DateTimeOffset.MaxValue)
-            .Select(entry => entry.ExpiresAtUtc)
+        var earliestExpiry = entries
+            .Where(pair =>
+                string.Equals(pair.Key.ConsumerKeyId, consumerKeyId, StringComparison.Ordinal)
+                && pair.Value.ExpiresAtUtc != DateTimeOffset.MaxValue)
+            .Select(pair => pair.Value.ExpiresAtUtc)
             .DefaultIfEmpty(now.AddMinutes(1))
             .Min();
         var seconds = Math.Ceiling((earliestExpiry - now).TotalSeconds);

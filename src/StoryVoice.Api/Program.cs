@@ -261,6 +261,7 @@ app.MapCollectionEndpoints();
 app.MapSpeechPlanEndpoints();
 app.MapCharacterProfileEndpoints();
 app.MapCharacterVoiceProfileEndpoints();
+app.MapDeveloperConsoleEndpoints();
 var externalVoiceApiOptions = app.Services.GetRequiredService<IOptions<ExternalVoiceApiOptions>>().Value;
 if (externalVoiceApiOptions.Enabled)
 {

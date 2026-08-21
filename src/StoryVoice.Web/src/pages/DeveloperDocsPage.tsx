@@ -202,7 +202,7 @@ Content-Type: application/json
           <ul className="mt-4 space-y-3 text-sm leading-6 text-stone-600">
             <li className="rounded-xl border border-stone-200 bg-white px-4 py-3">文字長度上限 200 字元／2,048 UTF-8 bytes。</li>
             <li className="rounded-xl border border-stone-200 bg-white px-4 py-3">WAV 回應大小上限 3 MiB。</li>
-            <li className="rounded-xl border border-stone-200 bg-white px-4 py-3">速率限制依 consumer 設定；收到 429 時請依 <code className="text-xs">Retry-After</code> 標頭等待再重試。</li>
+            <li className="rounded-xl border border-stone-200 bg-white px-4 py-3">速率限制按 consumer 各自計算（上限值目前為全服務統一設定）；收到 429 時請依 <code className="text-xs">Retry-After</code> 標頭等待再重試。</li>
             <li className="rounded-xl border border-stone-200 bg-white px-4 py-3">目前僅支援單一 API process；尚未提供跨 replica 的共用速率限制或用量查詢介面。</li>
           </ul>
         </section>

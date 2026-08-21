@@ -27,6 +27,10 @@ internal sealed class CharacterVoiceProfileService(
     IThreeWaVoiceProfileClient threeWaClient,
     IOptions<ThreeWaAiHubOptions> threeWaOptions) : ICharacterVoiceProfileService
 {
+    // Durable path 的遠端呼叫上限：取代 CancellationToken.None，
+    // 涵蓋 10 MiB WAV 上傳仍綽綽有餘，但擋住無限期的 body 停滯。
+    private static readonly TimeSpan DurableRemoteCallTimeout = TimeSpan.FromMinutes(10);
+
     public async Task<IReadOnlyList<CharacterVoiceProfileResponse>?> ListAsync(
         Guid characterProfileId,
         CancellationToken cancellationToken)
@@ -190,15 +194,15 @@ internal sealed class CharacterVoiceProfileService(
         await EnsureNoActiveOperationAsync(
             ownerId,
             characterProfileId,
-            CharacterVoiceProfileKind.Base,
-            sceneCode: null,
+            existing.Kind,
+            existing.SceneCode,
             cancellationToken);
         var operation = await StageOperationAsync(
             ownerId,
             characterProfileId,
             existing,
-            CharacterVoiceProfileKind.Base,
-            sceneCode: null,
+            existing.Kind,
+            existing.SceneCode,
             expectedTranscript,
             referenceAudio,
             referenceAudioFileName,
@@ -357,10 +361,16 @@ internal sealed class CharacterVoiceProfileService(
             }
         }
 
-        await threeWaClient.ConfirmAsync(
-            profile.VoiceProfileTaskId!,
-            intendedTranscript,
-            CancellationToken.None);
+        // Durable path：不能被呼叫端斷線取消，但也不能無上限等待——
+        // 3wa 若在回應 body 中途停住，沒有 token 保護會永遠掛住這個要求。
+        using (var remoteConfirmTimeout = new CancellationTokenSource(DurableRemoteCallTimeout))
+        {
+            await threeWaClient.ConfirmAsync(
+                profile.VoiceProfileTaskId!,
+                intendedTranscript,
+                remoteConfirmTimeout.Token);
+        }
+
         profile.CompleteTranscriptConfirmation(DateTimeOffset.UtcNow);
         try
         {
@@ -749,13 +759,16 @@ internal sealed class CharacterVoiceProfileService(
         {
             await using var uploadStream = File.OpenRead(
                 audioStorage.ResolveFullPath(stagedOperation.ReferenceAudioRelativePath));
+            // Durable path：同上，用有限逾時取代 CancellationToken.None，
+            // 避免 3wa 停在 body 中途時永遠佔住要求與 DbContext。
+            using var remotePrepareTimeout = new CancellationTokenSource(DurableRemoteCallTimeout);
             providerProfile = await threeWaClient.PrepareAsync(
                 uploadStream,
                 $"{stagedOperation.NewProfileId:N}.wav",
                 BuildProfileName(character.CanonicalName, stagedOperation.Kind, stagedOperation.SceneCode),
                 stagedOperation.ConsentType,
                 stagedOperation.ExpectedTranscript,
-                CancellationToken.None);
+                remotePrepareTimeout.Token);
         }
         catch (ThreeWaAiHubException exception) when (
             exception.FailureKind is ThreeWaAiHubFailureKind.PreSend
@@ -1139,11 +1152,19 @@ internal sealed class CharacterVoiceProfileService(
 
     private static void EnsureReplaceableBaseDesign(CharacterVoiceProfile profile)
     {
-        if (profile.Kind != CharacterVoiceProfileKind.Base
-            || profile.SceneCode is not null
-            || profile.Mode != CharacterVoiceProfileMode.Design)
+        // 兩種可安全取代的情況：
+        // 1) 文字設計基礎聲線（原本的規則，沒有遠端 task 需要顧慮）。
+        // 2) 已標記 Failed 的克隆聲線——遠端 task 已由 3wa 回報失敗，槽位若不能
+        //    取代就會永久卡死（rebuild 與 delete 都是刻意停用的）。原 operation
+        //    列與 WAV 稽核資料照舊保留，只有 profile 列被替換。
+        var isReplaceableDesign = profile.Kind == CharacterVoiceProfileKind.Base
+            && profile.SceneCode is null
+            && profile.Mode == CharacterVoiceProfileMode.Design;
+        var isFailedClone = profile.Mode == CharacterVoiceProfileMode.Clone
+            && profile.Status == CharacterVoiceProfileStatus.Failed;
+        if (!isReplaceableDesign && !isFailedClone)
         {
-            throw new InvalidOperationException("只有既有的文字設計基礎聲線可以安全取代為錄音克隆。");
+            throw new InvalidOperationException("只有文字設計基礎聲線，或已失敗的克隆聲線，可以安全取代為新的錄音克隆。");
         }
     }
 

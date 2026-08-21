@@ -17,6 +17,7 @@ public static class ExternalVoiceEndpoints
 
     private const string JsonContentType = "application/json";
     private const string WaveContentType = "audio/wav";
+    private const int UnavailableRetryAfterSeconds = 30;
 
     private static readonly JsonSerializerOptions StrictJsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -179,11 +180,7 @@ public static class ExternalVoiceEndpoints
                 || !string.Equals(audio.ContentType, WaveContentType, StringComparison.Ordinal))
             {
                 logger.LogError("External voice synthesis returned an invalid audio response.");
-                return Problem(
-                    StatusCodes.Status503ServiceUnavailable,
-                    "Synthesis unavailable",
-                    "External voice synthesis is unavailable.",
-                    "synthesis_unavailable");
+                return UnavailableProblem();
             }
 
             var requestId = CreateRequestId();
@@ -205,11 +202,7 @@ public static class ExternalVoiceEndpoints
         catch (Exception exception)
         {
             logger.LogError(exception, "External voice synthesis failed unexpectedly.");
-            return Problem(
-                StatusCodes.Status503ServiceUnavailable,
-                "Synthesis unavailable",
-                "External voice synthesis is unavailable.",
-                "synthesis_unavailable");
+            return UnavailableProblem();
         }
     }
 
@@ -232,18 +225,18 @@ public static class ExternalVoiceEndpoints
                 "The idempotency key was already used for a different request.",
                 "idempotency_conflict"),
             ExternalVoiceSynthesisFailureKind.RateLimited => RateLimitedProblem(exception.RetryAfterSeconds),
-            ExternalVoiceSynthesisFailureKind.SynthesisUnavailable
-                or ExternalVoiceSynthesisFailureKind.Disabled => Problem(
-                    StatusCodes.Status503ServiceUnavailable,
-                    "Synthesis unavailable",
-                    "External voice synthesis is unavailable.",
-                    "synthesis_unavailable"),
-            _ => Problem(
-                StatusCodes.Status503ServiceUnavailable,
-                "Synthesis unavailable",
-                "External voice synthesis is unavailable.",
-                "synthesis_unavailable"),
+            _ => UnavailableProblem(),
         };
+
+    // The public docs promise 503 responses carry Retry-After; keep the header on
+    // every synthesis_unavailable path so documented client retry loops work.
+    private static IResult UnavailableProblem() =>
+        new ExternalVoiceProblemResult(
+            StatusCodes.Status503ServiceUnavailable,
+            "Synthesis unavailable",
+            "External voice synthesis is unavailable.",
+            "synthesis_unavailable",
+            UnavailableRetryAfterSeconds);
 
     private static IResult RateLimitedProblem(int? retryAfterSeconds)
     {

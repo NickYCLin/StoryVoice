@@ -54,8 +54,10 @@ curl --fail-with-body --request POST --header "Authorization: Bearer $STORYVOICE
 | 409 | idempotency_conflict | 同一 key 已綁定不同 request |
 | 413 | request_too_large | body 超過上限 |
 | 415 | unsupported_media_type | 不是 application/json 或帶 Content-Encoding |
-| 429 | rate_limited | consumer／GPU 併發限制，依 Retry-After |
-| 503 | synthesis_unavailable | gateway 或合成服務暫時不可用 |
+| 429 | rate_limited | consumer 速率／冪等視窗或 GPU 併發限制（皆按 consumer 各自計算），依 Retry-After |
+| 503 | synthesis_unavailable | gateway 或合成服務暫時不可用，帶 Retry-After |
+
+失敗的請求不會被冪等快取釘住：收到 429／503 後用同一個 Idempotency-Key 重試會真正重新執行；只有成功的音訊會在 TTL 內以同一 key 重播。
 
 ## 安全產生 credential
 

@@ -47,6 +47,7 @@ export function AppLayout() {
           <NavLink className={navLinkClassName} to="/characters">角色管理</NavLink>
           <NavLink className={navLinkClassName} to="/voices">公開聲線</NavLink>
           <NavLink className={navLinkClassName} to="/developers/docs">API 文件</NavLink>
+          <NavLink className={navLinkClassName} to="/developer">開發者</NavLink>
           <NavLink className={navLinkClassName} to="/shared">分享給我的</NavLink>
         </nav>
 

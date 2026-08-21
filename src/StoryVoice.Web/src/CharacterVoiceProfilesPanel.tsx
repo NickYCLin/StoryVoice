@@ -11,6 +11,8 @@ type VoiceProfile = {
   consentType: string | null
   voicePromptText: string | null
   transcript: string | null
+  asrDraftTranscript: string | null
+  confirmationTranscriptIntent: string | null
   transcriptConfirmed: boolean
   status: 'Pending' | 'AwaitingTranscriptConfirmation' | 'Ready' | 'Failed'
   referenceAudioDurationSeconds: number | null
@@ -495,19 +497,6 @@ export function CharacterVoiceProfilesPanel({ characterProfileId, characterName,
     }
   }
 
-  async function rebuild(profile: VoiceProfile) {
-    setBusySlot(profile.id)
-    try {
-      await fetchJson(`${basePath(characterProfileId)}/${profile.id}/rebuild`, { method: 'POST', csrfToken, body: {} })
-      await load()
-      setMessage('已用本地保存的錄音與文字稿重新建立聲線。')
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : '重建聲線失敗。')
-    } finally {
-      setBusySlot(null)
-    }
-  }
-
   async function playPreview(profile: VoiceProfile, text: string) {
     if (previewingId !== null) return
 
@@ -824,11 +813,16 @@ export function CharacterVoiceProfilesPanel({ characterProfileId, characterName,
 
                   {profile.status === 'AwaitingTranscriptConfirmation' && (
                     <div className="space-y-2">
+                      {profile.confirmationTranscriptIntent !== null && (
+                        <p className="rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 leading-5 text-amber-800">
+                          先前已送出一份等待遠端確認的逐字稿（已帶入下方欄位）；只能以完全相同的內容重送確認。
+                        </p>
+                      )}
                       <textarea
                         className="auth-input min-h-16 w-full"
                         maxLength={2000}
                         onChange={(event) => setTranscriptDraft((current) => ({ ...current, [profile.id]: event.target.value }))}
-                        value={transcriptDraft[profile.id] ?? profile.transcript ?? ''}
+                        value={transcriptDraft[profile.id] ?? profile.confirmationTranscriptIntent ?? profile.transcript ?? ''}
                       />
                       <button
                         className="secondary-button w-full px-3 py-2 text-xs disabled:cursor-wait disabled:opacity-60"
@@ -838,27 +832,26 @@ export function CharacterVoiceProfilesPanel({ characterProfileId, characterName,
                       >
                         確認文字稿
                       </button>
+                      <button
+                        className="secondary-button w-full px-3 py-2 text-xs disabled:cursor-wait disabled:opacity-60"
+                        disabled={isBusy}
+                        onClick={() => void refreshStatus(profile)}
+                        type="button"
+                      >
+                        更新處理狀態
+                      </button>
                     </div>
                   )}
 
-                  {profile.status === 'Failed' && profile.mode === 'Clone' && (
-                    <button
-                      className="secondary-button w-full px-3 py-2 text-xs disabled:cursor-wait disabled:opacity-60"
-                      disabled={isBusy}
-                      onClick={() => void rebuild(profile)}
-                      type="button"
-                    >
-                      用保存的錄音重建
-                    </button>
-                  )}
-
-                  {designUnavailable && profile.kind === 'Base' && (
+                  {((designUnavailable && profile.kind === 'Base') || (profile.status === 'Failed' && profile.mode === 'Clone')) && (
                     <form
                       className="space-y-2 rounded-lg border border-amber-200 bg-white p-2"
                       onSubmit={(event) => void replaceDesignedWithClone(event, profile)}
                     >
                       <p className="leading-5 text-amber-800">
-                        上傳後會先建立 3wa 任務；成功時才以交易取代這筆文字設計聲線。
+                        {profile.status === 'Failed' && profile.mode === 'Clone'
+                          ? '這組克隆聲線處理失敗；重新上傳授權錄音後會先建立新的 3wa 任務，成功時才以交易取代這筆失敗聲線（原稽核資料照舊保留）。'
+                          : '上傳後會先建立 3wa 任務；成功時才以交易取代這筆文字設計聲線。'}
                       </p>
                       <input accept="audio/wav" className="auth-input w-full text-xs" name="referenceAudio" required type="file" />
                       <textarea
@@ -879,14 +872,16 @@ export function CharacterVoiceProfilesPanel({ characterProfileId, characterName,
                     </form>
                   )}
 
-                  <button
-                    className="w-full px-3 py-2 text-xs text-rose-600 disabled:cursor-wait disabled:opacity-60"
-                    disabled={isBusy}
-                    onClick={() => void remove(profile)}
-                    type="button"
-                  >
-                    刪除這組聲線
-                  </button>
+                  {profile.mode === 'Design' && (
+                    <button
+                      className="w-full px-3 py-2 text-xs text-rose-600 disabled:cursor-wait disabled:opacity-60"
+                      disabled={isBusy}
+                      onClick={() => void remove(profile)}
+                      type="button"
+                    >
+                      刪除這組聲線
+                    </button>
+                  )}
                 </div>
               )}
             </div>
